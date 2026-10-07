@@ -1,28 +1,27 @@
-# Current story: rust-workspace
+# Current story: rust-render
 
 This file is the detailed, living plan for the one active story. It is rewritten for each story. The backlog in `backlog.md` holds all work and the per-story status.
 
 ## Story
 
-Create the `rust/` Cargo workspace with one compiling crate.
+Add the Rust windowing/rendering crates.
 
-- **Depends on:** rust-toolchain (done).
-- **Minimal test:** `cargo build` from `rust/`.
+- **Depends on:** rust-toolchain (done), rust-workspace (done).
+- **Minimal test:** a window that renders one egui frame.
 
 ## Decisions
 
-* One crate: `crates/stations-dds` (the DDS library named in `architecture.md`). The `stations-dds` story fills it in; this story only requires it to compile.
-* The Cargo target directory is `build/rust` (`architecture.md`). Set it in `rust/.cargo/config.toml` (`[build] target-dir = "../build/rust"`) so a bare `cargo build` writes under `build/`, as the artifacts rule requires. `build-orchestrator` sets `CARGO_TARGET_DIR` explicitly; the config file makes this story's minimal test correct without it.
-* Workspace `resolver = "2"`, edition 2021 (matching the `rust-dds-binding` smoke crate).
-* Rust-only increment: no C++ members.
+* The crates are pinned in `rust/Cargo.toml` under `[workspace.dependencies]` so later crates (for example `display-lib`) consume them with `workspace = true`. There is no consumer crate yet.
+* The smoke test is a temporary standalone crate under `build/rust-render-smoke/` (gitignored), matching the `rust-dds-binding` smoke crate pattern.
+* Integration uses the raw stack from `architecture.md` (winit + glutin/glow + egui), not `eframe`; `egui_glow`'s `pure_glow` example is the reference.
+* Versions (current): winit 0.30.13, glutin 0.32.3, glutin-winit 0.5.0, glow 0.17, egui 0.36.2, egui-winit 0.36.2, egui_glow 0.36.2 (feature `winit`).
 
 ## Deliverables
 
-1. `rust/Cargo.toml` - workspace.
-2. `rust/.cargo/config.toml` - target directory.
-3. `rust/crates/stations-dds/Cargo.toml` - package `stations-dds`, lib.
-4. `rust/crates/stations-dds/src/lib.rs` - placeholder that compiles.
-5. `README.md` - a short "Rust workspace" note (build command only).
+1. `rust/Cargo.toml` - add `[workspace.dependencies]` with the pins.
+2. `build/rust-render-smoke/Cargo.toml` and `src/main.rs` - temporary smoke crate.
+3. `docs/versions.md` - add a row for the windowing/rendering crates.
+4. `README.md` - no change (smoke tests are not documented in the README).
 
 ## Contents
 
@@ -32,40 +31,43 @@ Create the `rust/` Cargo workspace with one compiling crate.
 [workspace]
 resolver = "2"
 members = ["crates/stations-dds"]
+
+[workspace.dependencies]
+winit = "0.30.13"
+glutin = "0.32.3"
+glutin-winit = "0.5.0"
+glow = "0.17"
+egui = "0.36.2"
+egui-winit = "0.36.2"
+egui_glow = { version = "0.36.2", features = ["winit"] }
 ```
 
-`rust/.cargo/config.toml`:
-
-```toml
-[build]
-target-dir = "../build/rust"
-```
-
-`rust/crates/stations-dds/Cargo.toml`:
+`build/rust-render-smoke/Cargo.toml`:
 
 ```toml
 [package]
-name = "stations-dds"
+name = "rust-render-smoke"
 version = "0.0.0"
 edition = "2021"
 publish = false
 
-[lib]
-name = "stations_dds"
-path = "src/lib.rs"
+[dependencies]
+winit = "0.30.13"
+glutin = "0.32.3"
+glutin-winit = "0.5.0"
+glow = "0.17"
+egui = "0.36.2"
+egui_glow = { version = "0.36.2", features = ["winit"] }
 ```
 
-`rust/crates/stations-dds/src/lib.rs`: a minimal placeholder (doc comment only).
+`build/rust-render-smoke/src/main.rs`: a winit `ApplicationHandler` that, on `resumed`, creates the glutin context (via `glutin-winit::DisplayBuilder`), a `glow::Context`, and `egui_glow::EguiGlow`; on `RedrawRequested`, runs one egui UI, calls `paint`, swaps buffers, then exits the event loop.
 
 ## Minimal test
 
-From `rust/`: `cargo build`; it succeeds and writes artifacts under `build/rust/debug/`.
-
-## Result
-
-Done. `cargo build` from `rust/` compiles `stations-dds` and writes to `build/rust/debug/`; no `rust/target/` is created, confirming the target-dir config. `rust/Cargo.lock` is generated and committed with the workspace.
+From `build/rust-render-smoke/`: `cargo run`; a window opens, renders one egui frame, and exits. Requires a desktop session.
 
 ## Files
 
-* Authored/committed: `rust/Cargo.toml`, `rust/.cargo/config.toml`, `rust/crates/stations-dds/Cargo.toml`, `rust/crates/stations-dds/src/lib.rs`, `README.md`.
+* Authored/committed: `rust/Cargo.toml`, `docs/versions.md`.
+* Temporary, gitignored: `build/rust-render-smoke/`.
 * Planning: `planning/current_story.md`, `planning/backlog.md`.

@@ -5,7 +5,7 @@ All future work lives here. The backlog is continually groomed; the story order 
 Conventions:
 * A story's title is a short, unique name. The body is a description followed by `Depends on`, `Minimal test`, and `Status`.
 * **Depends on** lists prerequisite stories (toolchain installs are environment prerequisites, not steps inside `build.ps1`).
-* **Minimal test** is the smallest runnable check that proves the story is done; toolchain smoke tests are temporary build artifacts under `build/`, with commands documented in `README.md`.
+* **Minimal test** is the smallest runnable check that proves the story is done; toolchain smoke tests are temporary build artifacts under `build/`.
 * **Status** is one of `todo`, `in progress`, or `done`. The active story's detailed plan lives in `current_story.md`.
 * IDs, topic names, and file paths follow `architecture.md`.
 
@@ -96,7 +96,7 @@ Create the `rust/` Cargo workspace with one compiling crate.
 Add the Rust windowing/rendering crates.
 - **Depends on:** rust-toolchain, rust-workspace.
 - **Minimal test:** a window that renders one egui frame.
-- **Status:** todo.
+- **Status:** in progress.
 - **Records:** the windowing/rendering crates in `docs/versions.md`.
 
 ### assets
