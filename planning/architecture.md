@@ -62,15 +62,18 @@ Every service declares the topics it publishes and subscribes to so that the con
 * `contracts/topics.toml` - the topic registry: topic name, IDL type, QoS, and key fields.
 * `contracts/services/<app>.toml` - for each service, the topics it publishes and the topics it subscribes to.
 
-Contracts are validated when a service starts, each service can print its own contract with `--topics`, and `scripts/build.ps1` regenerates a readable summary into `build/scratch/topics.md`.
+Contracts are validated when a service starts, each service can print its own contract with `--topics`, and `scripts/build.ps1` regenerates a readable summary into `build/topics.md`.
 
 There is deliberately no scope field in a contract: wiring is expressed by the IDL type's fields and by command-line arguments, and decided by each format's implementation.
 
 ## Files and folders
 * **Authored files** (written by people or agents) live in `planning/`, `docs/`, `DDS/`, `contracts/`, `scripts/`, `assets/`, `rust/`, and `cpp/`.
-* **Build artifacts** live only under `build/`, which is never committed:
-  * `build/scratch/` - needed for the build but not deployed: IDL-generated sources, intermediate files, the generated `topics.md`.
-  * `build/deploy/` - the structure of folders that would be deployed for the system (binaries, assets, DDS configuration).
+* **Build artifacts** live only under `build/`, which is never committed. `build/deploy/` is the only durable output; everything else under `build/` is temporary and freely deletable:
+  * `build/deploy/` - the deployable layout: binaries, libraries, assets, and DDS configuration.
+  * `build/gen/{rust,cpp}/` - IDL-generated sources.
+  * `build/rust/` - the Cargo target directory.
+  * `build/cpp/` - the CMake binary directory.
+  * `build/topics.md` - the generated contract summary.
 * `DDS/` holds the IDL types and the Cyclone DDS configuration shared by all applications; it is authored, not generated.
 
 ## Folder structure
@@ -82,7 +85,8 @@ to-stations-proto/
                        cyclonedds-config.xml
   contracts/           authored: topics.toml, services/<app>.toml
   scripts/             authored: build.ps1, stationsdds.ps1, cleanup.ps1,
-                       launch-rust.ps1, launch-cpp.ps1, launch-hybrid.ps1
+                       launch-rust.ps1, launch-cpp.ps1, launch-hybrid.ps1,
+                       subst-repo.ps1, install-subst-startup.ps1
   assets/              authored: earth cube faces, fonts
   rust/                authored: Cargo workspace
     crates/            stations-dds, display-lib, format-manager,
@@ -97,14 +101,23 @@ to-stations-proto/
     apps/controls/     joystick-control-service, controller-window
     apps/formats/      hello-world/{model-service, view-service, controller-service}
     apps/format-manager/
-  build/               gitignored: all build artifacts
-    scratch/           gen/{rust,cpp}, rust (CARGO_TARGET_DIR), cpp (CMake),
-                       topics.md
+  build/               gitignored: temporary artifacts plus one durable output
     deploy/            bin/, lib/, assets/, config/
+    gen/{rust,cpp}/    IDL-generated sources (temporary)
+    rust/              Cargo target directory (temporary)
+    cpp/               CMake binary directory (temporary)
+    topics.md          generated contract summary (temporary)
 ```
 
 ## Build and launch
-`scripts/build.ps1` is the single build orchestrator: it generates code from `DDS/` into `build/scratch/gen/{rust,cpp}`, builds Rust with `CARGO_TARGET_DIR=build/scratch/rust`, builds C++ with the CMake binary directory `build/scratch/cpp` and install prefix `build/deploy`, assembles `build/deploy`, and regenerates `build/scratch/topics.md`.
+`scripts/build.ps1` is the single build orchestrator. It is location-agnostic: it resolves the repository root from its own location and uses repository-relative paths. It generates code from `DDS/` into `build/gen/{rust,cpp}`, builds Rust with `CARGO_TARGET_DIR=build/rust`, builds C++ with the CMake binary directory `build/cpp` and install prefix `build/deploy`, assembles `build/deploy`, and regenerates `build/topics.md`.
+
+It locates the externally installed Cyclone DDS and SDL3 prefixes (hardcoded under a short path such as `C:\Libraries`) and provisions the runtime without changing the user `PATH`: a process-scoped `PATH` during build and test, with runtime DLLs copied into `build/deploy/bin`. The repository must be placed at a short path on Windows; see "Path length" below.
+
+### Path length
+Windows limits file paths to 260 characters unless long-path support is enabled. The `cyclonedds` Rust crate is not only a binding: `cyclonedds-rust-sys` compiles a copy of CycloneDDS with CMake as part of `cargo build`, by default under the Cargo target directory (`$OUT_DIR/cyclonedds-build/<source>/...`), and it also CMake-builds a small ABI probe under `$OUT_DIR`. Those nested paths exceed 260 characters unless the repository itself sits at a short path; when they do, MSBuild's `GetOutOfDateItems` task fails the build.
+
+The repository is therefore required to live at a short path on Windows. `scripts/subst-repo.ps1` maps the repository root to a short drive letter (`T:` by default), and `scripts/install-subst-startup.ps1` installs that mapping to run at logon via a wrapper in the Startup folder; alternatively the repository can simply be cloned to a short real path such as `C:\t\to-stations-proto`. These scripts are separate from the build and are never run by `scripts/build.ps1`, which is location-agnostic (it resolves the repository root from its own location, uses repository-relative paths, and hardcodes no drive letter). The Rust binding's CycloneDDS build is additionally redirected to the external prefix (`CYCLONEDDS_SRC`, `CYCLONEDDS_BUILD`) so it is built static there rather than inside the target directory. The requirement is restated in `README.md`.
 
 Each configuration has a launch script; all configurations share `cleanup.ps1`. `scripts/stationsdds.ps1` creates or verifies the loopback adapter. Launch and cleanup scripts operate only on `build/deploy/`.
 

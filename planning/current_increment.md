@@ -13,6 +13,7 @@ These are installed once and verified by their own stories in Milestone A-C of `
 
 * MSVC (Visual Studio Build Tools) and CMake.
 * Rust toolchain `stable-x86_64-pc-windows-msvc`.
+* A short repository path on Windows: run `scripts/subst-repo.ps1` (optionally installed at logon with `scripts/install-subst-startup.ps1`). See `architecture.md`, "Path length".
 * Eclipse Cyclone DDS C core (11.x) and `cyclonedds-cxx`.
 * The Microsoft loopback adapter named `StationsDDS` with IPv6 multicast.
 * C++ rendering libraries (SDL3, glad, Dear ImGui) - needed by Milestone C tests and by later C++ increments, not by the Rust MVP itself.
@@ -22,7 +23,7 @@ Third-party libraries are built/installed to an external prefix (for example `C:
 ## Stack
 * DDS: Eclipse Cyclone DDS for all configurations - C core with `cyclonedds-cxx` (C++) and the `cyclonedds` Rust crate; shared IDL in `DDS/`; all topics over IPv6 multicast on the `StationsDDS` loopback adapter.
 * Rendering: Rust = winit + glutin/glow + egui. C++ (later increment) = SDL3 + glad + Dear ImGui.
-* Build: `scripts/build.ps1` orchestrator; all artifacts under `build/` split into `scratch/` and `deploy/`.
+* Build: `scripts/build.ps1` orchestrator; all artifacts under `build/`, where only `build/deploy/` is durable and everything else is temporary. The repository must be placed at a short path on Windows (see `architecture.md`, "Path length").
 * Language: **Rust only** in this increment. C++ and hybrid are later increments.
 
 ## MVP constellation
@@ -43,4 +44,4 @@ Third-party libraries are built/installed to an external prefix (for example `C:
 * Real game-controller binding and per-station views.
 
 ## Done when
-`launch-rust.ps1` brings up the model service, the view service, and the small display from `build/deploy`; the small display shows the tilted, rotating, cube-mapped earth lit from the upper right with the greeting text rendered in the loaded font, and its power button works. `dds-echo` observes every topic in the registry, `--topics` and `build/scratch/topics.md` match `contracts/`, and `cleanup.ps1` stops everything.
+`launch-rust.ps1` brings up the model service, the view service, and the small display from `build/deploy`; the small display shows the tilted, rotating, cube-mapped earth lit from the upper right with the greeting text rendered in the loaded font, and its power button works. `dds-echo` observes every topic in the registry, `--topics` and `build/topics.md` match `contracts/`, and `cleanup.ps1` stops everything.

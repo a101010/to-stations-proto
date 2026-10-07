@@ -6,7 +6,7 @@ The increment target is the **minimum viable code product**: the `rust` hello_wo
 
 Conventions:
 * **Depends on** lists prerequisite stories (toolchain installs are environment prerequisites, not steps inside `build.ps1`).
-* **Minimal test** is the smallest runnable check that proves the story is done; toolchain smoke tests live under `rust/`, `cpp/`, and `scripts/`, with commands documented in `docs/`.
+* **Minimal test** is the smallest runnable check that proves the story is done; toolchain smoke tests are temporary build artifacts under `build/`, with commands documented in `README.md`.
 * IDs, topic names, and file paths follow `architecture.md`.
 
 ## Milestone A - host toolchain
@@ -21,6 +21,11 @@ Install rustup with the `stable-x86_64-pc-windows-msvc` toolchain and pin it for
 - **Depends on:** A1.
 - **Minimal test:** `cargo run` a hello world; commit `rust/rust-toolchain.toml`.
 
+### Story: A3 Repository short-path scripts
+Add `scripts/subst-repo.ps1`, which maps the repository root to a short drive letter (`T:` by default), and `scripts/install-subst-startup.ps1`, which installs that mapping to run at logon via a Startup-folder wrapper. Neither is run by `scripts/build.ps1`.
+- **Depends on:** none.
+- **Minimal test:** `subst-repo.ps1` makes `subst` show `T:` pointing at the repository; `install-subst-startup.ps1` creates the Startup entry.
+
 ## Milestone B - DDS toolchain
 
 ### Story: B1 Eclipse Cyclone DDS C core
@@ -34,8 +39,8 @@ Build and install the C++ binding against the B1 install.
 - **Minimal test:** build and run the C++ hello world example.
 
 ### Story: B3 Rust Cyclone DDS binding and IDL codegen
-Add the `cyclonedds` Rust crate plus `cyclonedds-idlc`/`cyclonedds-build`, and generate Rust types from a tiny IDL file.
-- **Depends on:** A2, B1.
+Add the `cyclonedds` Rust crate (3.0.1) with `cyclonedds-build` (3.0.1) for IDL codegen, generating Rust types into `build/gen/rust`. The crate's copy of CycloneDDS C is built from the external prefix (`CYCLONEDDS_SRC`, `CYCLONEDDS_BUILD`) and linked statically so no runtime DLL is needed.
+- **Depends on:** A2, A3, B1.
 - **Minimal test:** a Rust publisher and subscriber exchange one sample of an IDL-defined type.
 
 ### Story: B4 DDS configuration and StationsDDS adapter
@@ -51,7 +56,7 @@ Record the pinned versions and install locations of every toolchain/third-party 
 ## Milestone C - rendering toolchain
 
 ### Story: C1 SDL3, glad, and Dear ImGui
-Install SDL3 to the external prefix and vendor glad and Dear ImGui sources under `cpp/third_party/`.
+Install SDL3 to the external prefix and add glad and Dear ImGui sources under `cpp/third_party/`.
 - **Depends on:** A1.
 - **Minimal test:** a window that renders one Dear ImGui frame over a clear color.
 
@@ -88,7 +93,7 @@ Author `DDS/hello_world.idl` (`Quaternion`, `HelloWorldModel`).
 - **Minimal test:** code generation succeeds for both languages.
 
 ### Story: D5 IDL code generation into both build systems
-Wire Cyclone DDS IDL code generation into the Cargo build and the CMake build so generated sources land in `build/scratch/gen/{rust,cpp}` and compile into the `stations-dds` libraries. Generated files are never committed.
+Wire Cyclone DDS IDL code generation into the Cargo build and the CMake build so generated sources land in `build/gen/{rust,cpp}` and compile into the `stations-dds` libraries. Generated files are never committed.
 - **Depends on:** D2, D3, D4.
 - **Minimal test:** a clean build produces the generated sources and compiles them.
 
@@ -108,12 +113,12 @@ Subscribe to any named topic and print received samples.
 - **Minimal test:** prints samples from a publisher.
 
 ### Story: D9 dds-contracts tool (Rust)
-Read `contracts/` and write a readable summary to `build/scratch/topics.md`.
+Read `contracts/` and write a readable summary to `build/topics.md`.
 - **Depends on:** D6.
 - **Minimal test:** generated `topics.md` matches the registry.
 
 ### Story: D10 build orchestrator
-Write `scripts/build.ps1` (PowerShell 5.1 compatible) that runs IDL codegen into `build/scratch/gen/{rust,cpp}`, the Rust build with `CARGO_TARGET_DIR=build/scratch/rust`, the CMake build from `build/scratch/cpp` with install prefix `build/deploy`, assembly of `build/deploy`, and regeneration of `build/scratch/topics.md`. It locates the externally installed Cyclone DDS and SDL3 prefixes (hardcoded, for example `C:\Libraries\cyclonedds`) and provisions the runtime without changing the user PATH: it uses a process-scoped `$env:PATH` during build/test and copies the required runtime DLLs (`ddsc.dll`, SDL3's) into `build/deploy/bin`. It supports a dry-run mode.
+Write `scripts/build.ps1` (PowerShell 5.1 compatible) that resolves the repository root from its own location and uses repository-relative paths: IDL codegen into `build/gen/{rust,cpp}`, the Rust build with `CARGO_TARGET_DIR=build/rust`, the CMake build from `build/cpp` with install prefix `build/deploy`, assembly of `build/deploy`, and regeneration of `build/topics.md`. It hardcodes no drive letter; the repository must be placed at a short path because the `cyclonedds` Rust crate's CycloneDDS CMake build can exceed the Windows 260-character path limit (see `architecture.md`). It locates the externally installed Cyclone DDS and SDL3 prefixes (hardcoded, for example `C:\Libraries\cyclonedds`) and provisions the runtime without changing the user PATH: it uses a process-scoped `$env:PATH` during build/test and copies the required runtime DLLs (`ddsc.dll`, `ddscxx.dll`, SDL3's) into `build/deploy/bin`. It supports a dry-run mode.
 - **Depends on:** D2, D3, D5, D8, D9; B1-B3 installed as environment prerequisites.
 - **Minimal test:** `scripts/build.ps1 -DryRun` prints the ordered steps, and a full run succeeds once the workspace and tools exist.
 
@@ -182,7 +187,7 @@ Deferred until the Rust MVP is proven:
 * `launch and cleanup scripts` -> E7.
 * `stationsdds setup` -> B4.
 * `controller service`, `joystick control service`, `controller window`, `format manager`, C++/hybrid, `verification` -> Milestone F.
-* New: Milestones A-C toolchain/third-party stories, D2/D3 skeletons, B5 version pins.
+* New: Milestones A-C toolchain/third-party stories (including A3 short-path scripts), D2/D3 skeletons, B5 version pins.
 
 ## Done when
 The increment's "Done when" is stated in `current_increment.md`.
