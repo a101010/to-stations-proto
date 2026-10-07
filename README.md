@@ -54,6 +54,14 @@ rustup default stable-x86_64-pc-windows-msvc
 
 `rust/rust-toolchain.toml` pins the toolchain for the workspace.
 
+Build the workspace from `rust/`:
+
+```
+cargo build
+```
+
+The Cargo target directory is `build/rust`, set in `rust/.cargo/config.toml`.
+
 ### Cyclone DDS (C)
 
 Eclipse Cyclone DDS `11.0.1` is built from source and installed to `C:\Libraries\cyclonedds`; the source is kept at `C:\Libraries\src\cyclonedds`.

@@ -61,6 +61,10 @@ path = "src/lib.rs"
 
 From `rust/`: `cargo build`; it succeeds and writes artifacts under `build/rust/debug/`.
 
+## Result
+
+Done. `cargo build` from `rust/` compiles `stations-dds` and writes to `build/rust/debug/`; no `rust/target/` is created, confirming the target-dir config. `rust/Cargo.lock` is generated and committed with the workspace.
+
 ## Files
 
 * Authored/committed: `rust/Cargo.toml`, `rust/.cargo/config.toml`, `rust/crates/stations-dds/Cargo.toml`, `rust/crates/stations-dds/src/lib.rs`, `README.md`.

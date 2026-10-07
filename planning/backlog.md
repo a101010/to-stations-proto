@@ -90,7 +90,7 @@ Author `DDS/cyclonedds-config.xml` (IPv6 multicast on `StationsDDS`) and `script
 Create the `rust/` Cargo workspace with one compiling crate.
 - **Depends on:** rust-toolchain.
 - **Minimal test:** `cargo build` from `rust/`.
-- **Status:** in progress.
+- **Status:** done.
 
 ### rust-render
 Add the Rust windowing/rendering crates.
