@@ -29,3 +29,16 @@ To invoke `cl` directly, import the MSVC environment first (adjust the path to y
 ```
 cmd /c "call \"C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Auxiliary\Build\vcvars64.bat\" && cl ..."
 ```
+
+### Rust
+
+Rust is installed with rustup using the `stable-x86_64-pc-windows-msvc` toolchain.
+
+```
+winget install Rustlang.Rustup
+rustup default stable-x86_64-pc-windows-msvc
+```
+
+Verified on the development machine: rustc/cargo `1.99.0`, rustup `1.29.1`.
+
+`rust/rust-toolchain.toml` pins the toolchain for the workspace.
