@@ -12,13 +12,14 @@
 - The agent never asks whether to commit; the user decides when to commit.
 - The agent may run read-only git commands (`git status`, `git diff`, `git log`) and must leave all changes in the working tree for the user to review and commit.
 
-## Repo status
+## Planning
 
-- Design and increment planning live in `planning/`: `architecture.md`, `current_increment.md`, `backlog.md`, `current_story.md`. Read them before writing code.
-- Locked stack (see `planning/current_increment.md`): Eclipse Cyclone DDS, SDL3+glad+Dear ImGui for C++, winit+glutin/glow+egui for Rust, Cargo + CMake with `scripts/build.ps1`.
+- Planning lives in `planning/`: `architecture.md` (design), `backlog.md` (all work, prioritized), and `current_story.md` (the detailed plan for the one active story). Read them before writing code.
+- `backlog.md` is continually groomed; story order reflects the current best understanding of priority, and the active story's status is tracked there.
+- A story's title is a short, unique name; do not restate it as a longer name. The body is a description followed by `Depends on`, `Minimal test`, and `Status`.
 - IDs, topic names, and file paths are specified in `planning/backlog.md` and `planning/architecture.md`; use them rather than inventing your own.
 
-## Files and folders
+## Documentation
 
-- **Authored files** (written by people or agents): `planning/`, `docs/`, `DDS/`, `contracts/`, `scripts/`, `assets/`, `rust/`, `cpp/`.
-- **Build artifacts** only under `build/`, which is gitignored: `build/scratch/` for build-only files (IDL-generated sources, generated `topics.md`), `build/deploy/` for the deployable layout. Never put generated or build files in `planning/` or `docs/`.
+- Do not duplicate `planning/architecture.md` in this file. It is the single source for the technology stack, design, folder structure, and file/path conventions; refer to it instead of restating its content here.
+- Never put generated or build files in `planning/` or `docs/`.

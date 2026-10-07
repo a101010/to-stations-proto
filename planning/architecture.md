@@ -25,6 +25,11 @@ It also launches a window that can start and stop the applications for that conf
 
 All the applications communicate using Distributed Data Services configured to use IPv6 multicast on a Microsoft loopback adapter named StationsDDS.
 
+## Stack
+* DDS: Eclipse Cyclone DDS for all configurations - C core with `cyclonedds-cxx` (C++) and the `cyclonedds` Rust crate; shared IDL in `DDS/`; all topics over IPv6 multicast on the `StationsDDS` loopback adapter.
+* Rendering: Rust = winit + glutin/glow + egui. C++ = SDL3 + glad + Dear ImGui.
+* Build: `scripts/build.ps1` orchestrator; all artifacts under `build/`, where only `build/deploy/` is durable and everything else is temporary. The repository must be placed at a short path on Windows (see "Path length").
+
 ## Configurations
 The three configurations (`rust`, `c++`, `hybrid`) differ only in which language implementation of each application is launched. Applications interoperate because they share the same IDL types and speak DDSI-RTPS; a hybrid launch simply mixes the two implementations.
 
@@ -79,7 +84,7 @@ There is deliberately no scope field in a contract: wiring is expressed by the I
 ## Folder structure
 ```
 to-stations-proto/
-  planning/            authored: architecture.md, current_increment.md, backlog.md
+  planning/            authored: architecture.md, backlog.md, current_story.md
   docs/                authored: reference documentation
   DDS/                 authored: hello_world.idl, mvc.idl, controller.idl,
                        cyclonedds-config.xml

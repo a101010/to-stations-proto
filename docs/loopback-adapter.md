@@ -54,8 +54,8 @@ Use `file://` followed by the path (two slashes), or a plain path. A `file:///` 
 (three slashes) is not accepted and fails with `can't open configuration file`.
 
 `CYCLONEDDS_URI` also accepts a comma-separated list of file paths and inline XML
-strings, parsed in order into a single configuration. This is used by the B4 smoke test
-to add tracing without editing the committed file.
+strings, parsed in order into a single configuration. This is used by the smoke test to
+add tracing without editing the committed file.
 
 ## Troubleshooting
 
