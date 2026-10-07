@@ -1,93 +1,188 @@
-# Backlog - increment 1
+# Backlog - increment 1 (Rust MVP)
 
-Stories are individual deliverables. A group is marked as an epic only when it is broken into multiple stories. See `current_increment.md` for the locked scope and `architecture.md` for the design.
+This backlog is ordered so that no story starts before its dependencies exist. Stories are individual deliverables; a group is an epic only when it is broken into multiple stories.
 
-## Epic: build and deploy pipeline
+The increment target is the **minimum viable code product**: the `rust` hello_world constellation end to end. Milestones A-C install and smoke-test each piece of the toolchain and third-party stack; Milestones D-E build the MVP on top. Milestone F holds everything deferred to later increments. See `current_increment.md` for the locked scope and `architecture.md` for the design.
 
-### Story: repository structure and ignore rules
-Create the top-level folders (`DDS/`, `contracts/`, `rust/`, `cpp/`, `scripts/`, `assets/`, `docs/`, `build/`) and a `.gitignore` that excludes `build/`.
+Conventions:
+* **Depends on** lists prerequisite stories (toolchain installs are environment prerequisites, not steps inside `build.ps1`).
+* **Minimal test** is the smallest runnable check that proves the story is done; toolchain smoke tests live under `rust/`, `cpp/`, and `scripts/`, with commands documented in `docs/`.
+* IDs, topic names, and file paths follow `architecture.md`.
 
-### Story: build orchestrator
-Write `scripts/build.ps1` that runs the four build steps in order (IDL codegen into `build/scratch/gen/{rust,cpp}`, Rust build with `CARGO_TARGET_DIR=build/scratch/rust`, CMake build from `build/scratch/cpp` with install prefix `build/deploy`, assembly of `build/deploy`), and regenerates `build/scratch/topics.md`.
+## Milestone A - host toolchain
 
-### Story: IDL code generation into both build systems
-Wire Cyclone DDS IDL code generation into the Cargo build and the CMake build so generated sources land in `build/scratch/gen/` and are compiled into the `stations-dds` libraries. Generated files are never committed.
+### Story: A1 MSVC and CMake verification
+Confirm the Visual Studio Build Tools C++ toolchain and CMake work from a shell, and document how to invoke them (VS generator or developer shell).
+- **Depends on:** none.
+- **Minimal test:** configure, build, and run a C++ hello world with the VS generator; record the exact commands in `docs/`.
 
-## Epic: DDS layer and topic contracts
+### Story: A2 Rust toolchain
+Install rustup with the `stable-x86_64-pc-windows-msvc` toolchain and pin it for the repository.
+- **Depends on:** A1.
+- **Minimal test:** `cargo run` a hello world; commit `rust/rust-toolchain.toml`.
 
-### Story: topic registry and service contracts
-Author `contracts/topics.toml` (topic name, IDL type, QoS, key fields) and `contracts/services/<app>.toml` for every application, covering the topics listed below:
+## Milestone B - DDS toolchain
 
-| Topic | Type | Published by | Subscribed by | Key fields |
-|---|---|---|---|---|
-| `stations/hello_world/model` | `HelloWorldModel` | hello_world model service | hello_world view service | none (global) |
-| `stations/hello_world/view` | `ViewData` | hello_world view service | display library | none (global) |
-| `stations/hello_world/input` | `InputEvent` | display library | hello_world controller service | none (global) |
-| `stations/hello_world/control` | `ControlEvent` | joystick control service | hello_world controller service | `station` |
-| `stations/joystick/virtual` | `XboxController` | controller window | joystick control service | `station` |
-| `stations/joystick/state` | `XboxController` | joystick control service | observers, `dds-echo` | `station` |
-| `stations/format/window` | `FormatWindow` | display application | format manager | `station`, `display` |
-| `stations/format/mapping` | `FormatMapping` | format manager | display library | `station`, `display` |
+### Story: B1 Eclipse Cyclone DDS C core
+Build and install the Cyclone DDS C library (11.x) to the external prefix with IPv6 enabled.
+- **Depends on:** A1.
+- **Minimal test:** build with `-DBUILD_EXAMPLES=ON -DENABLE_IPV6=ON` and run the bundled HelloworldPublisher/HelloworldSubscriber.
 
-### Story: stations-dds library
-Implement the shared DDS wrapper in both languages: participant creation from `DDS/cyclonedds-config.xml`, typed readers and writers, validation of each application's contract at startup from `contracts/`, and a `--topics` flag that prints the application's published and subscribed topics.
+### Story: B2 cyclonedds-cxx
+Build and install the C++ binding against the B1 install.
+- **Depends on:** B1.
+- **Minimal test:** build and run the C++ hello world example.
 
-### Story: dds-contracts tool
-A tool that reads `contracts/` and writes a readable summary to `build/scratch/topics.md`, invoked by `scripts/build.ps1`.
+### Story: B3 Rust Cyclone DDS binding and IDL codegen
+Add the `cyclonedds` Rust crate plus `cyclonedds-idlc`/`cyclonedds-build`, and generate Rust types from a tiny IDL file.
+- **Depends on:** A2, B1.
+- **Minimal test:** a Rust publisher and subscriber exchange one sample of an IDL-defined type.
 
-### Story: dds-echo tool
-A tool that subscribes to any named topic and prints received samples, used to verify every topic during testing.
+### Story: B4 DDS configuration and StationsDDS adapter
+Author `DDS/cyclonedds-config.xml` (IPv6 multicast on `StationsDDS`) and `scripts/stationsdds.ps1` to create or verify the loopback adapter. Requires administrator rights; document the manual fallback in `docs/`.
+- **Depends on:** B1, B3.
+- **Minimal test:** a publisher and subscriber exchange samples bound to the adapter configuration; confirm IPv6 multicast.
 
-### Story: IDL types
-Author `DDS/hello_world.idl` (`Quaternion`, `HelloWorldModel`), `DDS/mvc.idl` (`ViewData`, `InputEvent`, `ControlEvent`, `FormatWindow`, `FormatMapping`, and the display element type), and `DDS/controller.idl` (`XboxController`, the default Xbox layout).
+### Story: B5 Third-party version pins
+Record the pinned versions and install locations of every toolchain/third-party component in `docs/`.
+- **Depends on:** B1, B2, B3, C1, C2.
+- **Minimal test:** a fresh shell following `docs/` reproduces the B/C smoke tests.
 
-## Epic: display infrastructure
+## Milestone C - rendering toolchain
 
-### Story: display library
-A library hosted by each display application that creates the window and OpenGL context, runs the render loop, renders the console (Dear ImGui / egui), renders the `ViewData` it receives in a format window, and publishes `InputEvent` for mouse, touchscreen, and key input over that window. Applications delegate all window rendering to it.
+### Story: C1 SDL3, glad, and Dear ImGui
+Install SDL3 to the external prefix and vendor glad and Dear ImGui sources under `cpp/third_party/`.
+- **Depends on:** A1.
+- **Minimal test:** a window that renders one Dear ImGui frame over a clear color.
 
-### Story: font handling
-Load a font from `assets/fonts` in both languages and render text (the hello_world greeting) inside the display library, so every format can draw text.
+### Story: C2 winit, glutin/glow, and egui
+Add the Rust windowing/rendering crates.
+- **Depends on:** A2.
+- **Minimal test:** a window that renders one egui frame.
 
-### Story: small display application
-The small display: one square format window surrounded by a console area with a single power button, a `--station N` command-line argument, and `--topics` support. The power button toggles the format window and emits an input event for later wiring.
+### Story: C3 Assets
+Add the earth cube-map faces and a font under `assets/`.
+- **Depends on:** none.
+- **Minimal test:** both load and render/validate.
 
-## Epic: hello_world format constellation
+## Milestone D - project infrastructure
 
-### Story: model service
-Publishes `HelloWorldModel` (greeting text and quaternion attitude) at a fixed rate. The attitude is a 23.5 degree tilt with one revolution every twelve minutes.
+### Story: D1 Repository structure and ignore rules
+Create the top-level folders and a `.gitignore` that excludes `build/`.
+- **Depends on:** none.
+- **Status:** done.
 
-### Story: view service
-Subscribes to `HelloWorldModel` and publishes the `ViewData` display message: the earth cube map and sphere parameters, the model quaternion, the upper-right light direction, and the greeting text with its font.
+### Story: D2 Rust workspace skeleton
+Create the `rust/` Cargo workspace with one compiling crate.
+- **Depends on:** A2.
+- **Minimal test:** `cargo build` from `rust/`.
 
-### Story: controller service
-Subscribes to `stations/hello_world/input` and `stations/hello_world/control`, tracks the current input and control state for its format, and is easy to observe (console output in this increment).
+### Story: D3 CMake project skeleton
+Create the `cpp/` CMake project with one compiling target.
+- **Depends on:** A1.
+- **Minimal test:** configure and build one runnable target.
 
-### Story: earth format rendering
+### Story: D4 Minimal IDL types
+Author `DDS/hello_world.idl` (`Quaternion`, `HelloWorldModel`).
+- **Depends on:** B2, B3.
+- **Minimal test:** code generation succeeds for both languages.
+
+### Story: D5 IDL code generation into both build systems
+Wire Cyclone DDS IDL code generation into the Cargo build and the CMake build so generated sources land in `build/scratch/gen/{rust,cpp}` and compile into the `stations-dds` libraries. Generated files are never committed.
+- **Depends on:** D2, D3, D4.
+- **Minimal test:** a clean build produces the generated sources and compiles them.
+
+### Story: D6 Minimal topic registry and service contracts
+Author `contracts/topics.toml` and `contracts/services/<app>.toml` for the MVP services (`stations/hello_world/model`, `stations/hello_world/view`).
+- **Depends on:** none.
+- **Minimal test:** the files parse and validate against the registry.
+
+### Story: D7 stations-dds library (Rust)
+Implement participant creation from `DDS/cyclonedds-config.xml`, typed readers and writers, validation of each application's contract at startup, and a `--topics` flag.
+- **Depends on:** B4, D5, D6.
+- **Minimal test:** typed publish/subscribe round-trip plus `--topics` output.
+
+### Story: D8 dds-echo tool (Rust)
+Subscribe to any named topic and print received samples.
+- **Depends on:** D7.
+- **Minimal test:** prints samples from a publisher.
+
+### Story: D9 dds-contracts tool (Rust)
+Read `contracts/` and write a readable summary to `build/scratch/topics.md`.
+- **Depends on:** D6.
+- **Minimal test:** generated `topics.md` matches the registry.
+
+### Story: D10 build orchestrator
+Write `scripts/build.ps1` (PowerShell 5.1 compatible) that runs IDL codegen into `build/scratch/gen/{rust,cpp}`, the Rust build with `CARGO_TARGET_DIR=build/scratch/rust`, the CMake build from `build/scratch/cpp` with install prefix `build/deploy`, assembly of `build/deploy`, and regeneration of `build/scratch/topics.md`. It locates externally installed Cyclone DDS/SDL3 via `CMAKE_PREFIX_PATH` and supports a dry-run mode.
+- **Depends on:** D2, D3, D5, D8, D9; B1-B3 installed as environment prerequisites.
+- **Minimal test:** `scripts/build.ps1 -DryRun` prints the ordered steps, and a full run succeeds once the workspace and tools exist.
+
+## Milestone E - MVP vertical slice (Rust)
+
+### Story: E1 display library (Rust)
+Create the window and OpenGL context, run the render loop, render the console (egui), render the `ViewData` it receives in a format window, and publish `InputEvent` for mouse, touchscreen, and key input.
+- **Depends on:** C2, C3, D7.
+- **Minimal test:** a window showing text that publishes an input event.
+
+### Story: E2 small display (Rust)
+Host the display library: one square format window plus a console area with a single power button, `--station N`, and `--topics`. The power button toggles the format window and emits an input event for later wiring.
+- **Depends on:** E1.
+- **Minimal test:** the power button toggles the format window.
+
+### Story: E3 model service (Rust)
+Publish `HelloWorldModel` (greeting text and quaternion attitude) at a fixed rate: a 23.5 degree tilt with one revolution every twelve minutes.
+- **Depends on:** D5, D7.
+- **Minimal test:** `dds-echo` shows `HelloWorldModel` samples.
+
+### Story: E4 view service (Rust)
+Subscribe to `HelloWorldModel` and publish `ViewData`: the earth cube map and sphere parameters, the model quaternion, the upper-right light direction, and the greeting text with its font.
+- **Depends on:** D5, D6, D7.
+- **Minimal test:** `dds-echo` shows `ViewData` samples.
+
+### Story: E5 font handling (Rust)
+Load a font from `assets/fonts` and render text (the hello_world greeting) inside the display library.
+- **Depends on:** C3, E1.
+- **Minimal test:** the greeting renders in the loaded font.
+
+### Story: E6 earth format rendering (Rust)
 Render the cube map on a sphere in the display library, orient it with the attitude quaternion from the `ViewData`, and light it from the upper right.
+- **Depends on:** C3, E1, E4.
+- **Minimal test:** the tilted, rotating, lit earth is visible on the small display.
 
-## Epic: controls
+### Story: E7 launch and cleanup scripts
+Write `scripts/launch-rust.ps1` to start the MVP constellation from `build/deploy` and `scripts/cleanup.ps1` to stop all processes of all configurations.
+- **Depends on:** D10, E1-E6.
+- **Minimal test:** `launch-rust.ps1` brings up the constellation and `cleanup.ps1` stops it.
 
-### Story: joystick control service
-A service per station that reads the virtual controller input, publishes the current `XboxController` values on `stations/joystick/state`, and forwards control events to the format's controller service. Runs headless or with a console window. No hardware binding in this increment.
+## Milestone F - later increments
 
-### Story: controller window
-A window with axis sliders and buttons for the default Xbox-controller layout, publishing `stations/joystick/virtual`. Binding a physical game controller is a later increment.
+Deferred until the Rust MVP is proven:
+* C++ mirror of D7-E7 (`cpp/` libraries, tools, and apps) and the `c++` configuration.
+* Hybrid configuration and `launch-hybrid.ps1`; `launch-cpp.ps1`.
+* Remaining IDL types (`DDS/mvc.idl`, `DDS/controller.idl`) and full topic registry (input, control, joystick, format window/mapping).
+* Joystick control service and controller window; real game-controller binding.
+* Format manager and per-station views.
+* Large display and launcher window.
 
-## Stories outside the epics
-
-### Story: format manager
-One service per display: reads the format windows that display publishes and publishes the format mapping that assigns hello_world to the small display's format window for its stations.
-
-### Story: stationsdds setup
-`scripts/stationsdds.ps1` creates or verifies the Microsoft loopback adapter named `StationsDDS` and enables IPv6 multicast on it. Requires administrator rights; document the manual fallback in `docs/`.
-
-### Story: launch and cleanup scripts
-`launch-rust.ps1`, `launch-cpp.ps1`, and `launch-hybrid.ps1` start every display and service of that configuration from `build/deploy`; `cleanup.ps1` stops all processes of all configurations.
-
-### Story: verification
-Manual end-to-end run of each configuration plus cross-language checks (a Rust publisher seen by a C++ subscriber and the reverse) for every topic in the registry.
+## Mapping from the original backlog
+* `repository structure and ignore rules` -> D1 (done).
+* `build orchestrator` -> D10.
+* `IDL code generation into both build systems` -> D5.
+* `topic registry and service contracts` -> D6.
+* `stations-dds library` -> D7.
+* `dds-contracts tool` -> D9.
+* `dds-echo tool` -> D8.
+* `IDL types` -> D4 (minimal) then Milestone F (full).
+* `display library` -> E1.
+* `small display application` -> E2.
+* `model service` -> E3.
+* `view service` -> E4.
+* `font handling` -> E5.
+* `earth format rendering` -> E6.
+* `launch and cleanup scripts` -> E7.
+* `stationsdds setup` -> B4.
+* `controller service`, `joystick control service`, `controller window`, `format manager`, C++/hybrid, `verification` -> Milestone F.
+* New: Milestones A-C toolchain/third-party stories, D2/D3 skeletons, B5 version pins.
 
 ## Done when
-
-Each configuration's launch script brings up the hello_world constellation, the small displays for stations 0 and 1, the joystick service and its window, and a format manager per display. The small display shows the tilted, rotating, cube-mapped earth lit from the upper right with the greeting text rendered in the loaded font, and its power button works. Display input events and joystick control events reach the hello_world controller service, `--topics` and `build/scratch/topics.md` match `contracts/`, `stations/joystick/state` shows the slider values, and `cleanup.ps1` stops everything.
+The increment's "Done when" is stated in `current_increment.md`.
