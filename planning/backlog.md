@@ -14,7 +14,7 @@ Conventions:
 ### Story: A1 MSVC and CMake verification
 Confirm the Visual Studio Build Tools C++ toolchain and CMake work from a shell, and document how to invoke them (VS generator or developer shell).
 - **Depends on:** none.
-- **Minimal test:** configure, build, and run a C++ hello world with the VS generator; record the exact commands in `docs/`.
+- **Minimal test:** configure, build, and run a C++ hello world with the VS generator; record the exact commands in `README.md`.
 
 ### Story: A2 Rust toolchain
 Install rustup with the `stable-x86_64-pc-windows-msvc` toolchain and pin it for the repository.
