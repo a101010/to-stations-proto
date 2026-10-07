@@ -54,7 +54,7 @@ Add the `cyclonedds` Rust crate (3.0.1) with `cyclonedds-build` (3.0.1) for IDL 
 Author `DDS/cyclonedds-config.xml` (IPv6 multicast on `StationsDDS`) and `scripts/verify-loopback.ps1` to verify the loopback adapter and its IPv6 prerequisites. Creating the adapter requires administrator rights and is a documented manual step; document it in `docs/`.
 - **Depends on:** B1, B3.
 - **Minimal test:** a publisher and subscriber exchange samples bound to the adapter configuration; confirm IPv6 multicast.
-- **Status:** in progress.
+- **Status:** done.
 
 ### Story: B5 Third-party version pins
 Record the pinned versions and install locations of every toolchain/third-party component in `docs/`.

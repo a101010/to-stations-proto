@@ -28,11 +28,6 @@ Required:
 - Visual Studio Build Tools with the "Desktop development with C++" workload (MSVC).
 - CMake 3.16 or later.
 
-Verified on the development machine:
-
-- Visual Studio Build Tools 2026 `18.9.12120.119` (MSVC `14.51.36231`).
-- CMake `4.4.3`.
-
 Build a C++ target with the Visual Studio generator. No developer shell is required:
 
 ```
@@ -57,8 +52,6 @@ winget install Rustlang.Rustup
 rustup default stable-x86_64-pc-windows-msvc
 ```
 
-Verified on the development machine: rustc/cargo `1.99.0`, rustup `1.29.1`.
-
 `rust/rust-toolchain.toml` pins the toolchain for the workspace.
 
 ### Cyclone DDS (C)
@@ -76,8 +69,6 @@ The install contains `bin\ddsc.dll`, `bin\idlc.exe`, `lib\ddsc.lib`, `include\dd
 
 The install prefix is hardcoded in `scripts/build.ps1`, which supplies the runtime: it uses a process-scoped `PATH` during the build and copies `ddsc.dll` into `build/deploy/bin`. No system or user `PATH` change is required.
 
-Verified by running `HelloworldSubscriber` and `HelloworldPublisher` from `C:\Libraries\src\cyclonedds\build\bin\Release`; the subscriber prints `Message (1, Hello World)`.
-
 ### Cyclone DDS (C++)
 
 The Cyclone DDS C++ binding (`cyclonedds-cxx`) `11.0.1` is built from source against the core install and installed to `C:\Libraries\cyclonedds-cxx`; the source is kept at `C:\Libraries\src\cyclonedds-cxx`.
@@ -93,8 +84,6 @@ The install contains `bin\ddscxx.dll`, `bin\cycloneddsidlcxx.dll` (the IDL C++ b
 
 Like the C install, the prefix is hardcoded in `scripts/build.ps1`, which supplies the runtime; no system or user `PATH` change is required.
 
-Verified by running `ddscxxHelloworldSubscriber` and `ddscxxHelloworldPublisher` from `C:\Libraries\src\cyclonedds-cxx\build\bin\Release`; the subscriber prints `[userID: 1, message: Hello World]`.
-
 ### Rust DDS binding
 
 The Rust DDS binding uses the `cyclonedds` crate `3.0.1` with `cyclonedds-build` `3.0.1` for IDL code generation.
@@ -109,4 +98,20 @@ cmake -S C:\Libraries\src\cyclonedds -B C:\Libraries\cyclonedds-rust -G "Visual 
 cmake --build C:\Libraries\cyclonedds-rust --target ddsc --config Release
 ```
 
-Verified with a Rust publisher and subscriber exchanging an IDL-defined `HelloWorld` sample; the subscriber prints `Hello World`.
+### DDS configuration
+
+All DDS traffic uses IPv6 multicast on a Microsoft loopback adapter named `StationsDDS`. The shared configuration is `DDS/cyclonedds-config.xml`, applied through the `CYCLONEDDS_URI` environment variable.
+
+Verify the adapter and its IPv6 prerequisites (creating it is a one-time manual step):
+
+```
+.\scripts\verify-loopback.ps1
+```
+
+See `docs/loopback-adapter.md` for creating the adapter and for troubleshooting.
+
+Point CycloneDDS at the configuration (use `file://` with two slashes, or a plain path):
+
+```
+$env:CYCLONEDDS_URI = 'file://T:/DDS/cyclonedds-config.xml'
+```

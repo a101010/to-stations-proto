@@ -65,7 +65,7 @@ Rationale:
 
 * Manual creation: Device Manager -> Add Legacy Hardware -> Network adapters -> Microsoft -> Microsoft KM-TEST Loopback Adapter, then rename to `StationsDDS`.
 * Verification: `Get-NetAdapter`, `Get-NetIPAddress -InterfaceAlias StationsDDS -AddressFamily IPv6`, `netsh interface ipv6 show joins "StationsDDS"`.
-* Point CycloneDDS at the configuration: `$env:CYCLONEDDS_URI = 'file:///T:/DDS/cyclonedds-config.xml'` (plain-path fallback).
+* Point CycloneDDS at the configuration: `$env:CYCLONEDDS_URI = 'file://T:/DDS/cyclonedds-config.xml'` (use `file://` with two slashes, or a plain path; `file:///` with three slashes fails).
 * Troubleshooting: adapter missing, interface-name mismatch, multicast not looped.
 
 ### `README.md`
@@ -77,16 +77,24 @@ Rationale:
 Reuse the `build/rust-dds-smoke` publisher and subscriber; no crate changes are needed because `dds_create_participant` reads `CYCLONEDDS_URI`.
 
 1. Run `scripts/verify-loopback.ps1`; it must pass (adapter exists, up, IPv6).
-2. `$env:CYCLONEDDS_URI = 'file:///T:/DDS/cyclonedds-config.xml'`; run `sub.exe`, then `pub.exe`; assert the subscriber prints `Received: id=1, message=Hello World`.
+2. `$env:CYCLONEDDS_URI = 'file://T:/DDS/cyclonedds-config.xml'`; run `sub.exe`, then `pub.exe`; assert the subscriber prints `Received: id=1, message=Hello World`.
 3. Confirm IPv6 multicast:
    * Set `CYCLONEDDS_URI` to the config file, a comma, then a bare inline XML string that enables tracing. `CYCLONEDDS_URI` accepts a comma-separated list parsed in order, so the inline string amends the file without editing it (`ddsi_config.c` splits on commas; a token starting with `<` is parsed as inline XML, otherwise opened as a file path). The committed `DDS/cyclonedds-config.xml` stays free of verbose tracing; tracing applies only to this invocation.
-     `"file:///T:/DDS/cyclonedds-config.xml,<CycloneDDS><Domain><Tracing><Verbosity>config</Verbosity><OutputFile>stderr</OutputFile></Tracing></Domain></CycloneDDS>"`
+     `"file://T:/DDS/cyclonedds-config.xml,<CycloneDDS><Domain><Tracing><Verbosity>config</Verbosity><OutputFile>stderr</OutputFile></Tracing></Domain></CycloneDDS>"`
      `Verbosity=config` dumps the complete effective configuration to stderr; confirm the dump shows `udp6` and `StationsDDS`.
    * `netsh interface ipv6 show joins "StationsDDS"` shows the DDS multicast group joined on the adapter.
 
+## Result
+
+Done and verified on the development machine.
+
+* The adapter existed as `StationDDS`; it was renamed to `StationsDDS` (matching the architecture), so `scripts/verify-loopback.ps1` now passes.
+* `CYCLONEDDS_URI` accepts `file://` with two slashes or a plain path; the three-slash form `file:///...` fails with `can't open configuration file`. The plan and docs use the working form.
+* `build/rust-dds-smoke/run-config-smoke.ps1` passes: the subscriber receives `Hello World`; the tracing dump shows `Domain/General/Transport: udp6` and `selected interfaces: StationsDDS`; `netsh interface ipv6 show joins "StationsDDS"` lists the CycloneDDS SPDP group `ff02::ffff:efff:1`.
+
 ## Blocker
 
-The `StationsDDS` adapter does not exist on this machine, and creating it requires administrator rights and the Device Manager GUI. Until it exists, the minimal test cannot pass.
+None remaining.
 
 ## Files
 
