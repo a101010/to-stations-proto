@@ -7,6 +7,7 @@ The increment target is the **minimum viable code product**: the `rust` hello_wo
 Conventions:
 * **Depends on** lists prerequisite stories (toolchain installs are environment prerequisites, not steps inside `build.ps1`).
 * **Minimal test** is the smallest runnable check that proves the story is done; toolchain smoke tests are temporary build artifacts under `build/`, with commands documented in `README.md`.
+* **Status** is one of `todo`, `in progress`, or `done`. The active story's detailed plan lives in `current_story.md`.
 * IDs, topic names, and file paths follow `architecture.md`.
 
 ## Milestone A - host toolchain
@@ -15,16 +16,19 @@ Conventions:
 Confirm the Visual Studio Build Tools C++ toolchain and CMake work from a shell, and document how to invoke them (VS generator or developer shell).
 - **Depends on:** none.
 - **Minimal test:** configure, build, and run a C++ hello world with the VS generator; record the exact commands in `README.md`.
+- **Status:** done.
 
 ### Story: A2 Rust toolchain
 Install rustup with the `stable-x86_64-pc-windows-msvc` toolchain and pin it for the repository.
 - **Depends on:** A1.
 - **Minimal test:** `cargo run` a hello world; commit `rust/rust-toolchain.toml`.
+- **Status:** done.
 
 ### Story: A3 Repository short-path scripts
 Add `scripts/subst-repo.ps1`, which maps the repository root to a short drive letter (`T:` by default), and `scripts/install-subst-startup.ps1`, which installs that mapping to run at logon via a Startup-folder wrapper. Neither is run by `scripts/build.ps1`.
 - **Depends on:** none.
 - **Minimal test:** `subst-repo.ps1` makes `subst` show `T:` pointing at the repository; `install-subst-startup.ps1` creates the Startup entry.
+- **Status:** done.
 
 ## Milestone B - DDS toolchain
 
@@ -32,26 +36,31 @@ Add `scripts/subst-repo.ps1`, which maps the repository root to a short drive le
 Build and install the Cyclone DDS C library (11.x) to the external prefix with IPv6 enabled.
 - **Depends on:** A1.
 - **Minimal test:** build with `-DBUILD_EXAMPLES=ON -DENABLE_IPV6=ON` and run the bundled HelloworldPublisher/HelloworldSubscriber.
+- **Status:** done.
 
 ### Story: B2 cyclonedds-cxx
 Build and install the C++ binding against the B1 install.
 - **Depends on:** B1.
 - **Minimal test:** build and run the C++ hello world example.
+- **Status:** done.
 
 ### Story: B3 Rust Cyclone DDS binding and IDL codegen
 Add the `cyclonedds` Rust crate (3.0.1) with `cyclonedds-build` (3.0.1) for IDL codegen, generating Rust types into `build/gen/rust`. The crate's copy of CycloneDDS C is built from the external prefix (`CYCLONEDDS_SRC`, `CYCLONEDDS_BUILD`) and linked statically so no runtime DLL is needed.
 - **Depends on:** A2, A3, B1.
 - **Minimal test:** a Rust publisher and subscriber exchange one sample of an IDL-defined type.
+- **Status:** done.
 
 ### Story: B4 DDS configuration and StationsDDS adapter
-Author `DDS/cyclonedds-config.xml` (IPv6 multicast on `StationsDDS`) and `scripts/stationsdds.ps1` to create or verify the loopback adapter. Requires administrator rights; document the manual fallback in `docs/`.
+Author `DDS/cyclonedds-config.xml` (IPv6 multicast on `StationsDDS`) and `scripts/verify-loopback.ps1` to verify the loopback adapter and its IPv6 prerequisites. Creating the adapter requires administrator rights and is a documented manual step; document it in `docs/`.
 - **Depends on:** B1, B3.
 - **Minimal test:** a publisher and subscriber exchange samples bound to the adapter configuration; confirm IPv6 multicast.
+- **Status:** in progress.
 
 ### Story: B5 Third-party version pins
 Record the pinned versions and install locations of every toolchain/third-party component in `docs/`.
 - **Depends on:** B1, B2, B3, C1, C2.
 - **Minimal test:** a fresh shell following `docs/` reproduces the B/C smoke tests.
+- **Status:** todo.
 
 ## Milestone C - rendering toolchain
 
@@ -59,16 +68,19 @@ Record the pinned versions and install locations of every toolchain/third-party 
 Install SDL3 to the external prefix and add glad and Dear ImGui sources under `cpp/third_party/`.
 - **Depends on:** A1.
 - **Minimal test:** a window that renders one Dear ImGui frame over a clear color.
+- **Status:** todo.
 
 ### Story: C2 winit, glutin/glow, and egui
 Add the Rust windowing/rendering crates.
 - **Depends on:** A2.
 - **Minimal test:** a window that renders one egui frame.
+- **Status:** todo.
 
 ### Story: C3 Assets
 Add the earth cube-map faces and a font under `assets/`.
 - **Depends on:** none.
 - **Minimal test:** both load and render/validate.
+- **Status:** todo.
 
 ## Milestone D - project infrastructure
 
@@ -81,46 +93,55 @@ Create the top-level folders and a `.gitignore` that excludes `build/`.
 Create the `rust/` Cargo workspace with one compiling crate.
 - **Depends on:** A2.
 - **Minimal test:** `cargo build` from `rust/`.
+- **Status:** todo.
 
 ### Story: D3 CMake project skeleton
 Create the `cpp/` CMake project with one compiling target.
 - **Depends on:** A1.
 - **Minimal test:** configure and build one runnable target.
+- **Status:** todo.
 
 ### Story: D4 Minimal IDL types
 Author `DDS/hello_world.idl` (`Quaternion`, `HelloWorldModel`).
 - **Depends on:** B2, B3.
 - **Minimal test:** code generation succeeds for both languages.
+- **Status:** todo.
 
 ### Story: D5 IDL code generation into both build systems
 Wire Cyclone DDS IDL code generation into the Cargo build and the CMake build so generated sources land in `build/gen/{rust,cpp}` and compile into the `stations-dds` libraries. Generated files are never committed.
 - **Depends on:** D2, D3, D4.
 - **Minimal test:** a clean build produces the generated sources and compiles them.
+- **Status:** todo.
 
 ### Story: D6 Minimal topic registry and service contracts
 Author `contracts/topics.toml` and `contracts/services/<app>.toml` for the MVP services (`stations/hello_world/model`, `stations/hello_world/view`).
 - **Depends on:** none.
 - **Minimal test:** the files parse and validate against the registry.
+- **Status:** todo.
 
 ### Story: D7 stations-dds library (Rust)
 Implement participant creation from `DDS/cyclonedds-config.xml`, typed readers and writers, validation of each application's contract at startup, and a `--topics` flag.
 - **Depends on:** B4, D5, D6.
 - **Minimal test:** typed publish/subscribe round-trip plus `--topics` output.
+- **Status:** todo.
 
 ### Story: D8 dds-echo tool (Rust)
 Subscribe to any named topic and print received samples.
 - **Depends on:** D7.
 - **Minimal test:** prints samples from a publisher.
+- **Status:** todo.
 
 ### Story: D9 dds-contracts tool (Rust)
 Read `contracts/` and write a readable summary to `build/topics.md`.
 - **Depends on:** D6.
 - **Minimal test:** generated `topics.md` matches the registry.
+- **Status:** todo.
 
 ### Story: D10 build orchestrator
 Write `scripts/build.ps1` (PowerShell 5.1 compatible) that resolves the repository root from its own location and uses repository-relative paths: IDL codegen into `build/gen/{rust,cpp}`, the Rust build with `CARGO_TARGET_DIR=build/rust`, the CMake build from `build/cpp` with install prefix `build/deploy`, assembly of `build/deploy`, and regeneration of `build/topics.md`. It hardcodes no drive letter; the repository must be placed at a short path because the `cyclonedds` Rust crate's CycloneDDS CMake build can exceed the Windows 260-character path limit (see `architecture.md`). It locates the externally installed Cyclone DDS and SDL3 prefixes (hardcoded, for example `C:\Libraries\cyclonedds`) and provisions the runtime without changing the user PATH: it uses a process-scoped `$env:PATH` during build/test and copies the required runtime DLLs (`ddsc.dll`, `ddscxx.dll`, SDL3's) into `build/deploy/bin`. It supports a dry-run mode.
 - **Depends on:** D2, D3, D5, D8, D9; B1-B3 installed as environment prerequisites.
 - **Minimal test:** `scripts/build.ps1 -DryRun` prints the ordered steps, and a full run succeeds once the workspace and tools exist.
+- **Status:** todo.
 
 ## Milestone E - MVP vertical slice (Rust)
 
@@ -128,36 +149,43 @@ Write `scripts/build.ps1` (PowerShell 5.1 compatible) that resolves the reposito
 Create the window and OpenGL context, run the render loop, render the console (egui), render the `ViewData` it receives in a format window, and publish `InputEvent` for mouse, touchscreen, and key input.
 - **Depends on:** C2, C3, D7.
 - **Minimal test:** a window showing text that publishes an input event.
+- **Status:** todo.
 
 ### Story: E2 small display (Rust)
 Host the display library: one square format window plus a console area with a single power button, `--station N`, and `--topics`. The power button toggles the format window and emits an input event for later wiring.
 - **Depends on:** E1.
 - **Minimal test:** the power button toggles the format window.
+- **Status:** todo.
 
 ### Story: E3 model service (Rust)
 Publish `HelloWorldModel` (greeting text and quaternion attitude) at a fixed rate: a 23.5 degree tilt with one revolution every twelve minutes.
 - **Depends on:** D5, D7.
 - **Minimal test:** `dds-echo` shows `HelloWorldModel` samples.
+- **Status:** todo.
 
 ### Story: E4 view service (Rust)
 Subscribe to `HelloWorldModel` and publish `ViewData`: the earth cube map and sphere parameters, the model quaternion, the upper-right light direction, and the greeting text with its font.
 - **Depends on:** D5, D6, D7.
 - **Minimal test:** `dds-echo` shows `ViewData` samples.
+- **Status:** todo.
 
 ### Story: E5 font handling (Rust)
 Load a font from `assets/fonts` and render text (the hello_world greeting) inside the display library.
 - **Depends on:** C3, E1.
 - **Minimal test:** the greeting renders in the loaded font.
+- **Status:** todo.
 
 ### Story: E6 earth format rendering (Rust)
 Render the cube map on a sphere in the display library, orient it with the attitude quaternion from the `ViewData`, and light it from the upper right.
 - **Depends on:** C3, E1, E4.
 - **Minimal test:** the tilted, rotating, lit earth is visible on the small display.
+- **Status:** todo.
 
 ### Story: E7 launch and cleanup scripts
 Write `scripts/launch-rust.ps1` to start the MVP constellation from `build/deploy` and `scripts/cleanup.ps1` to stop all processes of all configurations.
 - **Depends on:** D10, E1-E6.
 - **Minimal test:** `launch-rust.ps1` brings up the constellation and `cleanup.ps1` stops it.
+- **Status:** todo.
 
 ## Milestone F - later increments
 

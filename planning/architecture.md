@@ -84,7 +84,7 @@ to-stations-proto/
   DDS/                 authored: hello_world.idl, mvc.idl, controller.idl,
                        cyclonedds-config.xml
   contracts/           authored: topics.toml, services/<app>.toml
-  scripts/             authored: build.ps1, stationsdds.ps1, cleanup.ps1,
+  scripts/             authored: build.ps1, verify-loopback.ps1, cleanup.ps1,
                        launch-rust.ps1, launch-cpp.ps1, launch-hybrid.ps1,
                        subst-repo.ps1, install-subst-startup.ps1
   assets/              authored: earth cube faces, fonts
@@ -119,6 +119,6 @@ Windows limits file paths to 260 characters unless long-path support is enabled.
 
 The repository is therefore required to live at a short path on Windows. `scripts/subst-repo.ps1` maps the repository root to a short drive letter (`T:` by default), and `scripts/install-subst-startup.ps1` installs that mapping to run at logon via a wrapper in the Startup folder; alternatively the repository can simply be cloned to a short real path such as `C:\t\to-stations-proto`. These scripts are separate from the build and are never run by `scripts/build.ps1`, which is location-agnostic (it resolves the repository root from its own location, uses repository-relative paths, and hardcodes no drive letter). The Rust binding's CycloneDDS build is additionally redirected to the external prefix (`CYCLONEDDS_SRC`, `CYCLONEDDS_BUILD`) so it is built static there rather than inside the target directory. The requirement is restated in `README.md`.
 
-Each configuration has a launch script; all configurations share `cleanup.ps1`. `scripts/stationsdds.ps1` creates or verifies the loopback adapter. Launch and cleanup scripts operate only on `build/deploy/`.
+Each configuration has a launch script; all configurations share `cleanup.ps1`. `scripts/verify-loopback.ps1` verifies the loopback adapter and its IPv6 prerequisites; creating the adapter is a documented manual step (see `docs/`). Launch and cleanup scripts operate only on `build/deploy/`.
 
 

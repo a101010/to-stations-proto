@@ -2,7 +2,7 @@
 
 Increment 1 delivers the **minimum viable code product**: the `rust` configuration of the hello_world constellation, running end to end on one machine. It exists to retire the highest-risk unknowns first (host toolchain, Cyclone DDS on Windows, IPv6 multicast over the loopback adapter, and the rendering stack) in a single language before any C++ or hybrid work begins.
 
-The story breakdown and dependency order are in `backlog.md`. The design is in `architecture.md`.
+The story breakdown and dependency order are in `backlog.md`. The design is in `architecture.md`. This file is increment scope only; the detailed plan for the active story lives in `current_story.md`, and per-story status is tracked in `backlog.md`.
 
 ---
 
