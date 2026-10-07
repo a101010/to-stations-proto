@@ -94,3 +94,19 @@ The install contains `bin\ddscxx.dll`, `bin\cycloneddsidlcxx.dll` (the IDL C++ b
 Like the C install, the prefix is hardcoded in `scripts/build.ps1`, which supplies the runtime; no system or user `PATH` change is required.
 
 Verified by running `ddscxxHelloworldSubscriber` and `ddscxxHelloworldPublisher` from `C:\Libraries\src\cyclonedds-cxx\build\bin\Release`; the subscriber prints `[userID: 1, message: Hello World]`.
+
+### Rust DDS binding
+
+The Rust DDS binding uses the `cyclonedds` crate `3.0.1` with `cyclonedds-build` `3.0.1` for IDL code generation.
+
+- IDL types are generated into `build/gen/rust`.
+- The Cargo target directory is `build/rust`.
+- The crate builds its own copy of CycloneDDS. It is pointed at the external prefix with `CYCLONEDDS_SRC=C:\Libraries\src\cyclonedds` and `CYCLONEDDS_BUILD=C:\Libraries\cyclonedds-rust`, and is linked statically so no CycloneDDS DLL is needed at runtime. No `PATH` change is required.
+- `CYCLONEDDS_BUILD` must already contain a built library; build the static copy once with:
+
+```
+cmake -S C:\Libraries\src\cyclonedds -B C:\Libraries\cyclonedds-rust -G "Visual Studio 18 2026" -A x64 -DBUILD_SHARED_LIBS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DBUILD_TESTING=OFF -DBUILD_IDLC=OFF -DBUILD_DDSPERF=OFF -DBUILD_EXAMPLES=OFF -DENABLE_LTO=OFF -DENABLE_SECURITY=OFF -DENABLE_SSL=OFF
+cmake --build C:\Libraries\cyclonedds-rust --target ddsc --config Release
+```
+
+Verified with a Rust publisher and subscriber exchanging an IDL-defined `HelloWorld` sample; the subscriber prints `Hello World`.
