@@ -94,11 +94,11 @@ to-stations-proto/
                        subst-repo.ps1, install-subst-startup.ps1
   assets/              authored: earth cube faces, fonts
   rust/                authored: Cargo workspace
-    crates/            stations-dds, display-lib, format-manager,
-                       tools/{dds-echo, dds-contracts}
-    displays/          small-display, large-display, launcher
-    controls/          joystick-control-service, controller-window
-    formats/           hello-world/{model-service, view-service, controller-service}
+    ui/                big-d, lil-d, tentacles, paws
+    service/           hello-service, hello-view, hello-control
+    lib/               stations-dds, display-lib, and other shared libraries
+    tool/              dds-echo, dds-contracts, equirect-to-cubemap
+    test/              (deferred)
   cpp/                 authored: CMake project
     libs/              stations-dds, display-lib
     tools/             dds-echo, dds-contracts
@@ -114,6 +114,13 @@ to-stations-proto/
     topics.md          generated contract summary (temporary)
 ```
 
+### Rust crates
+* A crate defines a single main library and/or executable; any additional executables are tests.
+* `ui/` holds GUI applications, `service/` holds headless services, `lib/` holds shared libraries, `tool/` holds developer tools; `test/` is deferred.
+* A `-service` crate is a model: non-display business logic. `-view` and `-control` crates are services tied to the display library.
+* Common DDS support lives in `stations-dds`; other common support lives in one or more `lib/` crates.
+* The crate currently lives at `rust/crates/stations-dds`; it moves to `rust/lib/stations-dds` in the `stations-dds` story.
+
 ## Build and launch
 `scripts/build.ps1` is the single build orchestrator. It is location-agnostic: it resolves the repository root from its own location and uses repository-relative paths. It generates code from `DDS/` into `build/gen/{rust,cpp}`, builds Rust with `CARGO_TARGET_DIR=build/rust`, builds C++ with the CMake binary directory `build/cpp` and install prefix `build/deploy`, assembles `build/deploy`, and regenerates `build/topics.md`.
 
@@ -125,5 +132,13 @@ Windows limits file paths to 260 characters unless long-path support is enabled.
 The repository is therefore required to live at a short path on Windows. `scripts/subst-repo.ps1` maps the repository root to a short drive letter (`T:` by default), and `scripts/install-subst-startup.ps1` installs that mapping to run at logon via a wrapper in the Startup folder; alternatively the repository can simply be cloned to a short real path such as `C:\t\to-stations-proto`. These scripts are separate from the build and are never run by `scripts/build.ps1`, which is location-agnostic (it resolves the repository root from its own location, uses repository-relative paths, and hardcodes no drive letter). The Rust binding's CycloneDDS build is additionally redirected to the external prefix (`CYCLONEDDS_SRC`, `CYCLONEDDS_BUILD`) so it is built static there rather than inside the target directory. The requirement is restated in `README.md`.
 
 Each configuration has a launch script; all configurations share `cleanup.ps1`. `scripts/verify-loopback.ps1` verifies the loopback adapter and its IPv6 prerequisites; creating the adapter is a documented manual step (see `docs/`). Launch and cleanup scripts operate only on `build/deploy/`.
+
+## Deferred decisions
+* Rendering backend: glow/OpenGL (the current stack) versus WebGPU.
+* Text rendering: SDF/MSDF for format text (prefer a `skrifa`-based generator if MSDF is chosen); the console uses egui's own text.
+* displayLib internal architecture: it may split into smaller libraries; per-format rendering and communications are at least separate modules. The format manager has a view service, a control service, and one or more displayLib modules.
+* `test/` layout.
+* The `crates/` to `lib/` move (owned by the `stations-dds` story).
+* The C++ side mirroring the `ui/service/lib/tool/test` layout.
 
 

@@ -4,7 +4,7 @@ All future work lives here. The backlog is continually groomed; the story order 
 
 Conventions:
 * A story's title is a short, unique name. The body is a description followed by `Depends on`, `Minimal test`, and `Status`.
-* **Depends on** lists prerequisite stories (toolchain installs are environment prerequisites, not steps inside `build.ps1`).
+* **Depends on** lists prerequisite stories that are not yet done (toolchain installs are environment prerequisites, not steps inside `build.ps1`).
 * **Minimal test** is the smallest runnable check that proves the story is done; toolchain smoke tests are temporary build artifacts under `build/`.
 * **Status** is one of `todo`, `in progress`, or `done`. The active story's detailed plan lives in `current_story.md`.
 * IDs, topic names, and file paths follow `architecture.md`.
@@ -48,7 +48,7 @@ Confirm the Visual Studio Build Tools C++ toolchain and CMake work from a shell,
 
 ### rust-toolchain
 Install rustup with the `stable-x86_64-pc-windows-msvc` toolchain and pin it for the repository.
-- **Depends on:** host-toolchain.
+- **Depends on:** none.
 - **Minimal test:** `cargo run` a hello world; commit `rust/rust-toolchain.toml`.
 - **Status:** done.
 - **Records:** rustup/rustc in `docs/versions.md`.
@@ -61,40 +61,40 @@ Add `scripts/subst-repo.ps1`, which maps the repository root to a short drive le
 
 ### cyclonedds-core
 Build and install the Cyclone DDS C library (11.x) to the external prefix with IPv6 enabled.
-- **Depends on:** host-toolchain.
+- **Depends on:** none.
 - **Minimal test:** build with `-DBUILD_EXAMPLES=ON -DENABLE_IPV6=ON` and run the bundled HelloworldPublisher/HelloworldSubscriber.
 - **Status:** done.
 - **Records:** Cyclone DDS C in `docs/versions.md`.
 
 ### cyclonedds-cxx
 Build and install the C++ binding against the `cyclonedds-core` install.
-- **Depends on:** cyclonedds-core.
+- **Depends on:** none.
 - **Minimal test:** build and run the C++ hello world example.
 - **Status:** done.
 - **Records:** cyclonedds-cxx in `docs/versions.md`.
 
 ### rust-dds-binding
 Add the `cyclonedds` Rust crate (3.0.1) with `cyclonedds-build` (3.0.1) for IDL codegen, generating Rust types into `build/gen/rust`. The crate's copy of CycloneDDS C is built from the external prefix (`CYCLONEDDS_SRC`, `CYCLONEDDS_BUILD`) and linked statically so no runtime DLL is needed.
-- **Depends on:** rust-toolchain, short-path, cyclonedds-core.
+- **Depends on:** none.
 - **Minimal test:** a Rust publisher and subscriber exchange one sample of an IDL-defined type.
 - **Status:** done.
 - **Records:** the `cyclonedds` crate in `docs/versions.md`.
 
 ### dds-config
 Author `DDS/cyclonedds-config.xml` (IPv6 multicast on `StationsDDS`) and `scripts/verify-loopback.ps1` to verify the loopback adapter and its IPv6 prerequisites. Creating the adapter requires administrator rights and is a documented manual step; document it in `docs/`.
-- **Depends on:** cyclonedds-core, rust-dds-binding.
+- **Depends on:** none.
 - **Minimal test:** a publisher and subscriber exchange samples bound to the adapter configuration; confirm IPv6 multicast.
 - **Status:** done.
 
 ### rust-workspace
 Create the `rust/` Cargo workspace with one compiling crate.
-- **Depends on:** rust-toolchain.
+- **Depends on:** none.
 - **Minimal test:** `cargo build` from `rust/`.
 - **Status:** done.
 
 ### rust-render
 Add the Rust windowing/rendering crates.
-- **Depends on:** rust-toolchain, rust-workspace.
+- **Depends on:** none.
 - **Minimal test:** a window that renders one egui frame.
 - **Status:** done.
 - **Records:** the windowing/rendering crates in `docs/versions.md`.
@@ -103,17 +103,17 @@ Add the Rust windowing/rendering crates.
 Add the earth cube-map faces and a font under `assets/`.
 - **Depends on:** none.
 - **Minimal test:** both load and render/validate.
-- **Status:** todo.
+- **Status:** in progress.
 
-### idl-types
-Author `DDS/hello_world.idl` (`Quaternion`, `HelloWorldModel`).
-- **Depends on:** rust-dds-binding.
+### hello-world-topic
+Author the hello_world topic types in `DDS/hello_world.idl` (`Quaternion`, `HelloWorldModel`).
+- **Depends on:** none.
 - **Minimal test:** code generation succeeds.
 - **Status:** todo.
 
 ### idl-codegen
 Wire Cyclone DDS IDL code generation into the Cargo build so generated sources land in `build/gen/rust` and compile into the `stations-dds` library. Generated files are never committed.
-- **Depends on:** rust-workspace, idl-types.
+- **Depends on:** hello-world-topic.
 - **Minimal test:** a clean build produces the generated sources and compiles them.
 - **Status:** todo.
 
@@ -124,8 +124,8 @@ Author `contracts/topics.toml` and `contracts/services/<app>.toml` for the MVP s
 - **Status:** todo.
 
 ### stations-dds
-Implement participant creation from `DDS/cyclonedds-config.xml`, typed readers and writers, validation of each application's contract at startup, and a `--topics` flag.
-- **Depends on:** dds-config, idl-codegen, topic-contracts.
+Implement participant creation from `DDS/cyclonedds-config.xml`, typed readers and writers, validation of each application's contract at startup, and a `--topics` flag. Also move the crate to `rust/lib/stations-dds` and set the workspace members globs.
+- **Depends on:** idl-codegen, topic-contracts.
 - **Minimal test:** typed publish/subscribe round-trip plus `--topics` output.
 - **Status:** todo.
 
@@ -143,13 +143,13 @@ Read `contracts/` and write a readable summary to `build/topics.md`.
 
 ### build-orchestrator
 Write `scripts/build.ps1` (PowerShell 5.1 compatible) that resolves the repository root from its own location and uses repository-relative paths: IDL codegen into `build/gen/rust`, the Rust build with `CARGO_TARGET_DIR=build/rust`, assembly of `build/deploy`, and regeneration of `build/topics.md`. It hardcodes no drive letter; the repository must be placed at a short path because the `cyclonedds` Rust crate's CycloneDDS CMake build can exceed the Windows 260-character path limit (see `architecture.md`). It locates the externally installed Cyclone DDS prefix (hardcoded, for example `C:\Libraries\cyclonedds`) and provisions the runtime without changing the user PATH: a process-scoped `$env:PATH` during build/test. It supports a dry-run mode. The CMake/SDL3 halves are added when the C++ increment is scheduled.
-- **Depends on:** rust-workspace, idl-codegen, dds-echo, dds-contracts.
+- **Depends on:** idl-codegen, dds-echo, dds-contracts.
 - **Minimal test:** `scripts/build.ps1 -DryRun` prints the ordered steps, and a full run succeeds once the workspace and tools exist.
 - **Status:** todo.
 
 ### display-lib
 Create the window and OpenGL context, run the render loop, render the console (egui), render the `ViewData` it receives in a format window, and publish `InputEvent` for mouse, touchscreen, and key input.
-- **Depends on:** rust-render, assets, stations-dds.
+- **Depends on:** assets, stations-dds.
 - **Minimal test:** a window showing text that publishes an input event.
 - **Status:** todo.
 
@@ -193,14 +193,14 @@ Write `scripts/launch-rust.ps1` to start the MVP constellation from `build/deplo
 
 ### sdl3-imgui
 Install SDL3 to the external prefix and add glad and Dear ImGui sources under `cpp/third_party/`.
-- **Depends on:** host-toolchain.
+- **Depends on:** none.
 - **Minimal test:** a window that renders one Dear ImGui frame over a clear color.
 - **Status:** todo.
 - **Records:** SDL3, glad, and Dear ImGui in `docs/versions.md`.
 
 ### cmake-skeleton
 Create the `cpp/` CMake project with one compiling target.
-- **Depends on:** host-toolchain.
+- **Depends on:** none.
 - **Minimal test:** configure and build one runnable target.
 - **Status:** todo.
 

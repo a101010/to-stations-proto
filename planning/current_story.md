@@ -1,77 +1,46 @@
-# Current story: rust-render
+# Current story: assets
 
 This file is the detailed, living plan for the one active story. It is rewritten for each story. The backlog in `backlog.md` holds all work and the per-story status.
 
 ## Story
 
-Add the Rust windowing/rendering crates.
+Add the earth cube-map faces and a font under `assets/`.
 
-- **Depends on:** rust-toolchain (done), rust-workspace (done).
-- **Minimal test:** a window that renders one egui frame.
+- **Depends on:** none.
+- **Minimal test:** both load and render/validate.
 
 ## Decisions
 
-* The crates are pinned in `rust/Cargo.toml` under `[workspace.dependencies]` so later crates (for example `display-lib`) consume them with `workspace = true`. There is no consumer crate yet.
-* The smoke test is a temporary standalone crate under `build/rust-render-smoke/` (gitignored), matching the `rust-dds-binding` smoke crate pattern.
-* Integration uses the raw stack from `architecture.md` (winit + glutin/glow + egui), not `eframe`; `egui_glow`'s `pure_glow` example is the reference.
-* Versions (current): winit 0.30.13, glutin 0.32.3, glutin-winit 0.5.0, glow 0.17, egui 0.36.2, egui-winit 0.36.2, egui_glow 0.36.2 (feature `winit`).
+* Earth imagery: NASA Blue Marble 2002, public domain. An 8192×4096 equirectangular source is converted to six 1024×1024 cube faces, PNG, in OpenGL face order `px, nx, py, ny, pz, nz`. The face order and orientation are documented in `assets/earth/CREDITS.md` so `earth-rendering` samples them identically.
+* The converter is a committed Rust tool at `rust/tool/equirect-to-cubemap` (a workspace member), not a throwaway; the generated faces are committed, the source image is not.
+* Fonts: Fira Code Regular and Fira Sans Regular (both OFL 1.1), with their license files, under `assets/fonts/`.
+* Font validation uses `skrifa` (the Google Fonts `fontations` stack). `ttf-parser` is unmaintained (RUSTSEC-2026-0192), and `ab_glyph`/`fontdue` pull it transitively; `skrifa` is what egui already uses and is backend-agnostic.
+* The rendering backend (glow/OpenGL versus WebGPU) and SDF/MSDF text are deferred (see `architecture.md`, "Deferred decisions"); this story only adds assets and validates that they load.
+* During this story the workspace is `members = ["crates/stations-dds", "tool/*"]`; the `crates/` to `lib/` move is deferred to the `stations-dds` story.
 
 ## Deliverables
 
-1. `rust/Cargo.toml` - add `[workspace.dependencies]` with the pins.
-2. `build/rust-render-smoke/Cargo.toml` and `src/main.rs` - temporary smoke crate.
-3. `docs/versions.md` - add a row for the windowing/rendering crates.
-4. `README.md` - no change (smoke tests are not documented in the README).
+1. `assets/earth/{px,nx,py,ny,pz,nz}.png` - six 1024×1024 faces.
+2. `assets/earth/CREDITS.md` - NASA attribution and the face-order/orientation convention.
+3. `assets/fonts/FiraCode-Regular.ttf`, `assets/fonts/FiraSans-Regular.ttf`, and their OFL 1.1 license files.
+4. `rust/tool/equirect-to-cubemap/` - committed converter tool.
+5. `rust/Cargo.toml` - add the tool to `members`; pin `image` and `skrifa` in `[workspace.dependencies]`.
+6. `build/assets-smoke/` - temporary validator.
 
-## Contents
+## Converter tool
 
-`rust/Cargo.toml`:
+`rust/tool/equirect-to-cubemap`, CLI `equirect-to-cubemap <input-equirect> <output-dir> [--size 1024] [--format png]`, writing `px.png, nx.png, py.png, ny.png, pz.png, nz.png`. For each face pixel it computes a direction vector, maps it to equirectangular longitude/latitude, bilinear-samples the source, and writes the pixel. Uses `image = { workspace = true }`.
 
-```toml
-[workspace]
-resolver = "2"
-members = ["crates/stations-dds"]
+## Fonts
 
-[workspace.dependencies]
-winit = "0.30.13"
-glutin = "0.32.3"
-glutin-winit = "0.5.0"
-glow = "0.17"
-egui = "0.36.2"
-egui-winit = "0.36.2"
-egui_glow = { version = "0.36.2", features = ["winit"] }
-```
-
-`build/rust-render-smoke/Cargo.toml`:
-
-```toml
-[package]
-name = "rust-render-smoke"
-version = "0.0.0"
-edition = "2021"
-publish = false
-
-[dependencies]
-winit = "0.30.13"
-glutin = "0.32.3"
-glutin-winit = "0.5.0"
-glow = "0.17"
-egui = "0.36.2"
-egui_glow = { version = "0.36.2", features = ["winit"] }
-```
-
-`build/rust-render-smoke/src/main.rs`: a winit `ApplicationHandler` that, on `resumed`, creates the glutin context (via `glutin-winit::DisplayBuilder`), a `glow::Context`, and `egui_glow::EguiGlow`; on `RedrawRequested`, runs one egui UI, calls `paint`, swaps buffers, then exits the event loop.
+Download Fira Code Regular (tonsky/FiraCode) and Fira Sans Regular (mozilla/Fira), both OFL 1.1; keep the OFL license text alongside each.
 
 ## Minimal test
 
-From `build/rust-render-smoke/`: `cargo run`; a window opens, renders one egui frame, and exits. Requires a desktop session.
-
-## Result
-
-Done. The crates are pinned in `rust/Cargo.toml` under `[workspace.dependencies]` and recorded in `docs/versions.md`. The smoke crate builds and, when run, opens the window, renders one egui frame (`rendered egui frame 1`), and exits with code 0. `egui-winit` is also a direct dependency of the smoke crate (`egui_winit::winit` re-export). `rust/Cargo.lock` is unchanged.
+`build/assets-smoke/` (temporary, standalone): decode the six faces with `image` and assert they are 1024×1024 and equal; load both fonts with `skrifa` and read units-per-em, glyph count, a codepoint-to-glyph mapping, and a glyph outline; print the results and OK; exit 0.
 
 ## Files
 
-* Authored/committed: `rust/Cargo.toml`, `docs/versions.md`.
-* Temporary, gitignored: `build/rust-render-smoke/`.
-* Planning: `planning/current_story.md`, `planning/backlog.md`.
+* Authored/committed: `assets/earth/`, `assets/fonts/`, `rust/tool/equirect-to-cubemap/`, `rust/Cargo.toml`.
+* Temporary, gitignored: `build/assets-smoke/`, and the downloaded source image.
+* Planning: `planning/current_story.md`, `planning/backlog.md`, `planning/architecture.md`.
