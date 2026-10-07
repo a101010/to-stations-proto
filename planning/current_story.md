@@ -66,6 +66,10 @@ egui_glow = { version = "0.36.2", features = ["winit"] }
 
 From `build/rust-render-smoke/`: `cargo run`; a window opens, renders one egui frame, and exits. Requires a desktop session.
 
+## Result
+
+Done. The crates are pinned in `rust/Cargo.toml` under `[workspace.dependencies]` and recorded in `docs/versions.md`. The smoke crate builds and, when run, opens the window, renders one egui frame (`rendered egui frame 1`), and exits with code 0. `egui-winit` is also a direct dependency of the smoke crate (`egui_winit::winit` re-export). `rust/Cargo.lock` is unchanged.
+
 ## Files
 
 * Authored/committed: `rust/Cargo.toml`, `docs/versions.md`.

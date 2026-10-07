@@ -1,3 +1,12 @@
 [workspace]
 resolver = "2"
 members = ["crates/stations-dds"]
+
+[workspace.dependencies]
+winit = "0.30.13"
+glutin = "0.32.3"
+glutin-winit = "0.5.0"
+glow = "0.17"
+egui = "0.36.2"
+egui-winit = "0.36.2"
+egui_glow = { version = "0.36.2", features = ["winit"] }

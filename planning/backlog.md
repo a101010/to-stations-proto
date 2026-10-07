@@ -96,7 +96,7 @@ Create the `rust/` Cargo workspace with one compiling crate.
 Add the Rust windowing/rendering crates.
 - **Depends on:** rust-toolchain, rust-workspace.
 - **Minimal test:** a window that renders one egui frame.
-- **Status:** in progress.
+- **Status:** done.
 - **Records:** the windowing/rendering crates in `docs/versions.md`.
 
 ### assets
