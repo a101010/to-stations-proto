@@ -113,7 +113,7 @@ Read `contracts/` and write a readable summary to `build/scratch/topics.md`.
 - **Minimal test:** generated `topics.md` matches the registry.
 
 ### Story: D10 build orchestrator
-Write `scripts/build.ps1` (PowerShell 5.1 compatible) that runs IDL codegen into `build/scratch/gen/{rust,cpp}`, the Rust build with `CARGO_TARGET_DIR=build/scratch/rust`, the CMake build from `build/scratch/cpp` with install prefix `build/deploy`, assembly of `build/deploy`, and regeneration of `build/scratch/topics.md`. It locates externally installed Cyclone DDS/SDL3 via `CMAKE_PREFIX_PATH` and supports a dry-run mode.
+Write `scripts/build.ps1` (PowerShell 5.1 compatible) that runs IDL codegen into `build/scratch/gen/{rust,cpp}`, the Rust build with `CARGO_TARGET_DIR=build/scratch/rust`, the CMake build from `build/scratch/cpp` with install prefix `build/deploy`, assembly of `build/deploy`, and regeneration of `build/scratch/topics.md`. It locates the externally installed Cyclone DDS and SDL3 prefixes (hardcoded, for example `C:\Libraries\cyclonedds`) and provisions the runtime without changing the user PATH: it uses a process-scoped `$env:PATH` during build/test and copies the required runtime DLLs (`ddsc.dll`, SDL3's) into `build/deploy/bin`. It supports a dry-run mode.
 - **Depends on:** D2, D3, D5, D8, D9; B1-B3 installed as environment prerequisites.
 - **Minimal test:** `scripts/build.ps1 -DryRun` prints the ordered steps, and a full run succeeds once the workspace and tools exist.
 

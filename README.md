@@ -42,3 +42,20 @@ rustup default stable-x86_64-pc-windows-msvc
 Verified on the development machine: rustc/cargo `1.99.0`, rustup `1.29.1`.
 
 `rust/rust-toolchain.toml` pins the toolchain for the workspace.
+
+### Cyclone DDS (C)
+
+Eclipse Cyclone DDS `11.0.1` is built from source and installed to `C:\Libraries\cyclonedds`; the source is kept at `C:\Libraries\src\cyclonedds`.
+
+```
+git clone --branch 11.0.1 --depth 1 https://github.com/eclipse-cyclonedds/cyclonedds.git C:\Libraries\src\cyclonedds
+cmake -S C:\Libraries\src\cyclonedds -B C:\Libraries\src\cyclonedds\build -G "Visual Studio 18 2026" -A x64 -DCMAKE_INSTALL_PREFIX=C:/Libraries/cyclonedds -DBUILD_EXAMPLES=ON -DENABLE_IPV6=ON -DENABLE_SSL=NO -DBUILD_TESTING=OFF
+cmake --build C:\Libraries\src\cyclonedds\build --config Release --parallel
+cmake --install C:\Libraries\src\cyclonedds\build --config Release
+```
+
+The install contains `bin\ddsc.dll`, `bin\idlc.exe`, `lib\ddsc.lib`, `include\ddsc`, and the CMake package at `lib\cmake\CycloneDDS`.
+
+The install prefix is hardcoded in `scripts/build.ps1`, which supplies the runtime: it uses a process-scoped `PATH` during the build and copies `ddsc.dll` into `build/deploy/bin`. No system or user `PATH` change is required.
+
+Verified by running `HelloworldSubscriber` and `HelloworldPublisher` from `C:\Libraries\src\cyclonedds\build\bin\Release`; the subscriber prints `Message (1, Hello World)`.
