@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/stations-dds"]
+members = ["crates/stations-dds", "tool/equirect-to-cubemap"]
 
 [workspace.dependencies]
 winit = "0.30.13"
@@ -10,3 +10,6 @@ glow = "0.17"
 egui = "0.36.2"
 egui-winit = "0.36.2"
 egui_glow = { version = "0.36.2", features = ["winit"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+clap = { version = "4", features = ["derive"] }
+skrifa = "0.44"

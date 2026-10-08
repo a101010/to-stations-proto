@@ -103,7 +103,7 @@ Add the Rust windowing/rendering crates.
 Add the earth cube-map faces and a font under `assets/`.
 - **Depends on:** none.
 - **Minimal test:** both load and render/validate.
-- **Status:** in progress.
+- **Status:** done.
 
 ### hello-world-topic
 Author the hello_world topic types in `DDS/hello_world.idl` (`Quaternion`, `HelloWorldModel`).

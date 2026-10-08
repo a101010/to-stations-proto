@@ -1,0 +1,17 @@
+[package]
+name = "equirect-to-cubemap"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "equirect_to_cubemap"
+path = "src/lib.rs"
+
+[[bin]]
+name = "equirect-to-cubemap"
+path = "src/main.rs"
+
+[dependencies]
+image = { workspace = true }
+clap = { workspace = true }
