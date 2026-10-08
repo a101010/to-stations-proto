@@ -119,6 +119,7 @@ to-stations-proto/
 * `ui/` holds GUI applications, `service/` holds headless services, `lib/` holds shared libraries, `tool/` holds developer tools; `test/` is deferred.
 * A `-service` crate is a model: non-display business logic. `-view` and `-control` crates are services tied to the display library.
 * Common DDS support lives in `stations-dds`; other common support lives in one or more `lib/` crates.
+* Rust programs use `clap` for command-line parsing.
 * The crate currently lives at `rust/crates/stations-dds`; it moves to `rust/lib/stations-dds` in the `stations-dds` story.
 
 ## Build and launch
