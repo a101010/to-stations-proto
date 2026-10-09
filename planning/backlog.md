@@ -78,7 +78,7 @@ Build and install the C++ binding against the `cyclonedds-core` install.
 Add the `cyclonedds` Rust crate and `cyclonedds-build` from the to-stations fork of `cyclonedds-rust` (branch `multifile`, rev `acef684`) as git dependencies pinned to that rev. The fork's copy of CycloneDDS C is built from the external prefix (`CYCLONEDDS_SRC`, `CYCLONEDDS_BUILD`) and linked statically so no runtime DLL is needed. IDL codegen is deferred to `idl-codegen`; this story uses a hand-written `#[derive(DdsType)]` type.
 - **Depends on:** none.
 - **Minimal test:** a Rust publisher and subscriber exchange one sample of an IDL-defined type.
-- **Status:** in progress.
+- **Status:** done.
 - **Records:** the `cyclonedds`/`cyclonedds-build` fork in `docs/versions.md`.
 
 ### dds-config

@@ -7,3 +7,6 @@ publish = false
 [lib]
 name = "stations_dds"
 path = "src/lib.rs"
+
+[dependencies]
+cyclonedds = { workspace = true }

@@ -8,11 +8,11 @@ Increment 1 (milestones 1-5) is implemented and tested in the fork, which lives 
 
 ## Purpose
 
-Fork `cyclonedds-build` 3.0.1 (mzet97/cyclonedds-rust) and extend its IDL parser and Rust code generator so to-stations can author full, shared IDL (nested `dds::` modules, multi-file includes, DDS type-name parity with `idlc`/C++, optional members) and generate Rust types for the `cyclonedds` crate. Keep the existing `compile_idl`/`CompileOptions` API shape.
+Fork `cyclonedds-build` from upstream `main` (mzet97/cyclonedds-rust) and extend its IDL parser and Rust code generator so to-stations can author full, shared IDL (nested `dds::` modules, multi-file includes, DDS type-name parity with `idlc`/C++, optional members) and generate Rust types for the `cyclonedds` crate. Keep the existing `compile_idl`/`CompileOptions` API shape.
 
 ## Gaps this fork closes
 
-The stock 3.0.1 codegen:
+The upstream codegen:
 
 1. cannot parse nested modules (`IdlType` has no `Module` variant);
 2. skips `#include`/`import` (and `#` fails tokenization) so files cannot share types;
@@ -102,7 +102,7 @@ pub struct CompileOptions {
 
 - Chosen mechanism: a git dependency on the fork workspace pinned to `rev = acef68438ef3c8eae56c45afbecdbb89f3d3e115`, added in `rust/Cargo.toml` `[workspace.dependencies]`. Cargo resolves `cyclonedds`, `cyclonedds-derive`, `cyclonedds-rust-sys`, and `cyclonedds-src` from that same rev.
 - The `rust-dds-binding` story wires the `cyclonedds` crate into `stations-dds` and proves a hand-written `DdsType` round-trip; the `idl-codegen` story wires `cyclonedds-build`'s `compile_idl_with_options` (`include_dirs = ["DDS"]`, `emit_dds_typename = true`, `output_dir = build/gen/rust`) into the `stations-dds` build. The `hello-world-topic` story and later IDL stories author `module dds { module <format> { ... } }`.
-- The pinned rev, its base, and the version reconciliation (`3.0.0` fork vs `3.0.1` crates.io) are recorded in `docs/versions.md`.
+- The pinned rev and its base (`main` @ `feb7e7d`) are recorded in `docs/versions.md`.
 
 ## Milestones
 

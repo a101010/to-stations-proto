@@ -94,7 +94,7 @@ Like the C install, the prefix is hardcoded in `scripts/build.ps1`, which suppli
 
 ### Rust DDS binding
 
-The Rust DDS binding uses the `cyclonedds` crate `3.0.1` with `cyclonedds-build` `3.0.1` for IDL code generation.
+The Rust DDS binding uses the `cyclonedds` and `cyclonedds-build` crates from the to-stations fork of `cyclonedds-rust` (`https://github.com/a101010/cyclonedds-rust`, branch `multifile`, rev `acef68438ef3c8eae56c45afbecdbb89f3d3e115`), pinned as a git dependency in `rust/Cargo.toml`. The fork adds nested `module` support, `#include`/`import`, scoped type references, `@optional` members, and `#[dds_typename]` for C++/IDL parity; it is used for IDL code generation (`cyclonedds-build`).
 
 - IDL types are generated into `build/gen/rust`.
 - The Cargo target directory is `build/rust`.
