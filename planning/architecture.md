@@ -127,6 +127,8 @@ to-stations-proto/
 
 It locates the externally installed Cyclone DDS and SDL3 prefixes (hardcoded under a short path such as `C:\Libraries`) and provisions the runtime without changing the user `PATH`: a process-scoped `PATH` during build and test, with runtime DLLs copied into `build/deploy/bin`. The repository must be placed at a short path on Windows; see "Path length" below.
 
+DDS Rust types are generated from `DDS/` by the to-stations fork of `cyclonedds-rust`'s `cyclonedds-build`, consumed as a pinned git dependency. The fork adds nested modules, `#include`/`import`, scoped type references, and `#[dds_typename]` so Rust `DdsType::type_name()` matches the C `idlc`/C++ name. The fork spec is `planning/cyclonedds-build-plan.md`; the pinned rev is recorded in `docs/versions.md`.
+
 ### Path length
 Windows limits file paths to 260 characters unless long-path support is enabled. The `cyclonedds` Rust crate is not only a binding: `cyclonedds-rust-sys` compiles a copy of CycloneDDS with CMake as part of `cargo build`, by default under the Cargo target directory (`$OUT_DIR/cyclonedds-build/<source>/...`), and it also CMake-builds a small ABI probe under `$OUT_DIR`. Those nested paths exceed 260 characters unless the repository itself sits at a short path; when they do, MSBuild's `GetOutOfDateItems` task fails the build.
 

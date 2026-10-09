@@ -1,161 +1,55 @@
-# Current story: assets
+# Current story: rust-dds-binding
 
 This file is the detailed, living plan for the one active story. It is rewritten for each story. The backlog in `backlog.md` holds all work and the per-story status.
 
 ## Story
 
-Add the earth cube-map faces and a font under `assets/`.
+Bind the `stations-dds` library to the `cyclonedds` Rust crate and `cyclonedds-build` built from the to-stations fork of `cyclonedds-rust`, pinned to the fork's `multifile` rev, and prove a typed publish/subscribe round-trip on this machine.
 
 - **Depends on:** none.
-- **Minimal test:** both load and render/validate.
+- **Minimal test:** a Rust publisher and subscriber exchange one sample of an IDL-defined type over the `StationsDDS` loopback configuration.
+
+## Context
+
+The stock crates.io `cyclonedds`/`cyclonedds-build` cannot parse the shared IDL this project needs (nested `dds::` modules, `#include`, scoped type references, `@optional`) and does not emit `#[dds_typename]` for C++/IDL parity. The to-stations fork of `mzet97/cyclonedds-rust` extends `cyclonedds-build` (and fixes `cyclonedds-derive` for `Option<String>`); its Increment 1 is complete. The fork spec is `planning/cyclonedds-build-plan.md`.
+
+Fork location and pin: `https://github.com/a101010/cyclonedds-rust`, branch `multifile`, rev `acef68438ef3c8eae56c45afbecdbb89f3d3e115`. The fork workspace version is `3.0.0`; the earlier `docs/versions.md`/`README.md` note of `3.0.1` (the crates.io release) is superseded by the pinned rev.
 
 ## Decisions
 
-* Earth imagery: NASA Blue Marble 2002, public domain. An 8192×4096 equirectangular source is converted to six 1024×1024 cube faces in OpenGL face order `px, nx, py, ny, pz, nz`.
-* Faces are committed as **JPEG**, each **50–100 KB** (repo-size requirement on the committed asset, not a tool feature). The chosen `--jpeg-quality` and the resulting per-face sizes are recorded in `assets/earth/CREDITS.md`.
-* The converter is a committed Rust tool at `rust/tool/equirect-to-cubemap` (a workspace member); the generated faces are committed, the source image is not.
-* Fonts: Fira Code Regular and Fira Sans Regular (both OFL 1.1), with their license files, under `assets/fonts/`.
-* Font validation uses `skrifa` (the Google Fonts `fontations` stack). `ttf-parser` is unmaintained (RUSTSEC-2026-0192), and `ab_glyph`/`fontdue` pull it transitively; `skrifa` is what egui already uses and is backend-agnostic.
-* Rust programs use `clap`; the converter uses clap derive.
-* The rendering backend (glow/OpenGL versus WebGPU) and SDF/MSDF text are deferred (see `architecture.md`, "Deferred decisions"); this story only adds assets and validates that they load.
-* During this story the workspace is `members = ["crates/stations-dds", "tool/*"]`; the `crates/` to `lib/` move is deferred to the `stations-dds` story.
+* **Consumption:** a git dependency on the fork workspace pinned to `rev = acef684…`; Cargo resolves `cyclonedds`, `cyclonedds-derive`, `cyclonedds-rust-sys`, and `cyclonedds-src` by name from the same rev. No `version` is stated so it cannot conflict with the fork's `3.0.0`.
+* **Feature set:** `cyclonedds = { workspace = true, default-features = false, features = ["native"] }` - the native sync API is enough for the services and avoids pulling the async (`tokio`) surface now. `security` stays off.
+* **Static link unchanged:** `CYCLONEDDS_SRC=C:\Libraries\src\cyclonedds` and `CYCLONEDDS_BUILD=C:\Libraries\cyclonedds-rust` still point the fork's `cyclonedds-rust-sys` at the externally built static CycloneDDS, so no runtime DLL and no `PATH` change. The short-path requirement (`architecture.md`, "Path length") still applies to the fork's `$OUT_DIR` CMake probe.
+* **No codegen in this story:** the round-trip uses a small hand-written `#[derive(DdsType)]` struct so the story proves linking and runtime only. IDL code generation is the separate `idl-codegen` story.
+* **Smoke test is temporary:** a standalone crate under `build/dds-smoke/` (gitignored), following the `assets` precedent; nothing is committed except the Cargo manifest changes and the docs.
 
 ## Deliverables
 
-1. `assets/earth/{px,nx,py,ny,pz,nz}.jpg` - six 1024×1024 faces, each 50–100 KB.
-2. `assets/earth/CREDITS.md` - NASA attribution, the face-order/orientation convention, and the chosen JPEG quality and per-face sizes.
-3. `assets/fonts/FiraCode-Regular.ttf`, `assets/fonts/FiraSans-Regular.ttf`, and their OFL 1.1 license files.
-4. `rust/tool/equirect-to-cubemap/` - committed converter tool.
-5. `rust/Cargo.toml` - add the tool to `members`; pin `image`, `clap`, and `skrifa` in `[workspace.dependencies]`.
-6. `build/assets-smoke/` - temporary validator.
-
-## Converter tool
-
-### Crate
-- Path `rust/tool/equirect-to-cubemap/`; library `equirect_to_cubemap` plus binary `equirect-to-cubemap`.
-- Dependencies: `image`, `clap` (both `{ workspace = true }`).
-- Images are `RgbImage` (no alpha).
-
-```
-rust/tool/equirect-to-cubemap/
-  Cargo.toml
-  src/
-    lib.rs         // Error, run()
-    cli.rs         // Args, Format (clap derive)
-    cubemap.rs     // Face, direction/UV mapping, render_face, convert()
-    sampling.rs    // bilinear()
-    image_io.rs    // load_source(), save_face()
-    main.rs        // Args::parse(), run(), exit code
-```
-
-### CLI (clap derive)
-```
-equirect-to-cubemap <input> <output-dir> [--size N] [--format png|jpg] [--jpeg-quality Q]
-```
-```
-#[derive(clap::Parser)]
-#[command(name = "equirect-to-cubemap", about = "Convert an equirectangular image to six cube faces")]
-struct Args {
-    input: PathBuf,
-    output_dir: PathBuf,
-    #[arg(long, default_value_t = 1024)] size: u32,
-    #[arg(long, value_enum, default_value_t = Format::Jpg)] format: Format,
-    #[arg(long, default_value_t = 75)] jpeg_quality: u8,
-}
-#[derive(clap::ValueEnum, Clone, Copy)] enum Format { Png, Jpg }
-```
-clap handles `--help` and bad arguments (exit 2). `main` calls `Args::parse()`, then `run(&args)`; on error it prints `error: …` and exits 1.
-
-### Interfaces
-```
-// cubemap.rs
-pub enum Face { PosX, NegX, PosY, NegY, PosZ, NegZ }
-impl Face { pub const ALL: [Face; 6]; pub fn stem(self) -> &'static str; } // "px".."nz"
-pub fn face_direction(face: Face, s: f32, t: f32) -> [f32; 3]
-pub fn direction_to_equirect(d: [f32; 3]) -> (f32, f32)
-pub fn render_face(source: &RgbImage, face: Face, size: u32) -> RgbImage
-pub fn convert(source: &RgbImage, size: u32, on_face: &mut impl FnMut(Face)) -> Vec<(Face, RgbImage)>
-
-// sampling.rs
-pub fn bilinear(image: &RgbImage, x: f32, y: f32) -> Rgb<u8>   // x wraps, y clamps
-
-// image_io.rs
-pub fn load_source(path: &Path) -> Result<RgbImage, image::ImageError>
-pub fn save_face(image: &RgbImage, path: &Path, format: Format, quality: u8) -> Result<(), image::ImageError>
-
-// lib.rs
-pub enum Error { Io(io::Error), Image(image::ImageError) }
-pub fn run(args: &Args) -> Result<(), Error>
-```
-
-### Pseudocode
-```
-run(args):
-    source = load_source(args.input)?
-    if source.width != 2 * source.height: warn "source is not 2:1 (equirectangular)"
-    create_dir_all(args.output_dir)?
-    for (face, image) in convert(source, args.size, |f| print "rendering {f}"):
-        path = output_dir / (face.stem() + ext(args.format))
-        save_face(image, path, args.format, args.jpeg_quality)?
-        print "wrote {path}"
-    print "done: 6 faces at {size}x{size}"
-
-render_face(source, face, size):
-    dst = new RgbImage(size, size)
-    for j in 0..size:
-        t = 2*((j+0.5)/size) - 1
-        for i in 0..size:
-            s = 2*((i+0.5)/size) - 1
-            (u, v) = direction_to_equirect(face_direction(face, s, t))
-            dst[i,j] = bilinear(source, u*source.width, v*source.height)
-    return dst
-
-face_direction(face, s, t):
-    match face:
-        PosX: normalize( 1, -t, -s)
-        NegX: normalize(-1, -t,  s)
-        PosY: normalize( s,  1,  t)
-        NegY: normalize( s, -1, -t)
-        PosZ: normalize( s, -t,  1)
-        NegZ: normalize(-s, -t, -1)
-
-direction_to_equirect(d):           // d normalized; +Y is north
-    lon = atan2(d.x, d.z)           // [-pi, pi]
-    lat = asin(clamp(d.y, -1, 1))   // [-pi/2, pi/2]
-    return ( lon/(2*pi) + 0.5 , 0.5 - lat/pi )
-
-bilinear(image, x, y):
-    x0 = floor(x - 0.5); fx = (x - 0.5) - x0
-    y0 = floor(y - 0.5); fy = (y - 0.5) - y0
-    s(px, py) = image[ wrap_x(px), clamp_y(py) ]
-    return lerp2( s(x0,y0), s(x0+1,y0), s(x0,y0+1), s(x0+1,y0+1), fx, fy )
-```
-
-### Conventions (recorded in `assets/earth/CREDITS.md`)
-* Face order `px, nx, py, ny, pz, nz`, standard OpenGL cube-map layout, `+Y` up.
-* Equirectangular: `u = 0` at longitude `-π`, `u = 0.5` at longitude `0` (front `+Z`), `v = 0` at north pole; longitude wraps in x, latitude clamps in y.
-* Absolute orientation is arbitrary; `earth-rendering` applies the attitude quaternion and must match this convention.
-
-### Tests
-* `direction_to_equirect(face_direction(PosZ, 0.0, 0.0)) == (0.5, 0.5)`.
-* `face_direction(PosY, 0.0, 0.0)` maps to `v ≈ 0` (north).
-* All `direction_to_equirect` outputs within `[0,1]²`.
-* `bilinear` at pixel centers returns the exact pixel and wraps across the seam.
-
-## Fonts
-
-Download Fira Code Regular (tonsky/FiraCode) and Fira Sans Regular (mozilla/Fira), both OFL 1.1; keep the OFL license text alongside each.
+1. `rust/Cargo.toml` - add `cyclonedds` and `cyclonedds-build` git dependencies pinned to the fork rev in `[workspace.dependencies]`.
+2. `rust/crates/stations-dds/Cargo.toml` - depend on `cyclonedds`; the `cyclonedds-build` build-dependency is deferred to `idl-codegen`.
+3. `build/dds-smoke/` - temporary publisher/subscriber round-trip using a hand-written `DdsType`.
+4. `docs/versions.md` and `README.md` - record the fork URL/base/rev and correct the `3.0.1` note.
+5. Planning: this file, `planning/backlog.md`, `planning/cyclonedds-build-plan.md`.
 
 ## Minimal test
 
-`build/assets-smoke/` (temporary, standalone): decode the six faces with `image` and assert they are 1024×1024 and equal; report each face's file size (must be 50–100 KB); load both fonts with `skrifa` and read units-per-em, glyph count, a codepoint-to-glyph mapping, and a glyph outline; print the results and OK; exit 0.
+`build/dds-smoke/` (temporary, standalone, gitignored): a crate with its own `Cargo.toml` (path dependency on `rust/crates/stations-dds` and `rust/crates`'s workspace git deps) that
 
-## Result
+* derives `DdsType` on a small struct,
+* creates a `Participant` and `Topic` bound through `CYCLONEDDS_URI=file://T:/DDS/cyclonedds-config.xml`,
+* writes one sample from a `DataWriter` and reads it back with a `DataReader`,
+* asserts the value, prints `OK`, and exits 0.
 
-Done and verified. The committed faces are `px/nx/py/ny/pz/nz.jpg`, 1024×1024, 77,882–79,993 bytes (within 50–100 KB), generated by `rust/tool/equirect-to-cubemap --size 1024 --format jpg --target-bytes 80000` from NASA's public-domain Blue Marble 2002 (source in `build/`, not committed). A per-face size target was added to the tool (the plan's flagged fallback) because one global quality could not keep all six in range. Fonts are Fira Code Regular and Fira Sans Regular (OFL 1.1) with license files. The validator passed: six faces decoded and sized correctly, both fonts parsed by `skrifa` (`FiraCode` units_per_em 1950 / 2030 glyphs; `FiraSans` 1000 / 2631). Workspace pins `image`, `clap`, `skrifa`; members are `crates/stations-dds` and `tool/equirect-to-cubemap`. `image` is pinned with `default-features = false, features = ["jpeg", "png"]`, which keeps `Cargo.lock` at 43 packages instead of 139 (the default features pull every codec, including the `rav1e` AV1 encoder).
+If the `StationsDDS` adapter is not present, run the smoke test with `CYCLONEDDS_URI` unset (default transport) to isolate the binding from the loopback wiring; the loopback itself is owned by the `dds-config` story and `scripts/verify-loopback.ps1`.
+
+## Risks and follow-ups
+
+* The repo must be at a short path (`T:`) or the fork's `cyclonedds-rust-sys` CMake probe under `$OUT_DIR` can exceed the Windows 260-character limit (`README.md`, `planning/architecture.md` "Path length").
+* If the pinned rev's `cyclonedds`/`cyclonedds-build` versions drift from `docs/versions.md`, re-pin and update `docs/versions.md`.
+* Version-string reconciliation (`3.0.0` fork vs `3.0.1` crates.io) is documentation only.
 
 ## Files
 
-* Authored/committed: `assets/earth/`, `assets/fonts/`, `rust/tool/equirect-to-cubemap/`, `rust/Cargo.toml`.
-* Temporary, gitignored: `build/assets-smoke/`, and the downloaded source image.
-* Planning: `planning/current_story.md`, `planning/backlog.md`, `planning/architecture.md`.
+* Authored/changed: `rust/Cargo.toml`, `rust/crates/stations-dds/Cargo.toml`, `docs/versions.md`, `README.md`.
+* Temporary, gitignored: `build/dds-smoke/`.
+* Planning: `planning/current_story.md`, `planning/backlog.md`, `planning/cyclonedds-build-plan.md`.

@@ -29,6 +29,7 @@ Conventions:
 * Rust toolchain `stable-x86_64-pc-windows-msvc`.
 * A short repository path on Windows (`scripts/subst-repo.ps1`; see `architecture.md`, "Path length").
 * Eclipse Cyclone DDS C core (11.x) and the Microsoft loopback adapter named `StationsDDS` with IPv6 multicast.
+* The to-stations fork of `cyclonedds-rust` (`https://github.com/a101010/cyclonedds-rust`, branch `multifile`, rev `acef684`), consumed as a pinned git dependency (`planning/cyclonedds-build-plan.md`).
 
 Third-party libraries are built/installed to an external prefix (for example `C:\Libraries`), never committed. Each install story records its component in `docs/versions.md`.
 
@@ -74,11 +75,11 @@ Build and install the C++ binding against the `cyclonedds-core` install.
 - **Records:** cyclonedds-cxx in `docs/versions.md`.
 
 ### rust-dds-binding
-Add the `cyclonedds` Rust crate (3.0.1) with `cyclonedds-build` (3.0.1) for IDL codegen, generating Rust types into `build/gen/rust`. The crate's copy of CycloneDDS C is built from the external prefix (`CYCLONEDDS_SRC`, `CYCLONEDDS_BUILD`) and linked statically so no runtime DLL is needed.
+Add the `cyclonedds` Rust crate and `cyclonedds-build` from the to-stations fork of `cyclonedds-rust` (branch `multifile`, rev `acef684`) as git dependencies pinned to that rev. The fork's copy of CycloneDDS C is built from the external prefix (`CYCLONEDDS_SRC`, `CYCLONEDDS_BUILD`) and linked statically so no runtime DLL is needed. IDL codegen is deferred to `idl-codegen`; this story uses a hand-written `#[derive(DdsType)]` type.
 - **Depends on:** none.
 - **Minimal test:** a Rust publisher and subscriber exchange one sample of an IDL-defined type.
-- **Status:** done.
-- **Records:** the `cyclonedds` crate in `docs/versions.md`.
+- **Status:** in progress.
+- **Records:** the `cyclonedds`/`cyclonedds-build` fork in `docs/versions.md`.
 
 ### dds-config
 Author `DDS/cyclonedds-config.xml` (IPv6 multicast on `StationsDDS`) and `scripts/verify-loopback.ps1` to verify the loopback adapter and its IPv6 prerequisites. Creating the adapter requires administrator rights and is a documented manual step; document it in `docs/`.
@@ -106,19 +107,19 @@ Add the earth cube-map faces and a font under `assets/`.
 - **Status:** done.
 
 ### hello-world-topic
-Author the hello_world topic types in `DDS/hello_world.idl` (`Quaternion`, `HelloWorldModel`).
+Author the hello_world topic types in `DDS/hello_world.idl` as nested modules matching the fork's input shape: `module dds { module hello_world { struct Quaternion { … }; struct HelloWorldModel { … }; }; };`. Shared fields may be split into an included `.idl` to exercise `#include`.
 - **Depends on:** none.
-- **Minimal test:** code generation succeeds.
+- **Minimal test:** code generation succeeds and the generated `DdsType::type_name()` is `dds::hello_world::HelloWorldModel`.
 - **Status:** todo.
 
 ### idl-codegen
-Wire Cyclone DDS IDL code generation into the Cargo build so generated sources land in `build/gen/rust` and compile into the `stations-dds` library. Generated files are never committed.
+Wire `cyclonedds-build`'s `compile_idl_with_options` into the Cargo build so generated sources land in `build/gen/rust` and compile into the `stations-dds` library. Set `include_dirs = ["DDS"]` and `emit_dds_typename = true`. Generated files are never committed.
 - **Depends on:** hello-world-topic.
 - **Minimal test:** a clean build produces the generated sources and compiles them.
 - **Status:** todo.
 
 ### topic-contracts
-Author `contracts/topics.toml` and `contracts/services/<app>.toml` for the MVP services (`stations/hello_world/model`, `stations/hello_world/view`).
+Author `contracts/topics.toml` and `contracts/services/<app>.toml` for the MVP services (`stations/hello_world/model`, `stations/hello_world/view`). Topic types use their scoped DDS names (for example `dds::hello_world::HelloWorldModel`), matching the generated `DdsType::type_name()`.
 - **Depends on:** none.
 - **Minimal test:** the files parse and validate against the registry.
 - **Status:** todo.
