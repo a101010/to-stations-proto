@@ -101,7 +101,7 @@ pub struct CompileOptions {
 ## Consumption in to-stations
 
 - Chosen mechanism: a git dependency on the fork workspace pinned to `rev = acef68438ef3c8eae56c45afbecdbb89f3d3e115`, added in `rust/Cargo.toml` `[workspace.dependencies]`. Cargo resolves `cyclonedds`, `cyclonedds-derive`, `cyclonedds-rust-sys`, and `cyclonedds-src` from that same rev.
-- The `rust-dds-binding` story wires the `cyclonedds` crate into `stations-dds` and proves a hand-written `DdsType` round-trip; the `idl-codegen` story wires `cyclonedds-build`'s `compile_idl_with_options` (`include_dirs = ["DDS"]`, `emit_dds_typename = true`, `output_dir = build/gen/rust`) into the `stations-dds` build. The `hello-world-topic` story and later IDL stories author `module dds { module <format> { ... } }`.
+- The `rust-dds-binding` story wires the `cyclonedds` crate into `stations-dds` and proves a hand-written `DdsType` round-trip; the `hello-world-idl` story wires `cyclonedds-build`'s `compile_idl_with_options` (`include_dirs = ["DDS"]`, `emit_dds_typename = true`, `output_dir = build/gen/rust`) into the `stations-dds` build. IDL uses top-level modules (no vendor root), one scope per file, and a single root compiled with `#include`s inlined.
 - The pinned rev and its base (`main` @ `feb7e7d`) are recorded in `docs/versions.md`.
 
 ## Milestones

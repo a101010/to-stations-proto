@@ -64,12 +64,19 @@ The format manager is **per display** (not per station) and is itself a model-vi
 ## Topic contracts
 Every service declares the topics it publishes and subscribes to so that the contract of a service is easy to read:
 
-* `contracts/topics.toml` - the topic registry: topic name, IDL type, QoS, and key fields.
+* `contracts/topics.toml` - the topic registry: topic name, IDL type, QoS, and key fields. A topic's registry name and IDL type are the same scoped DDS name (for example `HelloWorldTopic`), per the naming conventions.
 * `contracts/services/<app>.toml` - for each service, the topics it publishes and the topics it subscribes to.
 
 Contracts are validated when a service starts, each service can print its own contract with `--topics`, and `scripts/build.ps1` regenerates a readable summary into `build/topics.md`.
 
 There is deliberately no scope field in a contract: wiring is expressed by the IDL type's fields and by command-line arguments, and decided by each format's implementation.
+
+## Naming conventions
+* **Topics.** A topic's DDS type name and its wire topic name are identical and end in `Topic`: the format's model payload is `<Format>Topic` (for example `HelloWorldTopic`), the view payload `<Format>ViewTopic`, and the control payload `<Format>CtlTopic`.
+* **Value types.** Embedded structs that are not topics are bare nouns (for example `Quaternion`).
+* **Services.** Service executables (and their crate names) end in `Service`: `<Format>Service`, `<Format>ViewService`, `<Format>CtlService`; generic control services (for example the joystick controller service) follow the same rule.
+* **`Model` is not a name.** `Model` is never used as a type, service, or code name; `Model`, `View`, and `Controller` appear only as role descriptions (see "Formats and the distributed MVC constellation").
+* **IDL modules are namespaces.** An IDL `module` maps to a Rust `pub mod`; the DDS type name is the fully-qualified IDL scope. Modules are top-level; there is no vendor root namespace.
 
 ## Files and folders
 * **Authored files** (written by people or agents) live in `planning/`, `docs/`, `DDS/`, `contracts/`, `scripts/`, `assets/`, `rust/`, and `cpp/`.
@@ -81,13 +88,19 @@ There is deliberately no scope field in a contract: wiring is expressed by the I
   * `build/topics.md` - the generated contract summary.
 * `DDS/` holds the IDL types and the Cyclone DDS configuration shared by all applications; it is authored, not generated.
 
+## IDL organization
+* `DDS/` holds authored IDL as module-sized files, one top-level IDL `module` per file (`math.idl` holds `module math`; `hello_world.idl` holds `module hello_world`).
+* A single root IDL is compiled per build and its `#include`s are inlined into one generated Rust file (the `cyclonedds-build` model, matching HDDS and `dust_dds_gen`). Each file is included exactly once - no diamond includes - because the generator neither merges reopened modules nor deduplicates includes.
+* Generated code is written to `build/gen/rust` (never committed) and pulled into `stations-dds` with `include!`.
+
 ## Folder structure
 ```
 to-stations-proto/
   planning/            authored: architecture.md, backlog.md, current_story.md
   docs/                authored: reference documentation
-  DDS/                 authored: hello_world.idl, mvc.idl, controller.idl,
-                       cyclonedds-config.xml
+  DDS/                 authored: math.idl, hello_world.idl,
+                       hello_world_view.idl, input.idl, control.idl,
+                       format_manager.idl, cyclonedds-config.xml
   contracts/           authored: topics.toml, services/<app>.toml
   scripts/             authored: build.ps1, verify-loopback.ps1, cleanup.ps1,
                        launch-rust.ps1, launch-cpp.ps1, launch-hybrid.ps1,
@@ -95,7 +108,7 @@ to-stations-proto/
   assets/              authored: earth cube faces, fonts
   rust/                authored: Cargo workspace
     ui/                big-d, lil-d, tentacles, paws
-    service/           hello-service, hello-view, hello-control
+    service/           hello-service, hello-view-service, hello-ctl-service
     lib/               stations-dds, display-lib, and other shared libraries
     tool/              dds-echo, dds-contracts, equirect-to-cubemap
     test/              (deferred)
@@ -104,7 +117,7 @@ to-stations-proto/
     tools/             dds-echo, dds-contracts
     apps/displays/     small-display, large-display, launcher
     apps/controls/     joystick-control-service, controller-window
-    apps/formats/      hello-world/{model-service, view-service, controller-service}
+    apps/formats/      hello-world/{hello-service, hello-view-service, hello-ctl-service}
     apps/format-manager/
   build/               gitignored: temporary artifacts plus one durable output
     deploy/            bin/, lib/, assets/, config/
@@ -117,7 +130,7 @@ to-stations-proto/
 ### Rust crates
 * A crate defines a single main library and/or executable; any additional executables are tests.
 * `ui/` holds GUI applications, `service/` holds headless services, `lib/` holds shared libraries, `tool/` holds developer tools; `test/` is deferred.
-* A `-service` crate is a model: non-display business logic. `-view` and `-control` crates are services tied to the display library.
+* A `-service` crate holds a format's model (non-display business logic); `-view-service` and `-ctl-service` crates are services tied to the display library.
 * Common DDS support lives in `stations-dds`; other common support lives in one or more `lib/` crates.
 * Rust programs use `clap` for command-line parsing.
 * The crate currently lives at `rust/crates/stations-dds`; it moves to `rust/lib/stations-dds` in the `stations-dds` story.
@@ -127,7 +140,7 @@ to-stations-proto/
 
 It locates the externally installed Cyclone DDS and SDL3 prefixes (hardcoded under a short path such as `C:\Libraries`) and provisions the runtime without changing the user `PATH`: a process-scoped `PATH` during build and test, with runtime DLLs copied into `build/deploy/bin`. The repository must be placed at a short path on Windows; see "Path length" below.
 
-DDS Rust types are generated from `DDS/` by the to-stations fork of `cyclonedds-rust`'s `cyclonedds-build`, consumed as a pinned git dependency. The fork adds nested modules, `#include`/`import`, scoped type references, and `#[dds_typename]` so Rust `DdsType::type_name()` matches the C `idlc`/C++ name. The fork spec is `planning/cyclonedds-build-plan.md`; the pinned rev is recorded in `docs/versions.md`.
+DDS Rust types are generated from `DDS/` by the to-stations fork of `cyclonedds-rust`'s `cyclonedds-build`, consumed as a pinned git dependency. The fork adds nested modules, `#include`/`import`, scoped type references, and `#[dds_typename]` so Rust `DdsType::type_name()` matches the C `idlc`/C++ name. IDL uses top-level modules and a single compiled root; see "IDL organization". The fork spec is `planning/cyclonedds-build-plan.md`; the pinned rev is recorded in `docs/versions.md`.
 
 ### Path length
 Windows limits file paths to 260 characters unless long-path support is enabled. The `cyclonedds` Rust crate is not only a binding: `cyclonedds-rust-sys` compiles a copy of CycloneDDS with CMake as part of `cargo build`, by default under the Cargo target directory (`$OUT_DIR/cyclonedds-build/<source>/...`), and it also CMake-builds a small ABI probe under `$OUT_DIR`. Those nested paths exceed 260 characters unless the repository itself sits at a short path; when they do, MSBuild's `GetOutOfDateItems` task fails the build.

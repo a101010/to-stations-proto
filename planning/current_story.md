@@ -1,62 +1,120 @@
-# Current story: rust-dds-binding
+# Current story: hello-world-idl
 
 This file is the detailed, living plan for the one active story. It is rewritten for each story. The backlog in `backlog.md` holds all work and the per-story status.
 
 ## Story
 
-Bind the `stations-dds` library to the `cyclonedds` Rust crate and `cyclonedds-build` built from the to-stations fork of `cyclonedds-rust`, pinned to the fork's `multifile` rev, and prove a typed publish/subscribe round-trip on this machine.
+Author the hello_world IDL as nested IDL modules and wire `cyclonedds-build` IDL code generation permanently into the `stations-dds` Cargo build, so the generated Rust types are part of the library. (This merges the former `hello-world-topic` and `idl-codegen` stories.)
 
-- **Depends on:** none.
-- **Minimal test:** a Rust publisher and subscriber exchange one sample of an IDL-defined type over the `StationsDDS` loopback configuration.
+- **Depends on:** none (uses the fork rev pinned in `rust-dds-binding`).
+- **Minimal test:** a clean `cargo build` generates `build/gen/rust/hello_world.rs` and compiles it into `stations-dds`; `hello_world::HelloWorldTopic::type_name() == "hello_world::HelloWorldTopic"` and `math::Quaternion::type_name() == "math::Quaternion"`.
 
 ## Context
 
-The stock crates.io `cyclonedds`/`cyclonedds-build` cannot parse the shared IDL this project needs (nested `dds::` modules, `#include`, scoped type references, `@optional`) and does not emit `#[dds_typename]` for C++/IDL parity. The to-stations fork of `mzet97/cyclonedds-rust` extends `cyclonedds-build` (and fixes `cyclonedds-derive` for `Option<String>`); its Increment 1 is complete. The fork spec is `planning/cyclonedds-build-plan.md`.
+`DDS/` currently holds only `cyclonedds-config.xml`. The fork pinned in `rust-dds-binding` provides IDL-to-Rust code generation (`cyclonedds-build::compile_idl_with_options`) with nested-module support, `#include`/`import`, scoped type references, and `#[dds_typename]`. This story authors the first IDL and wires code generation into the build for real (no throwaway smoke crate).
 
-Fork location and pin: `https://github.com/a101010/cyclonedds-rust`, branch `multifile`, rev `acef68438ef3c8eae56c45afbecdbb89f3d3e115`. The fork is identified by this rev, not by a semver: it tracks upstream `mzet97/cyclonedds-rust` `main` @ `feb7e7d`, whose manifest version and upstream's release numbering do not describe this tree.
+The approach follows the wider Rust DDS ecosystem (HDDS `hddsgen`, `dust_dds_gen`): an IDL `module` is a namespace that maps to a Rust `pub mod`; the DDS type name is the fully-qualified IDL scope; and a **single root IDL file** is compiled with its `#include`s inlined into one generated Rust file, pulled into the crate with `include!`. Nothing about that requires a fork change.
 
 ## Decisions
 
-* **Consumption:** a git dependency on the fork workspace pinned to `rev = acef684…`; Cargo resolves `cyclonedds`, `cyclonedds-derive`, `cyclonedds-rust-sys`, and `cyclonedds-src` by name from the same rev. No `version` is stated; the rev is the pin.
-* **Feature set:** `cyclonedds = { workspace = true, default-features = false, features = ["native"] }` - the native sync API is enough for the services and avoids pulling the async (`tokio`) surface now. `security` stays off.
-* **Static link unchanged:** `CYCLONEDDS_SRC=C:\Libraries\src\cyclonedds` and `CYCLONEDDS_BUILD=C:\Libraries\cyclonedds-rust` still point the fork's `cyclonedds-rust-sys` at the externally built static CycloneDDS, so no runtime DLL and no `PATH` change. The short-path requirement (`architecture.md`, "Path length") still applies to the fork's `$OUT_DIR` CMake probe.
-* **No codegen in this story:** the round-trip uses a small hand-written `#[derive(DdsType)]` struct so the story proves linking and runtime only. IDL code generation is the separate `idl-codegen` story.
-* **Smoke test is temporary:** a standalone crate under `build/dds-smoke/` (gitignored), following the `assets` precedent; nothing is committed except the Cargo manifest changes and the docs.
+* **Nested IDL `module` -> nested Rust `pub mod`**; the DDS type name is the fully-qualified IDL scope, emitted via `#[dds_typename]` (fork behavior).
+* **No vendor root namespace.** Modules are top-level (`math`, `hello_world`); the DDS names are `math::Quaternion` and `hello_world::HelloWorldTopic`.
+* **Module-sized files, one scope per file.** Small files are preferred, but each file holds one IDL `module`; a file is not split per struct (the fork, like HDDS/dust_dds, does not merge reopened modules).
+* **Single compile unit.** `compile_idl_with_options` compiles one root IDL (`DDS/hello_world.idl`); its `#include "math.idl"` is inlined. Distinct top-level modules mean no reopened-module problem; no umbrella, no fragments, no fork change.
+* **Shared value type up front.** `Quaternion` lives in a top-level `module math` now so the view can reuse it later (IDL inheritance is out of scope, so reuse is by embedding).
+* **Naming.** No "Model" in type, service, or code names. A topic's type name and topic name are identical and end in `Topic`: `HelloWorldTopic` (model role), `HelloWorldViewTopic`, `HelloWorldCtlTopic`. Embedded value structs are bare (`Quaternion`). Service executables end in `Service`.
+* **Parser.** `try_idlc = false` (built-in parser); `idlc`/C++ type-name parity is the fork's own test concern.
+* **Generated files live in `build/gen/rust` and are never committed.**
 
 ## Deliverables
 
-1. `rust/Cargo.toml` - add `cyclonedds` and `cyclonedds-build` git dependencies pinned to the fork rev in `[workspace.dependencies]`.
-2. `rust/crates/stations-dds/Cargo.toml` - depend on `cyclonedds`; the `cyclonedds-build` build-dependency is deferred to `idl-codegen`.
-3. `build/dds-smoke/` - temporary publisher/subscriber round-trip using a hand-written `DdsType`.
-4. `docs/versions.md` and `README.md` - record the fork repo, branch, and rev (no semver).
-5. Planning: this file, `planning/backlog.md`, `planning/cyclonedds-build-plan.md`.
+1. `DDS/math.idl` - `module math { struct Quaternion { double x; double y; double z; double w; }; };`
+2. `DDS/hello_world.idl` - `#include "math.idl"` then `module hello_world { struct HelloWorldTopic { string greeting; math::Quaternion attitude; }; };`
+3. `rust/crates/stations-dds/Cargo.toml` - add `[build-dependencies] cyclonedds-build = { workspace = true }` (keep the `cyclonedds` dependency).
+4. `rust/crates/stations-dds/build.rs` - call `compile_idl_with_options`.
+5. `rust/crates/stations-dds/src/lib.rs` - `include!` the generated file and add the `#[test]` assertions.
+6. Planning: this file, `planning/backlog.md`.
+
+## IDL
+
+`DDS/math.idl`:
+```
+module math {
+  struct Quaternion {
+    double x;
+    double y;
+    double z;
+    double w;
+  };
+};
+```
+
+`DDS/hello_world.idl` (the compiled root):
+```
+#include "math.idl"
+
+module hello_world {
+  struct HelloWorldTopic {
+    string greeting;
+    math::Quaternion attitude;
+  };
+};
+```
+
+The generated `build/gen/rust/hello_world.rs` contains `pub mod math { ... }` and
+`pub mod hello_world { ... }`, with `HelloWorldTopic.attitude` typed as
+`super::math::Quaternion` and `#[dds_typename("hello_world::HelloWorldTopic")]` on the topic.
+
+## Build wiring
+
+`rust/crates/stations-dds/build.rs`:
+- Resolve the repository root from `CARGO_MANIFEST_DIR` (`rust/crates/stations-dds` -> `../../..`; `rust/lib/stations-dds` is the same depth, so the path survives the later move).
+- `std::fs::create_dir_all(<repo>/build/gen/rust)`.
+- `compile_idl_with_options(<repo>/DDS/hello_world.idl, CompileOptions { output_dir: Some(<repo>/build/gen/rust), include_dirs: vec![<repo>/DDS], emit_dds_typename: true, try_idlc: false, ..Default::default() })`.
+- `println!("cargo:rerun-if-changed={}", <repo>/DDS)`.
+
+`rust/crates/stations-dds/src/lib.rs` appends:
+
+```
+include!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../build/gen/rust/hello_world.rs"));
+```
+
+so `stations_dds::math::Quaternion` and `stations_dds::hello_world::HelloWorldTopic` exist at the crate root.
+
+## Tests
+
+A `#[cfg(test)]` module in `rust/crates/stations-dds/src/lib.rs`:
+
+```
+use ::cyclonedds::DdsType;
+
+assert_eq!(<math::Quaternion as DdsType>::type_name(), "math::Quaternion");
+assert_eq!(<hello_world::HelloWorldTopic as DdsType>::type_name(), "hello_world::HelloWorldTopic");
+```
+
+`type_name()` reads the `#[dds_typename]` value and needs no DDS participant.
 
 ## Minimal test
 
-`build/dds-smoke/` (temporary, standalone, gitignored): a crate with its own `Cargo.toml` (path dependency on `rust/crates/stations-dds` and `rust/crates`'s workspace git deps) that
+```
+CARGO_TARGET_DIR=T:/build/rust \
+CYCLONEDDS_SRC=C:/Libraries/src/cyclonedds \
+CYCLONEDDS_BUILD=C:/Libraries/cyclonedds-rust \
+cargo test --manifest-path rust/Cargo.toml -p stations-dds
+```
 
-* derives `DdsType` on a small struct,
-* creates a `Participant` and `Topic` bound through `CYCLONEDDS_URI=file://T:/DDS/cyclonedds-config.xml`,
-* writes one sample from a `DataWriter` and reads it back with a `DataReader`,
-* asserts the value, prints `OK`, and exits 0.
-
-If the `StationsDDS` adapter is not present, run the smoke test with `CYCLONEDDS_URI` unset (default transport) to isolate the binding from the loopback wiring; the loopback itself is owned by the `dds-config` story and `scripts/verify-loopback.ps1`.
+A clean run generates `build/gen/rust/hello_world.rs`, compiles it, and the two
+assertions pass.
 
 ## Risks and follow-ups
 
-* The repo must be at a short path (`T:`) or the fork's `cyclonedds-rust-sys` CMake probe under `$OUT_DIR` can exceed the Windows 260-character limit (`README.md`, `planning/architecture.md` "Path length").
-* If the fork is advanced, re-pin the rev and update `docs/versions.md`.
-
-## Result
-
-Done and verified. `rust/Cargo.toml` pins `cyclonedds` (`default-features = false, features = ["native"]`) and `cyclonedds-build` as git dependencies on the fork at rev `acef684…`; `stations-dds` depends on `cyclonedds` and re-exports it (`pub use cyclonedds;`) plus `type_name::<T>()`. Cargo resolved all four fork packages from that rev (their self-declared versions are carried in `Cargo.lock`) and linked the prebuilt static `ddsc.lib` from `C:\Libraries\cyclonedds-rust` (no DLL, no `PATH` change).
-
-`build/dds-smoke/` (temporary) derives `DdsType` on a keyed `Smoke { id: i32, message: String }`, writes one sample and reads it back: `OK: round-tripped id=42 message="hello from the fork" type_name=Smoke`. It passes both over the default transport and with `CYCLONEDDS_URI=file://T:/DDS/cyclonedds-config.xml` (the `StationsDDS` adapter is present and up). `cargo build` and `cargo fmt --all -- --check` are clean for the workspace.
-
-`docs/versions.md` and `README.md` record the fork repo, branch, and rev. `rust/Cargo.lock` records the resolved fork packages.
+* **Multiple formats later.** When a second format file appears, compiling several roots separately would duplicate shared modules (e.g. `math`) across generated files if both are `include!`d. The fix is to keep one root that includes every format file (files then must not cross-`#include` each other, since the fork has no include-once) or to add include-once / reopened-module merge to the fork. Deferred until the view story; noted so it is not forgotten.
+* `include!` depends on the crate's location; the `stations-dds` story's `crates/` -> `lib/` move keeps the same depth (`../../..`), so the path is stable, but re-verify there.
+* The short-path requirement (`README.md`, `architecture.md` "Path length") still applies to the fork's `cyclonedds-rust-sys` `$OUT_DIR` CMake probe.
+* Names introduced here (`math`, `hello_world`, `HelloWorldTopic`) update the older `dds::hello_world::HelloWorldModel` wording in `backlog.md` and, later, `architecture.md`.
 
 ## Files
 
-* Authored/changed: `rust/Cargo.toml`, `rust/Cargo.lock`, `rust/crates/stations-dds/Cargo.toml`, `rust/crates/stations-dds/src/lib.rs`, `docs/versions.md`, `README.md`.
-* Temporary, gitignored: `build/dds-smoke/`, `build/rust/`, `build/dds-smoke-target/`.
-* Planning: `planning/current_story.md`, `planning/backlog.md`, `planning/cyclonedds-build-plan.md`.
+* Authored/changed: `DDS/math.idl`, `DDS/hello_world.idl`, `rust/crates/stations-dds/Cargo.toml`, `rust/crates/stations-dds/build.rs`, `rust/crates/stations-dds/src/lib.rs`.
+* Generated, gitignored: `build/gen/rust/hello_world.rs`.
+* Planning: `planning/current_story.md`, `planning/backlog.md`.

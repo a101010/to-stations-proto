@@ -75,7 +75,7 @@ Build and install the C++ binding against the `cyclonedds-core` install.
 - **Records:** cyclonedds-cxx in `docs/versions.md`.
 
 ### rust-dds-binding
-Add the `cyclonedds` Rust crate and `cyclonedds-build` from the to-stations fork of `cyclonedds-rust` (branch `multifile`, rev `acef684`) as git dependencies pinned to that rev. The fork's copy of CycloneDDS C is built from the external prefix (`CYCLONEDDS_SRC`, `CYCLONEDDS_BUILD`) and linked statically so no runtime DLL is needed. IDL codegen is deferred to `idl-codegen`; this story uses a hand-written `#[derive(DdsType)]` type.
+Add the `cyclonedds` Rust crate and `cyclonedds-build` from the to-stations fork of `cyclonedds-rust` (branch `multifile`, rev `acef684`) as git dependencies pinned to that rev. The fork's copy of CycloneDDS C is built from the external prefix (`CYCLONEDDS_SRC`, `CYCLONEDDS_BUILD`) and linked statically so no runtime DLL is needed. IDL codegen is deferred to `hello-world-idl`; this story uses a hand-written `#[derive(DdsType)]` type.
 - **Depends on:** none.
 - **Minimal test:** a Rust publisher and subscriber exchange one sample of an IDL-defined type.
 - **Status:** done.
@@ -106,27 +106,33 @@ Add the earth cube-map faces and a font under `assets/`.
 - **Minimal test:** both load and render/validate.
 - **Status:** done.
 
-### hello-world-topic
-Author the hello_world topic types in `DDS/hello_world.idl` as nested modules matching the fork's input shape: `module dds { module hello_world { struct Quaternion { … }; struct HelloWorldModel { … }; }; };`. Shared fields may be split into an included `.idl` to exercise `#include`.
-- **Depends on:** none.
-- **Minimal test:** code generation succeeds and the generated `DdsType::type_name()` is `dds::hello_world::HelloWorldModel`.
+### hello-world-idl
+Author the hello_world IDL as nested IDL modules and wire `cyclonedds-build`'s `compile_idl_with_options` permanently into the `stations-dds` build. `DDS/math.idl` holds `module math { struct Quaternion { double x; double y; double z; double w; }; };`; `DDS/hello_world.idl` (the compiled root) is `#include "math.idl"` then `module hello_world { struct HelloWorldTopic { string greeting; math::Quaternion attitude; }; };`. One scope per file; nested IDL `module` maps to a Rust `pub mod`; the DDS type name is the fully-qualified IDL scope (`#[dds_typename]`). The build calls `compile_idl_with_options` with `include_dirs = ["DDS"]`, `emit_dds_typename = true`, `output_dir = build/gen/rust`, and `include!`s the result. Generated files are never committed.
+- **Depends on:** none (uses the fork rev pinned in `rust-dds-binding`).
+- **Minimal test:** a clean `cargo build` produces `build/gen/rust/hello_world.rs` and compiles it; `hello_world::HelloWorldTopic::type_name() == "hello_world::HelloWorldTopic"` and `math::Quaternion::type_name() == "math::Quaternion"`.
+- **Status:** in progress.
+
+### hello-view-topic
+Author the hello_world view payload in `DDS/hello_world_view.idl` as `module hello_world { struct HelloWorldViewTopic { … }; };`, reusing `math::Quaternion` by embedding it (IDL inheritance is out of scope). The type and DDS topic name are both `HelloWorldViewTopic`.
+- **Depends on:** hello-world-idl.
+- **Minimal test:** code generation succeeds; `hello_world::HelloWorldViewTopic::type_name()` matches.
 - **Status:** todo.
 
-### idl-codegen
-Wire `cyclonedds-build`'s `compile_idl_with_options` into the Cargo build so generated sources land in `build/gen/rust` and compile into the `stations-dds` library. Set `include_dirs = ["DDS"]` and `emit_dds_typename = true`. Generated files are never committed.
-- **Depends on:** hello-world-topic.
-- **Minimal test:** a clean build produces the generated sources and compiles them.
+### input-topic
+Author the generic input event type in `DDS/input.idl` (top-level module), with the topic type named per the `…Topic` convention.
+- **Depends on:** hello-world-idl.
+- **Minimal test:** code generation succeeds; the input topic type's `type_name()` matches.
 - **Status:** todo.
 
 ### topic-contracts
-Author `contracts/topics.toml` and `contracts/services/<app>.toml` for the MVP services (`stations/hello_world/model`, `stations/hello_world/view`). Topic types use their scoped DDS names (for example `dds::hello_world::HelloWorldModel`), matching the generated `DdsType::type_name()`.
+Author `contracts/topics.toml` and `contracts/services/<app>.toml` for the MVP services (`hello_world/service`, `hello_world/view`). Topic types are their scoped DDS names (for example `hello_world::HelloWorldTopic`), matching the generated `DdsType::type_name()`.
 - **Depends on:** none.
 - **Minimal test:** the files parse and validate against the registry.
 - **Status:** todo.
 
 ### stations-dds
 Implement participant creation from `DDS/cyclonedds-config.xml`, typed readers and writers, validation of each application's contract at startup, and a `--topics` flag. Also move the crate to `rust/lib/stations-dds` and set the workspace members globs.
-- **Depends on:** idl-codegen, topic-contracts.
+- **Depends on:** hello-world-idl, topic-contracts.
 - **Minimal test:** typed publish/subscribe round-trip plus `--topics` output.
 - **Status:** todo.
 
@@ -144,12 +150,12 @@ Read `contracts/` and write a readable summary to `build/topics.md`.
 
 ### build-orchestrator
 Write `scripts/build.ps1` (PowerShell 5.1 compatible) that resolves the repository root from its own location and uses repository-relative paths: IDL codegen into `build/gen/rust`, the Rust build with `CARGO_TARGET_DIR=build/rust`, assembly of `build/deploy`, and regeneration of `build/topics.md`. It hardcodes no drive letter; the repository must be placed at a short path because the `cyclonedds` Rust crate's CycloneDDS CMake build can exceed the Windows 260-character path limit (see `architecture.md`). It locates the externally installed Cyclone DDS prefix (hardcoded, for example `C:\Libraries\cyclonedds`) and provisions the runtime without changing the user PATH: a process-scoped `$env:PATH` during build/test. It supports a dry-run mode. The CMake/SDL3 halves are added when the C++ increment is scheduled.
-- **Depends on:** idl-codegen, dds-echo, dds-contracts.
+- **Depends on:** hello-world-idl, dds-echo, dds-contracts.
 - **Minimal test:** `scripts/build.ps1 -DryRun` prints the ordered steps, and a full run succeeds once the workspace and tools exist.
 - **Status:** todo.
 
 ### display-lib
-Create the window and OpenGL context, run the render loop, render the console (egui), render the `ViewData` it receives in a format window, and publish `InputEvent` for mouse, touchscreen, and key input.
+Create the window and OpenGL context, run the render loop, render the console (egui), render the `HelloWorldViewTopic` it receives in a format window, and publish `InputEvent` for mouse, touchscreen, and key input.
 - **Depends on:** assets, stations-dds.
 - **Minimal test:** a window showing text that publishes an input event.
 - **Status:** todo.
@@ -160,16 +166,16 @@ Host the display library: one square format window plus a console area with a si
 - **Minimal test:** the power button toggles the format window.
 - **Status:** todo.
 
-### model-service
-Publish `HelloWorldModel` (greeting text and quaternion attitude) at a fixed rate: a 23.5 degree tilt with one revolution every twelve minutes.
-- **Depends on:** idl-codegen, stations-dds.
-- **Minimal test:** `dds-echo` shows `HelloWorldModel` samples.
+### hello-service
+Publish `HelloWorldTopic` (greeting text and quaternion attitude) at a fixed rate: a 23.5 degree tilt with one revolution every twelve minutes.
+- **Depends on:** hello-world-idl, stations-dds.
+- **Minimal test:** `dds-echo` shows `HelloWorldTopic` samples.
 - **Status:** todo.
 
-### view-service
-Subscribe to `HelloWorldModel` and publish `ViewData`: the earth cube map and sphere parameters, the model quaternion, the upper-right light direction, and the greeting text with its font.
-- **Depends on:** idl-codegen, topic-contracts, stations-dds.
-- **Minimal test:** `dds-echo` shows `ViewData` samples.
+### hello-view-service
+Subscribe to `HelloWorldTopic` and publish `HelloWorldViewTopic`: the earth cube map and sphere parameters, the model quaternion, the upper-right light direction, and the greeting text with its font.
+- **Depends on:** hello-world-idl, topic-contracts, stations-dds.
+- **Minimal test:** `dds-echo` shows `HelloWorldViewTopic` samples.
 - **Status:** todo.
 
 ### font-handling
@@ -179,14 +185,14 @@ Load a font from `assets/fonts` and render text (the hello_world greeting) insid
 - **Status:** todo.
 
 ### earth-rendering
-Render the cube map on a sphere in the display library, orient it with the attitude quaternion from the `ViewData`, and light it from the upper right.
-- **Depends on:** assets, display-lib, view-service.
+Render the cube map on a sphere in the display library, orient it with the attitude quaternion from the `HelloWorldViewTopic`, and light it from the upper right.
+- **Depends on:** assets, display-lib, hello-view-service.
 - **Minimal test:** the tilted, rotating, lit earth is visible on the small display.
 - **Status:** todo.
 
 ### launch-cleanup
 Write `scripts/launch-rust.ps1` to start the MVP constellation from `build/deploy` and `scripts/cleanup.ps1` to stop all processes of all configurations.
-- **Depends on:** build-orchestrator, display-lib, small-display, model-service, view-service, font-handling, earth-rendering.
+- **Depends on:** build-orchestrator, display-lib, small-display, hello-service, hello-view-service, font-handling, earth-rendering.
 - **Minimal test:** `launch-rust.ps1` brings up the constellation and `cleanup.ps1` stops it.
 - **Status:** todo.
 
@@ -208,7 +214,7 @@ Create the `cpp/` CMake project with one compiling target.
 Not yet broken into stories:
 * C++ mirror of the Rust libraries, tools, and apps and the `c++` configuration.
 * Hybrid configuration and `launch-hybrid.ps1`; `launch-cpp.ps1`.
-* Remaining IDL types (`DDS/mvc.idl`, `DDS/controller.idl`) and full topic registry (input, control, joystick, format window/mapping).
+* Remaining top-level module IDL (control, joystick, format-manager, per-station/display) and the full topic registry (input, control, joystick, format window/mapping).
 * Joystick control service and controller window; real game-controller binding.
 * Format manager and per-station views.
 * Large display and launcher window.
