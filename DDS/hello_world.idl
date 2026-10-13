@@ -1,0 +1,8 @@
+#include "math.idl"
+
+module hello_world {
+  struct HelloWorldTopic {
+    string greeting;
+    math::Quaternion attitude;
+  };
+};

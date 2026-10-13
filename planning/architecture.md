@@ -91,7 +91,7 @@ There is deliberately no scope field in a contract: wiring is expressed by the I
 ## IDL organization
 * `DDS/` holds authored IDL as module-sized files, one top-level IDL `module` per file (`math.idl` holds `module math`; `hello_world.idl` holds `module hello_world`). A module is not reopened across files: all of a module's types live in its one file, so a format's model/view/control structs share the format's file.
 * A single root IDL is compiled per build and its `#include`s are inlined into one generated Rust file (the `cyclonedds-build` model, matching HDDS and `dust_dds_gen`). Each file is included exactly once - no diamond includes - because the generator neither merges reopened modules nor deduplicates includes.
-* Generated code is written to `build/gen/rust` (never committed) and pulled into `stations-dds` with `include!`. The generated file is located through the `REPO_ROOT` environment variable (the absolute repository root) rather than a `..`-relative path; `scripts/build.ps1` sets it.
+* Generated code is written to `build/gen/rust` (never committed) and pulled into `stations-dds` with `include!`. The generated file is located through the `REPO_ROOT` environment variable (the absolute repository root) rather than a `..`-relative path; Cargo supplies it from `.cargo/config.toml` (`[env] REPO_ROOT = { value = ".", relative = true }`).
 
 ## Folder structure
 ```
@@ -106,6 +106,7 @@ to-stations-proto/
                        launch-rust.ps1, launch-cpp.ps1, launch-hybrid.ps1,
                        subst-repo.ps1, install-subst-startup.ps1
   assets/              authored: earth cube faces, fonts
+  .cargo/              authored: config.toml (Cargo target dir, REPO_ROOT)
   rust/                authored: Cargo workspace
     ui/                big-d, lil-d, tentacles, paws
     service/           hello-service, hello-view-service, hello-ctl-service
@@ -136,11 +137,21 @@ to-stations-proto/
 * `stations-dds` lives at `rust/lib/stations-dds`.
 
 ## Build and launch
-`scripts/build.ps1` is the single build orchestrator. It is location-agnostic: it resolves the repository root from its own location and uses repository-relative paths. It generates code from `DDS/` into `build/gen/{rust,cpp}`, builds Rust with `CARGO_TARGET_DIR=build/rust`, builds C++ with the CMake binary directory `build/cpp` and install prefix `build/deploy`, assembles `build/deploy`, and regenerates `build/topics.md`. It does not clean the Cargo target directory, so dependencies are rebuilt only when `build/` is removed.
+`scripts/build.ps1` is the single build orchestrator. It is location-agnostic: it resolves the repository root from its own location and uses repository-relative paths. It generates code from `DDS/` into `build/gen/{rust,cpp}`, builds Rust (target directory `build/rust`), builds C++ with the CMake binary directory `build/cpp` and install prefix `build/deploy`, assembles `build/deploy`, and regenerates `build/topics.md`. It does not clean the Cargo target directory, so dependencies are rebuilt only when `build/` is removed. The Rust target directory and `REPO_ROOT` are set in `.cargo/config.toml` at the repository root; running Cargo from the repository root finds it.
 
 It locates the externally installed Cyclone DDS and SDL3 prefixes under the external prefix (`EXT_PATH_PREFIX`, default `C:\Libraries`) and provisions the runtime without changing the user `PATH`: a process-scoped `PATH` during build and test, with runtime DLLs copied into `build/deploy/bin`. The repository must be placed at a short path on Windows; see "Path length" below.
 
 DDS Rust types are generated from `DDS/` by the to-stations fork of `cyclonedds-rust`'s `cyclonedds-idlc` CLI (which wraps `cyclonedds-build`), consumed as a pinned git dependency and built from the pinned rev by `scripts/build.ps1`. The CLI is run with `--no-idlc`; the C `idlc` compiler emits C/C++, not Rust. The fork adds nested modules, `#include`/`import`, scoped type references, and `#[dds_typename]` so Rust `DdsType::type_name()` matches the C `idlc`/C++ name. IDL uses top-level modules and a single compiled root; see "IDL organization". The fork spec is `planning/cyclonedds-build-plan.md`; the pinned rev is recorded in `docs/versions.md`.
+
+### Repository root
+The repository root is the directory containing `.git`. Each build system resolves it once from its own root file, using that system's built-in base, rather than a shared environment variable set by a script:
+
+* Cargo: `.cargo/config.toml` at the repository root (`[env] REPO_ROOT = { value = ".", relative = true }`, resolved against the parent of the `.cargo` directory).
+* MSBuild: `Directory.Build.props` at the repository root (`$(MSBuildThisFileDirectory)`).
+* CMake: the top-level `CMakeLists.txt` (`get_filename_component(REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}" DIRECTORY)`).
+* PowerShell: `$PSScriptRoot`.
+
+Paths never use `..`.
 
 ### Path length
 Windows limits file paths to 260 characters unless long-path support is enabled. The `cyclonedds` Rust crate is not only a binding: `cyclonedds-rust-sys` compiles a copy of CycloneDDS with CMake as part of `cargo build`, by default under the Cargo target directory (`$OUT_DIR/cyclonedds-build/<source>/...`), and it also CMake-builds a small ABI probe under `$OUT_DIR`. Those nested paths exceed 260 characters unless the repository itself sits at a short path; when they do, MSBuild's `GetOutOfDateItems` task fails the build.

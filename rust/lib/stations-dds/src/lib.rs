@@ -12,3 +12,20 @@ pub use cyclonedds;
 pub fn type_name<T: cyclonedds::DdsType>() -> &'static str {
     T::type_name()
 }
+
+include!(concat!(env!("REPO_ROOT"), "/build/gen/rust/hello_world.rs"));
+
+#[cfg(test)]
+mod tests {
+    use super::{hello_world, math};
+    use ::cyclonedds::DdsType;
+
+    #[test]
+    fn type_names_match_scopes() {
+        assert_eq!(<math::Quaternion as DdsType>::type_name(), "math::Quaternion");
+        assert_eq!(
+            <hello_world::HelloWorldTopic as DdsType>::type_name(),
+            "hello_world::HelloWorldTopic"
+        );
+    }
+}

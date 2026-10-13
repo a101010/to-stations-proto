@@ -1,0 +1,11 @@
+[build]
+# Cargo target directory. Never clean it: dependencies (including the pinned
+# fork of cyclonedds-rust) are cached here and are only rebuilt if build/ is
+# removed.
+target-dir = "build/rust"
+
+[env]
+# Absolute repository root, used by stations-dds to locate the generated IDL
+# code without a `..` path. `relative = true` resolves the value against the
+# parent of this .cargo directory, so Cargo computes it; no script sets it.
+REPO_ROOT = { value = ".", relative = true }

@@ -54,13 +54,19 @@ rustup default stable-x86_64-pc-windows-msvc
 
 `rust/rust-toolchain.toml` pins the toolchain for the workspace.
 
-Build the workspace from `rust/`:
+Build from the repository root:
 
 ```
-cargo build
+.\scripts\build.ps1
 ```
 
-The Cargo target directory is `build/rust`, set in `rust/.cargo/config.toml`.
+`build.ps1` runs the fork's `cyclonedds-idlc` to generate `build/gen/rust/hello_world.rs`, then builds the Rust workspace. Pass `-Test` to run the tests:
+
+```
+.\scripts\build.ps1 -Test
+```
+
+Cargo reads `.cargo/config.toml` at the repository root, which sets the target directory `build/rust` and `REPO_ROOT` (the absolute repository root, used by the generated-code `include!`). Because Cargo supplies `REPO_ROOT`, a plain `cargo build`/`cargo test` run from within the repository works too — but the generated file must exist first, so run `build.ps1` once after a clean. Never clean the target directory: dependencies (including the fork) are cached there and should not be rebuilt.
 
 ### Cyclone DDS (C)
 
@@ -75,7 +81,7 @@ cmake --install C:\Libraries\src\cyclonedds\build --config Release
 
 The install contains `bin\ddsc.dll`, `bin\idlc.exe`, `lib\ddsc.lib`, `include\ddsc`, and the CMake package at `lib\cmake\CycloneDDS`.
 
-The install prefix is hardcoded in `scripts/build.ps1`, which supplies the runtime: it uses a process-scoped `PATH` during the build and copies `ddsc.dll` into `build/deploy/bin`. No system or user `PATH` change is required.
+The install prefix (`EXT_PATH_PREFIX`, default `C:\Libraries`) is used by `scripts/build.ps1`, which supplies the runtime: it uses a process-scoped `PATH` during the build and copies `ddsc.dll` into `build/deploy/bin`. No system or user `PATH` change is required.
 
 ### Cyclone DDS (C++)
 
@@ -90,11 +96,13 @@ cmake --install C:\Libraries\src\cyclonedds-cxx\build --config Release
 
 The install contains `bin\ddscxx.dll`, `bin\cycloneddsidlcxx.dll` (the IDL C++ backend), `lib\ddscxx.lib`, `include\ddscxx`, and the CMake package at `lib\cmake\CycloneDDS-CXX`.
 
-Like the C install, the prefix is hardcoded in `scripts/build.ps1`, which supplies the runtime; no system or user `PATH` change is required.
+Like the C install, the prefix (`EXT_PATH_PREFIX`, default `C:\Libraries`) is used by `scripts/build.ps1`, which supplies the runtime; no system or user `PATH` change is required.
 
 ### Rust DDS binding
 
-The Rust DDS binding uses the `cyclonedds` and `cyclonedds-build` crates from the to-stations fork of `cyclonedds-rust` (`https://github.com/a101010/cyclonedds-rust`, branch `multifile`, rev `acef68438ef3c8eae56c45afbecdbb89f3d3e115`), pinned as a git dependency in `rust/Cargo.toml`. The fork adds nested `module` support, `#include`/`import`, scoped type references, `@optional` members, and `#[dds_typename]` for C++/IDL parity; it is used for IDL code generation (`cyclonedds-build`).
+The Rust DDS binding uses the `cyclonedds` crate from the to-stations fork of `cyclonedds-rust` (`https://github.com/a101010/cyclonedds-rust`, branch `multifile`, rev `acef68438ef3c8eae56c45afbecdbb89f3d3e115`), pinned as a git dependency in `rust/Cargo.toml`. The fork adds nested `module` support, `#include`/`import`, scoped type references, `@optional` members, and `#[dds_typename]` for C++/IDL parity.
+
+IDL code generation uses the fork's `cyclonedds-idlc`, a **Rust** CLI that wraps the fork's `cyclonedds-build` library. It is built from the same pinned rev by `scripts/build.ps1` and run with `--no-idlc`. Do not confuse it with the C `idlc.exe` installed with CycloneDDS (see "Cyclone DDS (C)" above): the C tool emits C/C++, not Rust.
 
 - IDL types are generated into `build/gen/rust`.
 - The Cargo target directory is `build/rust`.

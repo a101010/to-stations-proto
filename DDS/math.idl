@@ -1,0 +1,8 @@
+module math {
+  struct Quaternion {
+    double x;
+    double y;
+    double z;
+    double w;
+  };
+};
