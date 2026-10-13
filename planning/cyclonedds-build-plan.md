@@ -101,7 +101,7 @@ pub struct CompileOptions {
 ## Consumption in to-stations
 
 - Chosen mechanism: a git dependency on the fork workspace pinned to `rev = acef68438ef3c8eae56c45afbecdbb89f3d3e115`, added in `rust/Cargo.toml` `[workspace.dependencies]`. Cargo resolves `cyclonedds`, `cyclonedds-derive`, `cyclonedds-rust-sys`, and `cyclonedds-src` from that same rev.
-- The `rust-dds-binding` story wires the `cyclonedds` crate into `stations-dds` and proves a hand-written `DdsType` round-trip; the `hello-world-idl` story wires `cyclonedds-build`'s `compile_idl_with_options` (`include_dirs = ["DDS"]`, `emit_dds_typename = true`, `output_dir = build/gen/rust`) into the `stations-dds` build. IDL uses top-level modules (no vendor root), one scope per file, and a single root compiled with `#include`s inlined.
+- The `rust-dds-binding` story wires the `cyclonedds` crate into `stations-dds` and proves a hand-written `DdsType` round-trip; the `hello-world-idl` story runs the fork's `cyclonedds-idlc` CLI (`--no-idlc`) from `scripts/build.ps1` to generate Rust into `build/gen/rust`, and the crate `include!`s it. IDL uses top-level modules (no vendor root), one top-level module per file (a module is not reopened across files), and a single root compiled with `#include`s inlined.
 - The pinned rev and its base (`main` @ `feb7e7d`) are recorded in `docs/versions.md`.
 
 ## Milestones
@@ -122,5 +122,5 @@ pub struct CompileOptions {
 
 ## Open questions
 
-- ~~Git dependency vs vendoring the fork in-repo vs a private registry.~~ Resolved: pinned git dependency (see "Consumption in to-stations").
+- ~~Git dependency vs copying the fork's source into the repository vs a private registry.~~ Resolved: pinned git dependency (see "Consumption in to-stations").
 - Whether `cyclonedds-derive` also needs the deferred features later (`@id`/member IDs, type-level extensibility, optional keyed fields); the fork already carries the `Option<String>` fix. Next increment to be scoped when a to-stations IDL type needs them.

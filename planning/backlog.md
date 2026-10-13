@@ -107,9 +107,9 @@ Add the earth cube-map faces and a font under `assets/`.
 - **Status:** done.
 
 ### hello-world-idl
-Author the hello_world IDL as nested IDL modules and wire `cyclonedds-build`'s `compile_idl_with_options` permanently into the `stations-dds` build. `DDS/math.idl` holds `module math { struct Quaternion { double x; double y; double z; double w; }; };`; `DDS/hello_world.idl` (the compiled root) is `#include "math.idl"` then `module hello_world { struct HelloWorldTopic { string greeting; math::Quaternion attitude; }; };`. One top-level `module` per file, all of that module's types in that one file (a module is not reopened across files); nested IDL `module` maps to a Rust `pub mod`; the DDS type name is the fully-qualified IDL scope (`#[dds_typename]`). The build calls `compile_idl_with_options` with `include_dirs = ["DDS"]`, `emit_dds_typename = true`, `output_dir = build/gen/rust`, and `include!`s the result. Generated files are never committed.
-- **Depends on:** none (uses the fork rev pinned in `rust-dds-binding`).
-- **Minimal test:** a clean `cargo build` produces `build/gen/rust/hello_world.rs` and compiles it; `hello_world::HelloWorldTopic::type_name() == "hello_world::HelloWorldTopic"` and `math::Quaternion::type_name() == "math::Quaternion"`.
+Author the hello_world IDL as nested IDL modules and generate Rust into `build/gen/rust` with `scripts/build.ps1`, which runs the fork's `cyclonedds-idlc` Rust codegen (`--no-idlc`). `DDS/math.idl` holds `module math { struct Quaternion { double x; double y; double z; double w; }; };`; `DDS/hello_world.idl` (the compiled root) is `#include "math.idl"` then `module hello_world { struct HelloWorldTopic { string greeting; math::Quaternion attitude; }; };`. One top-level `module` per file, all of that module's types in that one file (a module is not reopened across files); nested IDL `module` maps to a Rust `pub mod`; the DDS type name is the fully-qualified IDL scope (`#[dds_typename]`). The crate has no `build.rs`; it `include!`s the generated file, located via the `REPO_ROOT` environment variable (no `..` paths). The crate moves to `rust/lib/stations-dds`. Generated files are never committed.
+- **Depends on:** none.
+- **Minimal test:** `scripts/build.ps1` generates `build/gen/rust/hello_world.rs`; `cargo test -p stations-dds` passes with `hello_world::HelloWorldTopic::type_name() == "hello_world::HelloWorldTopic"` and `math::Quaternion::type_name() == "math::Quaternion"`.
 - **Status:** in progress.
 
 ### hello-view-topic
@@ -131,7 +131,7 @@ Author `contracts/topics.toml` and `contracts/services/<app>.toml` for the MVP s
 - **Status:** todo.
 
 ### stations-dds
-Implement participant creation from `DDS/cyclonedds-config.xml`, typed readers and writers, validation of each application's contract at startup, and a `--topics` flag. Also move the crate to `rust/lib/stations-dds` and set the workspace members globs.
+Implement participant creation from `DDS/cyclonedds-config.xml`, typed readers and writers, validation of each application's contract at startup, and a `--topics` flag.
 - **Depends on:** hello-world-idl, topic-contracts.
 - **Minimal test:** typed publish/subscribe round-trip plus `--topics` output.
 - **Status:** todo.
@@ -149,14 +149,14 @@ Read `contracts/` and write a readable summary to `build/topics.md`.
 - **Status:** todo.
 
 ### build-orchestrator
-Write `scripts/build.ps1` (PowerShell 5.1 compatible) that resolves the repository root from its own location and uses repository-relative paths: IDL codegen into `build/gen/rust`, the Rust build with `CARGO_TARGET_DIR=build/rust`, assembly of `build/deploy`, and regeneration of `build/topics.md`. It hardcodes no drive letter; the repository must be placed at a short path because the `cyclonedds` Rust crate's CycloneDDS CMake build can exceed the Windows 260-character path limit (see `architecture.md`). It locates the externally installed Cyclone DDS prefix (hardcoded, for example `C:\Libraries\cyclonedds`) and provisions the runtime without changing the user PATH: a process-scoped `$env:PATH` during build/test. It supports a dry-run mode. The CMake/SDL3 halves are added when the C++ increment is scheduled.
+Extend the `scripts/build.ps1` created by `hello-world-idl` (which already generates IDL code into `build/gen/rust`) into the single build orchestrator (PowerShell 5.1 compatible): resolve the repository root from its own location, use repository-relative paths, build the Rust workspace with `CARGO_TARGET_DIR=build/rust` without cleaning it (so dependencies are not rebuilt), assemble `build/deploy`, and regenerate `build/topics.md`. It hardcodes no drive letter; the repository must be placed at a short path because the `cyclonedds` Rust crate's CycloneDDS CMake build can exceed the Windows 260-character path limit (see `architecture.md`). It locates the externally installed Cyclone DDS prefix under `EXT_PATH_PREFIX` (default `C:\Libraries`) and provisions the runtime without changing the user PATH: a process-scoped `$env:PATH` during build/test. It supports a dry-run mode. The CMake/SDL3 halves are added when the C++ increment is scheduled.
 - **Depends on:** hello-world-idl, dds-echo, dds-contracts.
 - **Minimal test:** `scripts/build.ps1 -DryRun` prints the ordered steps, and a full run succeeds once the workspace and tools exist.
 - **Status:** todo.
 
 ### display-lib
 Create the window and OpenGL context, run the render loop, render the console (egui), render the `HelloWorldViewTopic` it receives in a format window, and publish `InputEvent` for mouse, touchscreen, and key input.
-- **Depends on:** assets, stations-dds.
+- **Depends on:** hello-view-topic, input-topic, stations-dds.
 - **Minimal test:** a window showing text that publishes an input event.
 - **Status:** todo.
 
@@ -174,19 +174,19 @@ Publish `HelloWorldTopic` (greeting text and quaternion attitude) at a fixed rat
 
 ### hello-view-service
 Subscribe to `HelloWorldTopic` and publish `HelloWorldViewTopic`: the earth cube map and sphere parameters, the model quaternion, the upper-right light direction, and the greeting text with its font.
-- **Depends on:** hello-world-idl, topic-contracts, stations-dds.
+- **Depends on:** hello-world-idl, hello-view-topic, topic-contracts, stations-dds.
 - **Minimal test:** `dds-echo` shows `HelloWorldViewTopic` samples.
 - **Status:** todo.
 
 ### font-handling
 Load a font from `assets/fonts` and render text (the hello_world greeting) inside the display library.
-- **Depends on:** assets, display-lib.
+- **Depends on:** display-lib.
 - **Minimal test:** the greeting renders in the loaded font.
 - **Status:** todo.
 
 ### earth-rendering
 Render the cube map on a sphere in the display library, orient it with the attitude quaternion from the `HelloWorldViewTopic`, and light it from the upper right.
-- **Depends on:** assets, display-lib, hello-view-service.
+- **Depends on:** display-lib, hello-view-service.
 - **Minimal test:** the tilted, rotating, lit earth is visible on the small display.
 - **Status:** todo.
 
