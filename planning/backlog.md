@@ -107,13 +107,13 @@ Add the earth cube-map faces and a font under `assets/`.
 - **Status:** done.
 
 ### hello-world-idl
-Author the hello_world IDL as nested IDL modules and wire `cyclonedds-build`'s `compile_idl_with_options` permanently into the `stations-dds` build. `DDS/math.idl` holds `module math { struct Quaternion { double x; double y; double z; double w; }; };`; `DDS/hello_world.idl` (the compiled root) is `#include "math.idl"` then `module hello_world { struct HelloWorldTopic { string greeting; math::Quaternion attitude; }; };`. One scope per file; nested IDL `module` maps to a Rust `pub mod`; the DDS type name is the fully-qualified IDL scope (`#[dds_typename]`). The build calls `compile_idl_with_options` with `include_dirs = ["DDS"]`, `emit_dds_typename = true`, `output_dir = build/gen/rust`, and `include!`s the result. Generated files are never committed.
+Author the hello_world IDL as nested IDL modules and wire `cyclonedds-build`'s `compile_idl_with_options` permanently into the `stations-dds` build. `DDS/math.idl` holds `module math { struct Quaternion { double x; double y; double z; double w; }; };`; `DDS/hello_world.idl` (the compiled root) is `#include "math.idl"` then `module hello_world { struct HelloWorldTopic { string greeting; math::Quaternion attitude; }; };`. One top-level `module` per file, all of that module's types in that one file (a module is not reopened across files); nested IDL `module` maps to a Rust `pub mod`; the DDS type name is the fully-qualified IDL scope (`#[dds_typename]`). The build calls `compile_idl_with_options` with `include_dirs = ["DDS"]`, `emit_dds_typename = true`, `output_dir = build/gen/rust`, and `include!`s the result. Generated files are never committed.
 - **Depends on:** none (uses the fork rev pinned in `rust-dds-binding`).
 - **Minimal test:** a clean `cargo build` produces `build/gen/rust/hello_world.rs` and compiles it; `hello_world::HelloWorldTopic::type_name() == "hello_world::HelloWorldTopic"` and `math::Quaternion::type_name() == "math::Quaternion"`.
 - **Status:** in progress.
 
 ### hello-view-topic
-Author the hello_world view payload in `DDS/hello_world_view.idl` as `module hello_world { struct HelloWorldViewTopic { … }; };`, reusing `math::Quaternion` by embedding it (IDL inheritance is out of scope). The type and DDS topic name are both `HelloWorldViewTopic`.
+Add the hello_world view payload to `DDS/hello_world.idl` under the existing `module hello_world` (modules are not reopened across files), reusing `math::Quaternion` by embedding it (IDL inheritance is out of scope). The type and DDS topic name are both `hello_world::HelloWorldViewTopic`.
 - **Depends on:** hello-world-idl.
 - **Minimal test:** code generation succeeds; `hello_world::HelloWorldViewTopic::type_name()` matches.
 - **Status:** todo.

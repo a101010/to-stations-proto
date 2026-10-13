@@ -89,7 +89,7 @@ There is deliberately no scope field in a contract: wiring is expressed by the I
 * `DDS/` holds the IDL types and the Cyclone DDS configuration shared by all applications; it is authored, not generated.
 
 ## IDL organization
-* `DDS/` holds authored IDL as module-sized files, one top-level IDL `module` per file (`math.idl` holds `module math`; `hello_world.idl` holds `module hello_world`).
+* `DDS/` holds authored IDL as module-sized files, one top-level IDL `module` per file (`math.idl` holds `module math`; `hello_world.idl` holds `module hello_world`). A module is not reopened across files: all of a module's types live in its one file, so a format's model/view/control structs share the format's file.
 * A single root IDL is compiled per build and its `#include`s are inlined into one generated Rust file (the `cyclonedds-build` model, matching HDDS and `dust_dds_gen`). Each file is included exactly once - no diamond includes - because the generator neither merges reopened modules nor deduplicates includes.
 * Generated code is written to `build/gen/rust` (never committed) and pulled into `stations-dds` with `include!`.
 
@@ -99,8 +99,8 @@ to-stations-proto/
   planning/            authored: architecture.md, backlog.md, current_story.md
   docs/                authored: reference documentation
   DDS/                 authored: math.idl, hello_world.idl,
-                       hello_world_view.idl, input.idl, control.idl,
-                       format_manager.idl, cyclonedds-config.xml
+                       input.idl, control.idl, format_manager.idl,
+                       cyclonedds-config.xml
   contracts/           authored: topics.toml, services/<app>.toml
   scripts/             authored: build.ps1, verify-loopback.ps1, cleanup.ps1,
                        launch-rust.ps1, launch-cpp.ps1, launch-hybrid.ps1,

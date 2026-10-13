@@ -19,7 +19,7 @@ The approach follows the wider Rust DDS ecosystem (HDDS `hddsgen`, `dust_dds_gen
 
 * **Nested IDL `module` -> nested Rust `pub mod`**; the DDS type name is the fully-qualified IDL scope, emitted via `#[dds_typename]` (fork behavior).
 * **No vendor root namespace.** Modules are top-level (`math`, `hello_world`); the DDS names are `math::Quaternion` and `hello_world::HelloWorldTopic`.
-* **Module-sized files, one scope per file.** Small files are preferred, but each file holds one IDL `module`; a file is not split per struct (the fork, like HDDS/dust_dds, does not merge reopened modules).
+* **Module-sized files: one top-level IDL `module` per file, all of that module's types in the one file.** Small files are preferred, but a file is not split per struct, and a module is not reopened across files (the fork, like HDDS/dust_dds, does not merge reopened modules). A format's model/view/control structs therefore all live in that format's module file: the view payload is added to `hello_world.idl` alongside the model, not to a separate `hello_world_view.idl`.
 * **Single compile unit.** `compile_idl_with_options` compiles one root IDL (`DDS/hello_world.idl`); its `#include "math.idl"` is inlined. Distinct top-level modules mean no reopened-module problem; no umbrella, no fragments, no fork change.
 * **Shared value type up front.** `Quaternion` lives in a top-level `module math` now so the view can reuse it later (IDL inheritance is out of scope, so reuse is by embedding).
 * **Naming.** No "Model" in type, service, or code names. A topic's type name and topic name are identical and end in `Topic`: `HelloWorldTopic` (model role), `HelloWorldViewTopic`, `HelloWorldCtlTopic`. Embedded value structs are bare (`Quaternion`). Service executables end in `Service`.
@@ -33,7 +33,7 @@ The approach follows the wider Rust DDS ecosystem (HDDS `hddsgen`, `dust_dds_gen
 3. `rust/crates/stations-dds/Cargo.toml` - add `[build-dependencies] cyclonedds-build = { workspace = true }` (keep the `cyclonedds` dependency).
 4. `rust/crates/stations-dds/build.rs` - call `compile_idl_with_options`.
 5. `rust/crates/stations-dds/src/lib.rs` - `include!` the generated file and add the `#[test]` assertions.
-6. Planning: this file, `planning/backlog.md`.
+6. Planning: this file, `planning/backlog.md`, `planning/architecture.md` (drop the stale `hello_world_view.idl` and state that modules are not reopened).
 
 ## IDL
 
@@ -70,8 +70,8 @@ The generated `build/gen/rust/hello_world.rs` contains `pub mod math { ... }` an
 `rust/crates/stations-dds/build.rs`:
 - Resolve the repository root from `CARGO_MANIFEST_DIR` (`rust/crates/stations-dds` -> `../../..`; `rust/lib/stations-dds` is the same depth, so the path survives the later move).
 - `std::fs::create_dir_all(<repo>/build/gen/rust)`.
-- `compile_idl_with_options(<repo>/DDS/hello_world.idl, CompileOptions { output_dir: Some(<repo>/build/gen/rust), include_dirs: vec![<repo>/DDS], emit_dds_typename: true, try_idlc: false, ..Default::default() })`.
-- `println!("cargo:rerun-if-changed={}", <repo>/DDS)`.
+- Build `let options = CompileOptions { output_dir: Some(<repo>/build/gen/rust), include_dirs: vec![<repo>/DDS], emit_dds_typename: true, try_idlc: false, ..Default::default() };` and call `compile_idl_with_options(<repo>/DDS/hello_world.idl, &options)`.
+- Optionally `println!("cargo:rerun-if-changed={}", <repo>/DDS)`. The fork already emits one `rerun-if-changed` per preprocessed file (the root plus each `#include`), so this directory watch is only needed if adding or removing files under `DDS/` should also trigger a rebuild.
 
 `rust/crates/stations-dds/src/lib.rs` appends:
 
@@ -83,13 +83,20 @@ so `stations_dds::math::Quaternion` and `stations_dds::hello_world::HelloWorldTo
 
 ## Tests
 
-A `#[cfg(test)]` module in `rust/crates/stations-dds/src/lib.rs`:
+A `#[cfg(test)]` module in `rust/crates/stations-dds/src/lib.rs`. The generated modules sit at the crate root, so the test module must bring them into scope:
 
 ```
-use ::cyclonedds::DdsType;
+#[cfg(test)]
+mod tests {
+    use super::{hello_world, math};
+    use ::cyclonedds::DdsType;
 
-assert_eq!(<math::Quaternion as DdsType>::type_name(), "math::Quaternion");
-assert_eq!(<hello_world::HelloWorldTopic as DdsType>::type_name(), "hello_world::HelloWorldTopic");
+    #[test]
+    fn type_names_match_scopes() {
+        assert_eq!(<math::Quaternion as DdsType>::type_name(), "math::Quaternion");
+        assert_eq!(<hello_world::HelloWorldTopic as DdsType>::type_name(), "hello_world::HelloWorldTopic");
+    }
+}
 ```
 
 `type_name()` reads the `#[dds_typename]` value and needs no DDS participant.
@@ -108,13 +115,15 @@ assertions pass.
 
 ## Risks and follow-ups
 
-* **Multiple formats later.** When a second format file appears, compiling several roots separately would duplicate shared modules (e.g. `math`) across generated files if both are `include!`d. The fix is to keep one root that includes every format file (files then must not cross-`#include` each other, since the fork has no include-once) or to add include-once / reopened-module merge to the fork. Deferred until the view story; noted so it is not forgotten.
+* **Modules are not reopened across files.** The fork neither merges reopened modules nor deduplicates includes, so a format's types all live in that format's module file: `HelloWorldViewTopic` (and later `HelloWorldCtlTopic`) are added to `DDS/hello_world.idl`, not to a separate `hello_world_view.idl`. This supersedes the `hello_world_view.idl` wording in `backlog.md` and `architecture.md` (both updated by this story).
+* **Diamond includes of shared modules.** If a later format also needs `math`, only one file may `#include "math.idl"`: with no include-once, including it twice emits two `pub mod math`. Either the single root includes `math.idl` first and each format refers to the already-inlined `math`, or the fork gains include-once / reopened-module merge. Decide when the second format appears; deferred now.
+* **One root per build.** Compile one root IDL rather than several roots into several generated files, because shared modules such as `math` would otherwise be duplicated across generated files that are all `include!`d.
 * `include!` depends on the crate's location; the `stations-dds` story's `crates/` -> `lib/` move keeps the same depth (`../../..`), so the path is stable, but re-verify there.
 * The short-path requirement (`README.md`, `architecture.md` "Path length") still applies to the fork's `cyclonedds-rust-sys` `$OUT_DIR` CMake probe.
-* Names introduced here (`math`, `hello_world`, `HelloWorldTopic`) update the older `dds::hello_world::HelloWorldModel` wording in `backlog.md` and, later, `architecture.md`.
+* The to-stations planning docs use the `math`/`hello_world`/`HelloWorldTopic` names; the fork spec `planning/cyclonedds-build-plan.md` keeps its own `dds::hello_world::HelloWorldModel` examples (those describe the fork's internal tests).
 
 ## Files
 
 * Authored/changed: `DDS/math.idl`, `DDS/hello_world.idl`, `rust/crates/stations-dds/Cargo.toml`, `rust/crates/stations-dds/build.rs`, `rust/crates/stations-dds/src/lib.rs`.
 * Generated, gitignored: `build/gen/rust/hello_world.rs`.
-* Planning: `planning/current_story.md`, `planning/backlog.md`.
+* Planning: `planning/current_story.md`, `planning/backlog.md`, `planning/architecture.md`.
