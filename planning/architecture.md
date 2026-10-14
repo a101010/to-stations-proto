@@ -30,6 +30,9 @@ All the applications communicate using Distributed Data Services configured to u
 * Rendering: Rust = winit + glutin/glow + egui. C++ = SDL3 + glad + Dear ImGui.
 * Build: `scripts/build.ps1` orchestrator; all artifacts under `build/`, where only `build/deploy/` is durable and everything else is temporary. The repository must be placed at a short path on Windows (see "Path length").
 
+### OpenGL context and safety
+`glow` marks every GL call `unsafe` because a GL context must be current on the calling thread, and the binding has no token that proves currentness. The Rust rendering libraries follow `egui_glow`: their public APIs are safe and document the assumption that a glow context is current on the calling thread, which the display application upholds by doing all GL work on its event-loop thread. This documented-assumption approach is limited to the GL-context-current precondition; other safety concerns are handled normally. The context is requested explicitly (OpenGL 3.3 core) so the shaders the libraries compile are guaranteed.
+
 ## Configurations
 The three configurations (`rust`, `c++`, `hybrid`) differ only in which language implementation of each application is launched. Applications interoperate because they share the same IDL types and speak DDSI-RTPS; a hybrid launch simply mixes the two implementations.
 
@@ -162,7 +165,6 @@ The repository is therefore required to live at a short path on Windows. `script
 Each configuration has a launch script; all configurations share `cleanup.ps1`. `scripts/verify-loopback.ps1` verifies the loopback adapter and its IPv6 prerequisites; creating the adapter is a documented manual step (see `docs/`). Launch and cleanup scripts operate only on `build/deploy/`.
 
 ## Deferred decisions
-* Rendering backend: glow/OpenGL (the current stack) versus WebGPU.
 * Text rendering: SDF/MSDF for format text (prefer a `skrifa`-based generator if MSDF is chosen); the console uses egui's own text.
 * displayLib internal architecture: it may split into smaller libraries; per-format rendering and communications are at least separate modules. The format manager has a view service, a control service, and one or more displayLib modules.
 * `test/` layout.

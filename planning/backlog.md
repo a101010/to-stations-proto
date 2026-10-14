@@ -123,7 +123,7 @@ Create the small display application (`lil-d`): a window and an egui console are
 Create the display library (`display-lib`) and have `lil-d` delegate the format-window region to it. It renders the default format, hardcoded: a solid color (different from the original `lil-d` color) with an x in a different color, owning the entire region delegated to the library.
 - **Depends on:** lil-d.
 - **Minimal test:** the delegated region shows the default format.
-- **Status:** todo.
+- **Status:** in progress.
 
 ### font-handling
 Load a font from `assets/fonts` and render text (the hello_world greeting) in the display library as part of the hello-world format. The greeting and attitude are hardcoded for now.
