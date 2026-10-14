@@ -38,7 +38,7 @@ A *format* is a distributable model-view-controller constellation. Each format o
 
 * **Model service** - owns or derives the data for the format.
 * **View service** - sends all data to be displayed to the display library of each interested display via a DDS message.
-* **Display library** (the view) - renders the data it receives; sends mouse, touchscreen, and other input events to the controller service via DDS.
+* **Display library** (the view) - renders the data it receives; handles the input events its display application forwards to it and, when a format requires it, sends events to the controller service via DDS. Input handling is added per feature.
 * **Controller service** - consumes input events from the display libraries and control events from control services.
 * **Control services** - interface to game controls (for example, a joystick controller service) and send events to the display control services.
 
@@ -59,7 +59,7 @@ The hello_world format is global (system-wide) in the first increment; the abili
 ## Format windows and the format manager
 A *format window* is a place where a format can be displayed: one square format window on the small display, three square format windows and an eyebrow window on the large display.
 
-The format manager is **per display** (not per station) and is itself a model-view-controller constellation. It tells that display's display library which format to display in each format window, and that combination is different for each display. It runs as a separate service process, not inside the display application.
+The format manager is **per display** (not per station) and is itself a model-view-controller constellation. It tells that display's display library which format to display in each format window, and that combination is different for each display. It runs as a separate service process, not inside the display application. Its first form lives inside the display library and switches the active format on a click in the region delegated to it; it becomes a separate service later.
 
 ## Topic contracts
 Every service declares the topics it publishes and subscribes to so that the contract of a service is easy to read:
@@ -116,8 +116,9 @@ to-stations-proto/
   cpp/                 authored: CMake project
     libs/              stations-dds, display-lib
     tools/             dds-echo, dds-contracts
-    apps/displays/     small-display, large-display, launcher
-    apps/controls/     joystick-control-service, controller-window
+    apps/displays/     big-d, lil-d
+    apps/launcher/     tentacles
+    apps/controls/     joystick-control-service, paws
     apps/formats/      hello-world/{hello-service, hello-view-service, hello-ctl-service}
     apps/format-manager/
   build/               gitignored: temporary artifacts plus one durable output

@@ -1,139 +1,83 @@
-# Current story: hello-world-idl
+# Current story: lil-d
 
 This file is the detailed, living plan for the one active story. It is rewritten for each story. The backlog in `backlog.md` holds all work and the per-story status.
 
 ## Story
 
-Author the hello_world IDL as nested IDL modules and generate Rust into `build/gen/rust` with `scripts/build.ps1` (the fork's `cyclonedds-idlc` Rust codegen), which then builds the workspace, so the generated Rust types are part of the `stations-dds` library. (This merges the former `hello-world-topic` and `idl-codegen` stories.)
+Create the small display application (`lil-d`): a window and an egui console area, with the region delegated to the display library painted a dark unsaturated green placeholder. The console has a single power button that toggles the format window. Takes `--station N` on the command line. Extends `scripts/build.ps1` to build and deploy the executable to `build/deploy`, and adds `scripts/launch-rust.ps1` and `scripts/cleanup.ps1`; later stories that add executables or libraries extend these scripts as needed.
 
 - **Depends on:** none.
-- **Minimal test:** `scripts/build.ps1 -Test` generates `build/gen/rust/hello_world.rs`, builds, and runs the tests; `math::Quaternion::type_name() == "math::Quaternion"` and `hello_world::HelloWorldTopic::type_name() == "hello_world::HelloWorldTopic"`.
+- **Minimal test:** the window opens showing the console and the green region; the power button toggles the format window; `launch-rust.ps1` starts it and `cleanup.ps1` stops it.
 
 ## Context
 
-`DDS/` currently holds only `cyclonedds-config.xml`. The fork pinned in `rust-dds-binding` provides IDL-to-Rust code generation (`cyclonedds-build::compile_idl_with_options`) with nested-module support, `#include`/`import`, scoped type references, and `#[dds_typename]`. The fork also ships that engine as a standalone Rust CLI, `cyclonedds-idlc`, which is what this story runs.
+`rust-render` proved the windowing/rendering stack (winit 0.30.13, glutin 0.32.3, glutin-winit 0.5.0, glow 0.17, egui/egui-winit/egui_glow 0.36.2) with a temporary smoke test under `build/rust-render-smoke`; that directory is gitignored and is the reference for the window/GL/egui setup. No committed display crate exists: `rust/` holds only `lib/stations-dds` and `tool/equirect-to-cubemap`, and there is no `rust/ui/` yet.
 
-The approach follows the wider Rust DDS ecosystem (HDDS `hddsgen`, `dust_dds_gen`): an IDL `module` is a namespace that maps to a Rust `pub mod`; the DDS type name is the fully-qualified IDL scope; and a **single root IDL file** is compiled with its `#include`s inlined into one generated Rust file, pulled into the crate with `include!`. Nothing about that requires a fork change.
+`scripts/build.ps1` currently generates IDL into `build/gen/rust` and builds the Rust workspace with the Cargo target directory `build/rust`; it has no deploy step, and `scripts/launch-rust.ps1` and `scripts/cleanup.ps1` do not exist.
 
-Two different tools share the name "idlc": the C `idlc.exe` (installed with `cyclonedds-core`) emits C/C++, not Rust; the fork's `cyclonedds-idlc` is a **Rust** CLI that wraps `cyclonedds-build`. This story uses the fork's `cyclonedds-idlc`, run with `--no-idlc` so it never invokes the C tool.
+`lil-d` is the display application that will host the display library. In this story the display library does not exist yet, so the region it will own is painted a placeholder color.
 
 ## Decisions
 
-* **Nested IDL `module` -> nested Rust `pub mod`**; the DDS type name is the fully-qualified IDL scope, emitted via `#[dds_typename]` (fork behavior).
-* **No vendor root namespace.** Modules are top-level (`math`, `hello_world`); the DDS names are `math::Quaternion` and `hello_world::HelloWorldTopic`.
-* **Module-sized files: one top-level IDL `module` per file, all of that module's types in the one file.** Small files are preferred, but a file is not split per struct, and a module is not reopened across files (the fork, like HDDS/dust_dds, does not merge reopened modules). A format's model/view/control structs therefore all live in that format's module file: the view payload is added to `hello_world.idl` alongside the model, not to a separate `hello_world_view.idl`.
-* **Single compile unit.** The fork's `cyclonedds-idlc` compiles one root IDL (`DDS/hello_world.idl`); its `#include "math.idl"` is inlined. Distinct top-level modules mean no reopened-module problem; no umbrella, no fragments, no fork change.
-* **Shared value type up front.** `Quaternion` lives in a top-level `module math` now so the view can reuse it later (IDL inheritance is out of scope, so reuse is by embedding).
-* **Naming.** No "Model" in type, service, or code names. A topic's type name and topic name are identical and end in `Topic`: `HelloWorldTopic` (model role), `HelloWorldViewTopic`, `HelloWorldCtlTopic`. Embedded value structs are bare (`Quaternion`). Service executables end in `Service`.
-* **The build is script-owned, not a Cargo build script.** `scripts/build.ps1` generates code with the fork's `cyclonedds-idlc` and then builds the Rust workspace; the crate has no `build.rs` and no `cyclonedds-build` build-dependency. This matches the architecture, where `scripts/build.ps1` is the single build orchestrator.
-* **Fork consumption.** The fork stays a pinned git dependency: it is downloaded from the repository and built once, then cached in the `build/rust` target directory. `build.ps1` never cleans, so codegen and the Rust build do not rebuild the fork unless `build/` is wiped (`git clean -xdf`); that rebuild is acceptable.
-* **No `..` in paths.** The crate reaches the generated file through `REPO_ROOT`, the absolute repository root, which Cargo computes from `.cargo/config.toml` (`[env] REPO_ROOT = { value = ".", relative = true }`) and passes to every rustc invocation. External components are addressed by absolute paths under `EXT_PATH_PREFIX` (default `C:\Libraries`). Each build system resolves the repository root from its own root file rather than a shared environment variable set by a script.
-* **Generated files live in `build/gen/rust` and are never committed.**
-* **Crate location.** `stations-dds` lives at `rust/lib/stations-dds` (moved out of `rust/crates/` in this story).
+* **Crate.** `lil-d` lives at `rust/ui/lil-d`, a binary crate (`architecture.md` puts GUI applications under `ui/`).
+* **Stack reuse.** Follow the smoke test's winit + glutin/glow + egui_glow setup; the windowing/rendering dependencies come from `[workspace.dependencies]` in `rust/Cargo.toml`.
+* **Window.** One OS window: a square format region (the region that will be delegated to the display library) painted a named dark unsaturated green constant, with the console area around it. The power button lives in the console and toggles the format region on/off.
+* **Arguments.** `--station N` via `clap`, default `0`. `--topics` is not added yet; it arrives with `dds-and-service-contracts`.
+* **No DDS, no `InputEvent`, no display library.** `lil-d` does not forward input yet; the display application forwards input to the display library when `format-manager` needs it.
+* **Build and deploy are script-owned and grow with the stories.** `scripts/build.ps1` gains a step that assembles `build/deploy/bin` with `lil-d.exe`; the debug binary is deployed for now (a release switch can come later). `scripts/launch-rust.ps1` and `scripts/cleanup.ps1` are new, location-agnostic (resolve the repository root from `$PSScriptRoot`; no drive letter), and PowerShell 5.1 compatible.
+* **Launch and cleanup operate only on `build/deploy`.** `launch-rust.ps1` starts `build/deploy/bin/lil-d.exe` with its station argument; the model and view services join it in later stories. `cleanup.ps1` stops all configuration processes.
 
 ## Deliverables
 
-1. `DDS/math.idl` - `module math { struct Quaternion { double x; double y; double z; double w; }; };`
-2. `DDS/hello_world.idl` - `#include "math.idl"` then `module hello_world { struct HelloWorldTopic { string greeting; math::Quaternion attitude; }; };`
-3. `scripts/build.ps1` - generate with the fork's `cyclonedds-idlc` into `build/gen/rust`, then build the Rust workspace (`-Test` runs the tests). `build-orchestrator` extends it.
-4. `.cargo/config.toml` (repository root) - `target-dir = "build/rust"` and `[env] REPO_ROOT = { value = ".", relative = true }`; replaces `rust/.cargo/config.toml`.
-5. `rust/Cargo.toml` - members `["lib/stations-dds", "tool/equirect-to-cubemap"]`; drop the now-unused `cyclonedds-build` workspace dependency.
-6. `rust/lib/stations-dds/Cargo.toml` - keep the `cyclonedds` dependency; no build-dependencies.
-7. `rust/lib/stations-dds/src/lib.rs` - `include!` the generated file and add the `#[test]` assertions.
-8. `docs/versions.md` - note that the fork's `cyclonedds-idlc` is built from the same pinned rev.
-9. `README.md` - build instructions and the `idlc.exe` vs `cyclonedds-idlc` distinction.
-10. Planning: this file, `planning/backlog.md`, `planning/architecture.md`, `planning/cyclonedds-build-plan.md`.
+1. `rust/ui/lil-d/Cargo.toml` - the binary crate, using the workspace dependencies.
+2. `rust/ui/lil-d/src/main.rs` - argument parsing, window/GL/egui setup, the render loop, the console with the power button, and the green format region.
+3. `rust/Cargo.toml` - add `ui/lil-d` to `members`.
+4. `scripts/build.ps1` - assemble `build/deploy/bin` after the build.
+5. `scripts/launch-rust.ps1` - new; start `build/deploy/bin/lil-d.exe`.
+6. `scripts/cleanup.ps1` - new; stop all configuration processes.
+7. Planning: this file, `planning/backlog.md`, `planning/architecture.md`.
 
-## IDL
+## Window layout
 
-`DDS/math.idl`:
-```
-module math {
-  struct Quaternion {
-    double x;
-    double y;
-    double z;
-    double w;
-  };
-};
-```
+* The format region is a square; the console is the area around it. For the first version, keep the geometry simple: the square occupies the upper portion of the window, sized to the smaller of the window width and the available height, and the console is a strip (for example along the bottom) holding the single power button.
+* The placeholder color is a named constant (dark, unsaturated green); its exact value is chosen during implementation.
+* The power button toggles the format region: off hides it (the console remains). Exact off-state rendering (hidden region, resized window, or a blank area) is decided during implementation.
 
-`DDS/hello_world.idl` (the compiled root):
-```
-#include "math.idl"
+## Build and launch
 
-module hello_world {
-  struct HelloWorldTopic {
-    string greeting;
-    math::Quaternion attitude;
-  };
-};
-```
+`scripts/build.ps1` (extended):
+* After the workspace build, create `build/deploy/bin` and copy `build/rust/debug/lil-d.exe` into it.
+* Keep the existing behavior: no clean, repository-relative paths, `$PSScriptRoot` for the repository root.
 
-The generated `build/gen/rust/hello_world.rs` contains `pub mod math { ... }` and
-`pub mod hello_world { ... }`, with `HelloWorldTopic.attitude` typed as
-`super::math::Quaternion` and `#[dds_typename("hello_world::HelloWorldTopic")]` on the topic.
+`scripts/launch-rust.ps1` (new):
+* Resolve the repository root from `$PSScriptRoot`.
+* Start `build/deploy/bin/lil-d.exe --station 0`. Later stories add the model service and the view service.
 
-## Build wiring
-
-`scripts/build.ps1` (new; `build-orchestrator` extends it):
-- Resolve the repository root from the script's own location (`Split-Path -Parent $PSScriptRoot`); use repository-relative paths, and no `..`.
-- `$prefix = $env:EXT_PATH_PREFIX` (the external prefix for installed components; default `C:\Libraries`).
-- Build the fork's `cyclonedds-idlc` from the pinned rev, cached under `build/`:
-  `cargo install --git https://github.com/a101010/cyclonedds-rust --rev acef68438ef3c8eae56c45afbecdbb89f3d3e115 cyclonedds-idlc --locked --target-dir build/rust/codegen --root build`
-  The `--target-dir` caches the tool's compilation; without it `cargo install` uses a fresh temporary directory and rebuilds every time. `cargo install` writes the binary to `build/bin/cyclonedds-idlc.exe`.
-- Generate: `build/bin/cyclonedds-idlc.exe --input DDS/hello_world.idl --output-dir build/gen/rust --include-dir DDS --no-idlc` (defaults already emit `#[dds_typename]`).
-- Build the Rust workspace from the repository root (so Cargo finds `.cargo/config.toml`): `cargo build --manifest-path rust\Cargo.toml`, or `cargo test --manifest-path rust\Cargo.toml` with `-Test`.
-- No clean: do not run `cargo clean` and do not delete `build/`, so dependencies (including the fork) are not rebuilt.
-
-`rust/lib/stations-dds/src/lib.rs` appends:
-
-```
-include!(concat!(env!("REPO_ROOT"), "/build/gen/rust/hello_world.rs"));
-```
-
-so `stations_dds::math::Quaternion` and `stations_dds::hello_world::HelloWorldTopic` exist at the crate root. `REPO_ROOT` is supplied by Cargo from `.cargo/config.toml` (its `relative = true` resolves to the repository root), so any `cargo build`/`test` run from within the repository has it; no script or caller sets it.
+`scripts/cleanup.ps1` (new):
+* Stop all processes of all configurations by image name for the known applications (`lil-d` for now; later stories add the services and the other displays).
 
 ## Tests
 
-A `#[cfg(test)]` module in `rust/lib/stations-dds/src/lib.rs`. The generated modules sit at the crate root, so the test module must bring them into scope:
-
-```
-#[cfg(test)]
-mod tests {
-    use super::{hello_world, math};
-    use ::cyclonedds::DdsType;
-
-    #[test]
-    fn type_names_match_scopes() {
-        assert_eq!(<math::Quaternion as DdsType>::type_name(), "math::Quaternion");
-        assert_eq!(<hello_world::HelloWorldTopic as DdsType>::type_name(), "hello_world::HelloWorldTopic");
-    }
-}
-```
-
-`type_name()` reads the `#[dds_typename]` value and needs no DDS participant.
+The minimal test is manual: the window opens, the console and the green region are visible, the power button toggles the format region, and the launch/cleanup scripts start and stop the application. A headless unit test is not practical for the windowed shell.
 
 ## Minimal test
 
 ```
-./scripts/build.ps1 -Test
+.\scripts\build.ps1
+.\scripts\launch-rust.ps1
 ```
 
-A clean run generates `build/gen/rust/hello_world.rs`, builds the workspace, and the two assertions pass.
+The `lil-d` window opens; the power button toggles the format window; `.\scripts\cleanup.ps1` stops it.
 
 ## Risks and follow-ups
 
-* **The generated file must exist before compiling.** `.cargo/config.toml` always supplies `REPO_ROOT`, but `build/gen/rust/hello_world.rs` only exists after `scripts/build.ps1` runs; a bare `cargo build` on a freshly cleaned tree fails with a missing-file error until then. Documented in `README.md`.
-* **Path length.** `cyclonedds-rust-sys` runs a small CMake ABI probe under its `$OUT_DIR`, so the repository must stay at a short path on Windows (`T:`). The main CycloneDDS CMake build is redirected to the external prefix (`CYCLONEDDS_SRC`, `CYCLONEDDS_BUILD`).
-* **Codegen build cache.** `cargo install --target-dir build/rust/codegen` caches the tool's compilation; wiping `build/` (for example `git clean -xdf`) forces a rebuild, which is acceptable.
-* **Modules are not reopened across files.** The fork neither merges reopened modules nor deduplicates includes, so a format's types all live in that format's module file: `HelloWorldViewTopic` (and later `HelloWorldCtlTopic`) are added to `DDS/hello_world.idl`, not to a separate `hello_world_view.idl`. This supersedes the `hello_world_view.idl` wording in `backlog.md` and `architecture.md` (both updated by this story).
-* **Diamond includes of shared modules.** If a later format also needs `math`, only one file may `#include "math.idl"`: with no include-once, including it twice emits two `pub mod math`. Either the single root includes `math.idl` first and each format refers to the already-inlined `math`, or the fork gains include-once / reopened-module merge. Decide when the second format appears; deferred now.
-* The to-stations planning docs use the `math`/`hello_world`/`HelloWorldTopic` names; the fork spec `planning/cyclonedds-build-plan.md` keeps its own `dds::hello_world::HelloWorldModel` examples (those describe the fork's internal tests).
+* **Window/console geometry** and the **placeholder color** are provisional and may be refined when the display library takes over the region.
+* **Deploy build profile.** Debug is deployed for now; switching to release is a later decision.
+* **`cleanup.ps1` reliability.** Stopping by image name is simple but broad; a pid file or a job object can replace it if needed.
+* **Layout duplication.** `scripts/launch-rust.ps1` and `scripts/cleanup.ps1` start small and grow as stories add executables; keep them location-agnostic and free of hardcoded drive letters.
 
 ## Files
 
-* Authored/changed: `DDS/math.idl`, `DDS/hello_world.idl`, `scripts/build.ps1`, `.cargo/config.toml`, `rust/Cargo.toml`, `rust/lib/stations-dds/Cargo.toml`, `rust/lib/stations-dds/src/lib.rs`, `README.md`, `docs/versions.md`.
-* Moved: `rust/crates/stations-dds` -> `rust/lib/stations-dds` (dropping `build.rs`); `rust/.cargo/config.toml` -> `.cargo/config.toml`.
-* Generated, gitignored: `build/gen/rust/hello_world.rs`, `build/bin/cyclonedds-idlc.exe`, `build/rust/codegen`.
-* Planning: `planning/current_story.md`, `planning/backlog.md`, `planning/architecture.md`, `planning/cyclonedds-build-plan.md`.
+* Authored: `rust/ui/lil-d/Cargo.toml`, `rust/ui/lil-d/src/main.rs`, `scripts/launch-rust.ps1`, `scripts/cleanup.ps1`.
+* Changed: `rust/Cargo.toml`, `scripts/build.ps1`, `planning/backlog.md`, `planning/architecture.md`, `planning/current_story.md`.
+* Reference (gitignored, not committed): `build/rust-render-smoke/`.

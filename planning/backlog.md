@@ -17,12 +17,13 @@ Conventions:
 * Language: Rust only. C++ and hybrid are later increments.
 * DDS: Eclipse Cyclone DDS; all topics over IPv6 multicast on the `StationsDDS` loopback adapter; shared IDL in `DDS/`.
 * Rendering: winit + glutin/glow + egui.
-* The model service and the view service are separate: the model publishes the greeting and the attitude (a 23.5 degree tilt, one revolution every twelve minutes, as a quaternion); the view publishes the display message.
+* The model service and the view service are separate: the model publishes the greeting and the attitude (a 23.5 degree tilt, as a quaternion; one revolution every twelve minutes is added later); the view publishes the display message.
 * Earth projection: a cube map sampled on a sphere, oriented by the attitude quaternion, lit from the upper right.
 * Font handling (loading and rendering the greeting) is in scope.
-* Small display: one square format window plus a console area with a single power button, `--station N`, and `--topics`.
-* Input events are published as `InputEvent`; wiring them into a controller is a later increment.
-* Out of scope: the C++/hybrid configurations and their launch scripts; joystick control service, controller window, format manager, large display, launcher; real game-controller binding; per-station views.
+* Small display (`lil-d`): one square format window plus a console area with a single power button, `--station N`, and `--topics`.
+* The display library hosts a default format and the hello-world format and a format manager that switches the active format on a click in the region delegated to it.
+* Input handling is added per feature; the first is the format-manager click.
+* Out of scope: the C++/hybrid configurations and their launch scripts; joystick control service and `paws`; the format-manager controller service, the three-dot menu, and the format-chooser-format; `big-d` and `tentacles`; real game-controller binding; per-station views.
 
 **Prerequisites** (environment, installed once, not built by `scripts/build.ps1`):
 * MSVC (Visual Studio Build Tools) and CMake.
@@ -33,7 +34,7 @@ Conventions:
 
 Third-party libraries are built/installed to an external prefix (for example `C:\Libraries`), never committed. Each install story records its component in `docs/versions.md`.
 
-**Done when.** `launch-rust.ps1` brings up the model service, the view service, and the small display from `build/deploy`; the small display shows the tilted, rotating, cube-mapped earth lit from the upper right with the greeting text rendered in the loaded font, and its power button works. `dds-echo` observes every topic in the registry, `--topics` and `build/topics.md` match `contracts/`, and `cleanup.ps1` stops everything.
+**Done when.** `launch-rust.ps1` brings up the model service, the view service, and `lil-d` from `build/deploy`; `lil-d` shows the tilted, cube-mapped earth lit from the upper right with the greeting text rendered in the loaded font, its power button works, and the format manager switches between the default and hello-world formats. `dds-echo` observes every topic in the registry, `--topics` and `build/topics.md` match `contracts/`, and `cleanup.ps1` stops everything.
 
 ### repo-structure
 Create the top-level folders and a `.gitignore` that excludes `build/`.
@@ -112,91 +113,103 @@ Author the hello_world IDL as nested IDL modules and generate Rust into `build/g
 - **Minimal test:** `scripts/build.ps1 -Test` generates `build/gen/rust/hello_world.rs`, builds, and passes with `hello_world::HelloWorldTopic::type_name() == "hello_world::HelloWorldTopic"` and `math::Quaternion::type_name() == "math::Quaternion"`.
 - **Status:** done.
 
-### hello-view-topic
-Add the hello_world view payload to `DDS/hello_world.idl` under the existing `module hello_world` (modules are not reopened across files), reusing `math::Quaternion` by embedding it (IDL inheritance is out of scope). The type and DDS topic name are both `hello_world::HelloWorldViewTopic`.
-- **Depends on:** hello-world-idl.
-- **Minimal test:** code generation succeeds; `hello_world::HelloWorldViewTopic::type_name()` matches.
-- **Status:** todo.
-
-### input-topic
-Author the generic input event type in `DDS/input.idl` (top-level module), with the topic type named per the `…Topic` convention.
-- **Depends on:** hello-world-idl.
-- **Minimal test:** code generation succeeds; the input topic type's `type_name()` matches.
-- **Status:** todo.
-
-### topic-contracts
-Author `contracts/topics.toml` and `contracts/services/<app>.toml` for the MVP services (`hello_world/service`, `hello_world/view`). Topic types are their scoped DDS names (for example `hello_world::HelloWorldTopic`), matching the generated `DdsType::type_name()`.
+### lil-d
+Create the small display application (`lil-d`): a window and an egui console area, with the region delegated to the display library painted a dark unsaturated green placeholder. The console has a single power button that toggles the format window. Takes `--station N` on the command line. Extends `scripts/build.ps1` to build and deploy the executable to `build/deploy`, and adds `scripts/launch-rust.ps1` and `scripts/cleanup.ps1`; later stories that add executables or libraries extend these scripts as needed.
 - **Depends on:** none.
-- **Minimal test:** the files parse and validate against the registry.
-- **Status:** todo.
-
-### stations-dds
-Implement participant creation from `DDS/cyclonedds-config.xml`, typed readers and writers, validation of each application's contract at startup, and a `--topics` flag.
-- **Depends on:** hello-world-idl, topic-contracts.
-- **Minimal test:** typed publish/subscribe round-trip plus `--topics` output.
-- **Status:** todo.
-
-### dds-echo
-Subscribe to any named topic and print received samples.
-- **Depends on:** stations-dds.
-- **Minimal test:** prints samples from a publisher.
-- **Status:** todo.
-
-### dds-contracts
-Read `contracts/` and write a readable summary to `build/topics.md`.
-- **Depends on:** topic-contracts.
-- **Minimal test:** generated `topics.md` matches the registry.
-- **Status:** todo.
-
-### build-orchestrator
-Extend the `scripts/build.ps1` created by `hello-world-idl` (which already generates IDL code into `build/gen/rust` and builds the Rust workspace) into the single build orchestrator (PowerShell 5.1 compatible): resolve the repository root from its own location, use repository-relative paths, build the Rust workspace with `CARGO_TARGET_DIR=build/rust` without cleaning it (so dependencies are not rebuilt), assemble `build/deploy`, and regenerate `build/topics.md`. It hardcodes no drive letter; the repository must be placed at a short path because the `cyclonedds` Rust crate's CycloneDDS CMake build can exceed the Windows 260-character path limit (see `architecture.md`). It locates the externally installed Cyclone DDS prefix under `EXT_PATH_PREFIX` (default `C:\Libraries`) and provisions the runtime without changing the user PATH: a process-scoped `$env:PATH` during build/test. It supports a dry-run mode. The CMake/SDL3 halves are added when the C++ increment is scheduled.
-- **Depends on:** hello-world-idl, dds-echo, dds-contracts.
-- **Minimal test:** `scripts/build.ps1 -DryRun` prints the ordered steps, and a full run succeeds once the workspace and tools exist.
+- **Minimal test:** the window opens showing the console and the green region; the power button toggles the format window; `launch-rust.ps1` starts it and `cleanup.ps1` stops it.
 - **Status:** todo.
 
 ### display-lib
-Create the window and OpenGL context, run the render loop, render the console (egui), render the `HelloWorldViewTopic` it receives in a format window, and publish `InputEvent` for mouse, touchscreen, and key input.
-- **Depends on:** hello-view-topic, input-topic, stations-dds.
-- **Minimal test:** a window showing text that publishes an input event.
-- **Status:** todo.
-
-### small-display
-Host the display library: one square format window plus a console area with a single power button, `--station N`, and `--topics`. The power button toggles the format window and emits an input event for later wiring.
-- **Depends on:** display-lib.
-- **Minimal test:** the power button toggles the format window.
-- **Status:** todo.
-
-### hello-service
-Publish `HelloWorldTopic` (greeting text and quaternion attitude) at a fixed rate: a 23.5 degree tilt with one revolution every twelve minutes.
-- **Depends on:** hello-world-idl, stations-dds.
-- **Minimal test:** `dds-echo` shows `HelloWorldTopic` samples.
-- **Status:** todo.
-
-### hello-view-service
-Subscribe to `HelloWorldTopic` and publish `HelloWorldViewTopic`: the earth cube map and sphere parameters, the model quaternion, the upper-right light direction, and the greeting text with its font.
-- **Depends on:** hello-world-idl, hello-view-topic, topic-contracts, stations-dds.
-- **Minimal test:** `dds-echo` shows `HelloWorldViewTopic` samples.
+Create the display library (`display-lib`) and have `lil-d` delegate the format-window region to it. It renders the default format, hardcoded: a solid color (different from the original `lil-d` color) with an x in a different color, owning the entire region delegated to the library.
+- **Depends on:** lil-d.
+- **Minimal test:** the delegated region shows the default format.
 - **Status:** todo.
 
 ### font-handling
-Load a font from `assets/fonts` and render text (the hello_world greeting) inside the display library.
+Load a font from `assets/fonts` and render text (the hello_world greeting) in the display library as part of the hello-world format. The greeting and attitude are hardcoded for now.
 - **Depends on:** display-lib.
 - **Minimal test:** the greeting renders in the loaded font.
 - **Status:** todo.
 
 ### earth-rendering
-Render the cube map on a sphere in the display library, orient it with the attitude quaternion from the `HelloWorldViewTopic`, and light it from the upper right.
-- **Depends on:** display-lib, hello-view-service.
-- **Minimal test:** the tilted, rotating, lit earth is visible on the small display.
+Render the cube map on a sphere in the display library, orient it with the attitude quaternion, and light it from the upper right, completing the hello-world format. The cube map, attitude, and light direction are hardcoded for now.
+- **Depends on:** display-lib.
+- **Minimal test:** the tilted, lit earth is visible in the delegated region.
 - **Status:** todo.
 
-### launch-cleanup
-Write `scripts/launch-rust.ps1` to start the MVP constellation from `build/deploy` and `scripts/cleanup.ps1` to stop all processes of all configurations.
-- **Depends on:** build-orchestrator, display-lib, small-display, hello-service, hello-view-service, font-handling, earth-rendering.
-- **Minimal test:** `launch-rust.ps1` brings up the constellation and `cleanup.ps1` stops it.
+### format-manager
+Add the format manager to the display library: a registry of the default and hello-world formats and the active format. `lil-d` forwards mouse and other window input events to the library; clicking in the region delegated to the display library switches the active format.
+- **Depends on:** display-lib, font-handling, earth-rendering.
+- **Minimal test:** clicking in the delegated region switches between the default and hello-world formats.
+- **Status:** todo.
+
+### dds-and-service-contracts
+Define the DDS layer and the service contracts in `stations-dds`: create the participant from `DDS/cyclonedds-config.xml` and typed readers/writers; define the topic-contract schema and loader for `contracts/topics.toml` and `contracts/services/<app>.toml`; validate each service's declared topics at startup; support a `--topics` flag that prints a service's contract; and write a readable summary to `build/topics.md`. Provisional: the nature and scope of the DDS layer and the contracts still need refinement, and this may be split again.
+- **Depends on:** none.
+- **Minimal test:** a typed publish/subscribe round-trip; a sample contract loads, validates, prints with `--topics`, and matches `build/topics.md`.
+- **Status:** todo.
+
+### dds-echo
+Subscribe to any named topic and print received samples.
+- **Depends on:** dds-and-service-contracts.
+- **Minimal test:** prints samples from a publisher.
+- **Status:** todo.
+
+### hello-view-service
+Create the hello_world view service (`hello-view-service`): add the trivial `HelloWorldViewTopic` to `DDS/hello_world.idl` (an exact copy of `HelloWorldTopic`; rotation is added later) and publish it; extend the display library to subscribe to `HelloWorldViewTopic` and render the hello-world format from the received greeting and attitude instead of the hardcoded values. The model data moves out of the display library to this service; later `hello-service` becomes its source.
+- **Depends on:** font-handling, earth-rendering, dds-and-service-contracts.
+- **Minimal test:** `dds-echo` shows `HelloWorldViewTopic` samples and the display renders the published view.
+- **Status:** todo.
+
+### hello-service
+Create the hello_world model service (`hello-service`): publish `HelloWorldTopic` (greeting text and quaternion attitude) at a fixed rate, a 23.5 degree tilt. The model data moves out of the view service to this service, and the view service now subscribes to it and relays. One revolution every twelve minutes is added later.
+- **Depends on:** dds-and-service-contracts.
+- **Minimal test:** `dds-echo` shows `HelloWorldTopic` samples and the display shows the model-driven world.
 - **Status:** todo.
 
 ## Later increments
+
+### format-ctl-service
+Create the format-manager controller service: the controller of the per-display format-manager constellation, controlling which format each display shows.
+- **Depends on:** format-manager.
+- **Minimal test:** the service controls the active format on a display.
+- **Status:** todo.
+
+### format-menu
+Add a three-dot menu to the format manager, drawn in the upper left over all formats, with one entry per format.
+- **Depends on:** format-ctl-service.
+- **Minimal test:** the menu switches the active format.
+- **Status:** todo.
+
+### format-chooser-format
+Create the format-chooser-format: a format for choosing formats.
+- **Depends on:** format-menu.
+- **Minimal test:** a format can be chosen from the format.
+- **Status:** todo.
+
+### hello-ctl-service
+Create the hello_world control service (`hello-ctl-service`): consume input events from the display libraries; user rotations and changes of the light vector and color, to be refined later.
+- **Depends on:** hello-view-service.
+- **Minimal test:** input events change the displayed world.
+- **Status:** todo.
+
+### big-d
+Create the large display application (`big-d`): a large rectangular window with three square format windows and an eyebrow window, surrounded by a console.
+- **Depends on:** display-lib.
+- **Minimal test:** the window opens with three format windows and the eyebrow.
+- **Status:** todo.
+
+### tentacles
+Create the launcher application (`tentacles`): a window that can start and stop the applications for a configuration.
+- **Depends on:** none.
+- **Minimal test:** the launcher starts and stops a configuration.
+- **Status:** todo.
+
+### paws
+Create the game-controller window application (`paws`): a window with a virtual controller that can be bound to a game controller.
+- **Depends on:** none.
+- **Minimal test:** the window shows a virtual controller.
+- **Status:** todo.
 
 ### sdl3-imgui
 Install SDL3 to the external prefix and add glad and Dear ImGui sources under `cpp/third_party/`.
@@ -214,7 +227,6 @@ Create the `cpp/` CMake project with one compiling target.
 Not yet broken into stories:
 * C++ mirror of the Rust libraries, tools, and apps and the `c++` configuration.
 * Hybrid configuration and `launch-hybrid.ps1`; `launch-cpp.ps1`.
-* Remaining top-level module IDL (control, joystick, format-manager, per-station/display) and the full topic registry (input, control, joystick, format window/mapping).
-* Joystick control service and controller window; real game-controller binding.
-* Format manager and per-station views.
-* Large display and launcher window.
+* Remaining top-level module IDL (control, joystick, per-station/display) and the full topic registry (input, control, joystick, format window/mapping).
+* Joystick control service and real game-controller binding.
+* Per-station views.
