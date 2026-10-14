@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use display_lib::{Display, Region};
 use egui_glow::EguiGlow;
 use glow::HasContext as _;
 use winit::application::ApplicationHandler;
@@ -20,9 +21,6 @@ const WINDOW_HEIGHT: f64 = 720.0;
 
 /// Background of the console (and of the whole window).
 const CONSOLE_BG: [f32; 4] = [0.06, 0.06, 0.07, 1.0];
-/// Placeholder for the region delegated to the display library: dark,
-/// unsaturated green.
-const FORMAT_GREEN: [f32; 4] = [0.10, 0.18, 0.10, 1.0];
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct AppState {
@@ -35,6 +33,7 @@ pub struct App {
     gl_window: Option<GlWindow>,
     gl: Option<Arc<glow::Context>>,
     egui_glow: Option<EguiGlow>,
+    display: Option<Display>,
 }
 
 impl App {
@@ -45,6 +44,7 @@ impl App {
             gl_window: None,
             gl: None,
             egui_glow: None,
+            display: None,
         }
     }
 
@@ -64,10 +64,12 @@ impl App {
         };
         let gl = Arc::new(gl);
         let egui_glow = EguiGlow::new(event_loop, Arc::clone(&gl), None, None, true);
+        let display = Display::new(Arc::clone(&gl)).expect("display-lib init");
 
         self.gl_window = Some(gl_window);
         self.gl = Some(gl);
         self.egui_glow = Some(egui_glow);
+        self.display = Some(display);
         self.state.format_on = true;
         // Paint one frame while hidden, then show the window.
         self.render();
@@ -79,20 +81,31 @@ impl App {
 
     fn render(&mut self) {
         // 1. Raw GL: console background over the whole window, then the
-        //    delegated region. Also derive the console height for egui.
+        //    delegated region (rendered by the display library). Also derive
+        //    the console height for egui.
         let console_height = {
-            let (Some(gl), Some(gl_window)) = (self.gl.as_ref(), self.gl_window.as_ref()) else {
+            let (Some(gl), Some(gl_window), Some(display)) = (
+                self.gl.as_ref(),
+                self.gl_window.as_ref(),
+                self.display.as_mut(),
+            ) else {
                 return;
             };
             let scale = gl_window.scale_factor();
-            let layout = layout::compute(gl_window.size(), scale);
+            let size = gl_window.size();
+            let layout = layout::compute(size, scale);
             clear(gl, gl_window, CONSOLE_BG);
-            let format_color = if self.state.format_on {
-                FORMAT_GREEN
-            } else {
-                CONSOLE_BG
-            };
-            paint_format(gl, gl_window, layout.format, format_color);
+            if self.state.format_on {
+                display.render(
+                    size.height as i32,
+                    Region {
+                        x: layout.format.x,
+                        y: layout.format.y,
+                        width: layout.format.w,
+                        height: layout.format.h,
+                    },
+                );
+            }
             layout.console.h as f32 / scale as f32
         };
 
@@ -178,21 +191,5 @@ fn clear(gl: &glow::Context, gl_window: &GlWindow, color: [f32; 4]) {
         gl.viewport(0, 0, size.width as i32, size.height as i32);
         gl.clear_color(color[0], color[1], color[2], color[3]);
         gl.clear(glow::COLOR_BUFFER_BIT);
-    }
-}
-
-/// Clear `rect` (top-left origin) to `color` using a GL scissor rect.
-fn paint_format(gl: &glow::Context, gl_window: &GlWindow, rect: layout::Rect, color: [f32; 4]) {
-    if rect.w <= 0 || rect.h <= 0 {
-        return;
-    }
-    let height = gl_window.size().height as i32;
-    let y_gl = height - rect.y - rect.h; // GL origin is bottom-left
-    unsafe {
-        gl.enable(glow::SCISSOR_TEST);
-        gl.scissor(rect.x, y_gl, rect.w, rect.h);
-        gl.clear_color(color[0], color[1], color[2], color[3]);
-        gl.clear(glow::COLOR_BUFFER_BIT);
-        gl.disable(glow::SCISSOR_TEST);
     }
 }

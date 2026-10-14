@@ -1,9 +1,10 @@
 [workspace]
 resolver = "2"
-members = ["lib/stations-dds", "tool/equirect-to-cubemap", "ui/lil-d"]
+members = ["lib/stations-dds", "lib/display-lib", "tool/equirect-to-cubemap", "ui/lil-d"]
 
 [workspace.dependencies]
 cyclonedds = { git = "https://github.com/a101010/cyclonedds-rust", rev = "acef68438ef3c8eae56c45afbecdbb89f3d3e115", default-features = false, features = ["native"] }
+display-lib = { path = "lib/display-lib" }
 winit = "0.30.13"
 glutin = "0.32.3"
 glutin-winit = "0.5.0"

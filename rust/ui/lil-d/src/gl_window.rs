@@ -53,19 +53,17 @@ impl GlWindow {
         let raw_window_handle = window
             .as_ref()
             .map(|w| w.window_handle().expect("window handle").as_raw());
-        let context_attributes =
-            glutin::context::ContextAttributesBuilder::new().build(raw_window_handle);
-        let fallback_context_attributes = glutin::context::ContextAttributesBuilder::new()
-            .with_context_api(glutin::context::ContextApi::Gles(None))
+        // OpenGL 3.3 core: the display library compiles `#version 330 core`
+        // shaders, so request a context that supports them explicitly.
+        let context_attributes = glutin::context::ContextAttributesBuilder::new()
+            .with_context_api(glutin::context::ContextApi::OpenGl(Some(
+                glutin::context::Version::new(3, 3),
+            )))
+            .with_profile(glutin::context::GlProfile::Core)
             .build(raw_window_handle);
         let not_current_gl_context = gl_display
             .create_context(&gl_config, &context_attributes)
-            .unwrap_or_else(|_| {
-                gl_config
-                    .display()
-                    .create_context(&gl_config, &fallback_context_attributes)
-                    .expect("failed to create GL context")
-            });
+            .expect("failed to create GL 3.3 context");
 
         let window = window.take().unwrap_or_else(|| {
             glutin_winit::finalize_window(event_loop, window_attributes.clone(), &gl_config)

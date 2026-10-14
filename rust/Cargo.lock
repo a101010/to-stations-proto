@@ -454,6 +454,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "display-lib"
+version = "0.0.0"
+dependencies = [
+ "glow",
+]
+
+[[package]]
 name = "dlib"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1063,6 +1070,7 @@ name = "lil-d"
 version = "0.0.0"
 dependencies = [
  "clap",
+ "display-lib",
  "egui",
  "egui_glow",
  "glow",

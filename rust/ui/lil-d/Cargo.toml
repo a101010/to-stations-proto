@@ -9,6 +9,7 @@ name = "lil-d"
 path = "src/main.rs"
 
 [dependencies]
+display-lib = { workspace = true }
 winit = { workspace = true }
 glutin = { workspace = true }
 glutin-winit = { workspace = true }
