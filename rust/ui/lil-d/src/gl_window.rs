@@ -1,9 +1,12 @@
 //! The winit window with a glutin/glow OpenGL context.
 
-use core::ffi::CStr;
+use core::ffi::{c_char, c_void, CStr};
 use core::num::NonZeroU32;
 
 use winit::raw_window_handle::HasWindowHandle as _;
+
+/// A GL proc-address loader, as passed to the display library.
+pub type GlLoaderFn = extern "C" fn(*const c_char, *mut c_void) -> *const c_void;
 
 pub struct GlWindow {
     window: winit::window::Window,
@@ -129,5 +132,19 @@ impl GlWindow {
     pub fn get_proc_address(&self, addr: &CStr) -> *const core::ffi::c_void {
         use glutin::display::GlDisplay as _;
         self.gl_display.get_proc_address(addr)
+    }
+
+    /// The GL proc-address loader and its userdata (the glutin display), for
+    /// the display library.
+    pub fn gl_loader(&self) -> (GlLoaderFn, *mut c_void) {
+        extern "C" fn load(name: *const c_char, userdata: *mut c_void) -> *const c_void {
+            use glutin::display::GlDisplay as _;
+            let display = unsafe { &*(userdata as *const glutin::display::Display) };
+            display.get_proc_address(unsafe { CStr::from_ptr(name) })
+        }
+        (
+            load,
+            &self.gl_display as *const glutin::display::Display as *mut c_void,
+        )
     }
 }

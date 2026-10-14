@@ -68,6 +68,12 @@ Build from the repository root:
 
 Cargo reads `.cargo/config.toml` at the repository root, which sets the target directory `build/rust` and `REPO_ROOT` (the absolute repository root, used by the generated-code `include!`). Because Cargo supplies `REPO_ROOT`, a plain `cargo build`/`cargo test` run from within the repository works too — but the generated file must exist first, so run `build.ps1` once after a clean. Never clean the target directory: dependencies (including the fork) are cached there and should not be rebuilt.
 
+### Display library
+
+The small display app (`lil-d`) renders its format region through a display library that it loads at runtime as a DLL (`display_lib.dll`), not by linking. The ABI is the shared header `include/display_lib.h`; a display app in either language can load a display library in either language (the hybrid deployment).
+
+`scripts/build.ps1` builds `display_lib.dll` and deploys it next to `lil-d.exe` in `build/deploy/bin`. `lil-d` takes `--display-lib <path>` to choose the DLL (default `display_lib.dll`, resolved next to the exe). Because `lil-d` does not link the library, `cargo run -p lil-d` alone does not build the DLL; run `scripts/build.ps1` (or `cargo build` for the whole workspace) first.
+
 ### Cyclone DDS (C)
 
 Eclipse Cyclone DDS `11.0.1` is built from source and installed to `C:\Libraries\cyclonedds`; the source is kept at `C:\Libraries\src\cyclonedds`.

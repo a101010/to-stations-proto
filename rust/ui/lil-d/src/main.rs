@@ -10,6 +10,7 @@
 mod app;
 mod cli;
 mod console;
+mod display;
 mod gl_window;
 mod layout;
 

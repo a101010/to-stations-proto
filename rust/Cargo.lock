@@ -1070,12 +1070,12 @@ name = "lil-d"
 version = "0.0.0"
 dependencies = [
  "clap",
- "display-lib",
  "egui",
  "egui_glow",
  "glow",
  "glutin",
  "glutin-winit",
+ "libloading",
  "winit",
 ]
 

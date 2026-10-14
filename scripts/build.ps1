@@ -73,5 +73,6 @@ if (-not $Test) {
     $deployBin = Join-Path $repoRoot 'build\deploy\bin'
     New-Item -ItemType Directory -Force -Path $deployBin | Out-Null
     Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\lil-d.exe') -Destination $deployBin -Force
-    Write-Host "Deployed $(Join-Path $deployBin 'lil-d.exe')"
+    Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\display_lib.dll') -Destination $deployBin -Force
+    Write-Host "Deployed $(Join-Path $deployBin 'lil-d.exe') and display_lib.dll"
 }

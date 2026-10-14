@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use display_lib::{Display, Region};
 use egui_glow::EguiGlow;
 use glow::HasContext as _;
 use winit::application::ApplicationHandler;
@@ -12,6 +11,7 @@ use winit::window::WindowId;
 
 use crate::cli::Args;
 use crate::console::{self, ConsoleAction};
+use crate::display;
 use crate::gl_window::GlWindow;
 use crate::layout;
 
@@ -33,7 +33,7 @@ pub struct App {
     gl_window: Option<GlWindow>,
     gl: Option<Arc<glow::Context>>,
     egui_glow: Option<EguiGlow>,
-    display: Option<Display>,
+    display: Option<display::Display>,
 }
 
 impl App {
@@ -64,7 +64,11 @@ impl App {
         };
         let gl = Arc::new(gl);
         let egui_glow = EguiGlow::new(event_loop, Arc::clone(&gl), None, None, true);
-        let display = Display::new(Arc::clone(&gl)).expect("display-lib init");
+        let display = {
+            let (loader, userdata) = gl_window.gl_loader();
+            let path = display::resolve_path(&self.args.display_lib);
+            display::Display::load(&path, loader, userdata).expect("display-lib load")
+        };
 
         self.gl_window = Some(gl_window);
         self.gl = Some(gl);
@@ -96,15 +100,7 @@ impl App {
             let layout = layout::compute(size, scale);
             clear(gl, gl_window, CONSOLE_BG);
             if self.state.format_on {
-                display.render(
-                    size.height as i32,
-                    Region {
-                        x: layout.format.x,
-                        y: layout.format.y,
-                        width: layout.format.w,
-                        height: layout.format.h,
-                    },
-                );
+                display.render(size.height as i32, layout.format);
             }
             layout.console.h as f32 / scale as f32
         };
