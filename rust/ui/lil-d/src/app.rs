@@ -69,7 +69,10 @@ impl App {
         self.gl = Some(gl);
         self.egui_glow = Some(egui_glow);
         self.state.format_on = true;
+        // Paint one frame while hidden, then show the window.
+        self.render();
         if let Some(gl_window) = self.gl_window.as_ref() {
+            gl_window.window().set_visible(true);
             gl_window.window().request_redraw();
         }
     }

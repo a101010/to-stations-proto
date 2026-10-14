@@ -26,7 +26,7 @@ The third-party APIs below were verified against the installed `egui_glow-0.36.2
 * **Window.** One OS window: a square format region (the region that will be delegated to the display library) painted a named dark unsaturated green constant, with the console area around it. The power button lives in the console and toggles the format region on/off.
 * **Arguments.** `--station N` via `clap`, default `0`. `--topics` is not added yet; it arrives with `dds-and-service-contracts`.
 * **No DDS, no `InputEvent`, no display library.** `lil-d` does not forward input yet; the display application forwards input to the display library when `format-manager` needs it.
-* **Build and deploy are script-owned and grow with the stories.** `scripts/build.ps1` gains a step that assembles `build/deploy/bin` with `lil-d.exe`; the debug binary is deployed for now (a release switch can come later). `scripts/launch-rust.ps1` and `scripts/cleanup.ps1` are new, location-agnostic (resolve the repository root from `$PSScriptRoot`; no drive letter), and PowerShell 5.1 compatible.
+* **Build and deploy are script-owned and grow with the stories.** `scripts/build.ps1` gains a step that assembles `build/deploy/bin` with `lil-d.exe`; the release binary is deployed so the display is a GUI application with no console window (`lil-d` sets `windows_subsystem = "windows"` in release builds). `scripts/launch-rust.ps1` and `scripts/cleanup.ps1` are new, location-agnostic (resolve the repository root from `$PSScriptRoot`; no drive letter), and PowerShell 5.1 compatible.
 * **Launch and cleanup operate only on `build/deploy`.** `launch-rust.ps1` starts `build/deploy/bin/lil-d.exe` with its station argument; the model and view services join it in later stories. `cleanup.ps1` stops all configuration processes.
 
 ## Crate layout
@@ -348,7 +348,7 @@ try {
 # deploy (new)
 $deployBin = Join-Path $repoRoot 'build\deploy\bin'
 New-Item -ItemType Directory -Force -Path $deployBin | Out-Null
-Copy-Item -Path (Join-Path $repoRoot 'build\rust\debug\lil-d.exe') -Destination $deployBin -Force
+Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\lil-d.exe') -Destination $deployBin -Force
 ```
 
 ### `scripts/launch-rust.ps1` (new)
@@ -404,7 +404,7 @@ The window opens with the console ("station 0" and the power button) and the gre
 * **egui_glow API drift.** The plan pins the verified 0.36.2 calls (`EguiGlow::new`, `run(&Window, impl FnMut(&mut Ui))`, `paint`, `on_window_event`); follow the smoke test if the version moves.
 * **GL scissor origin.** The Y flip (`h - y - h`) is easy to get wrong; the format region must be visually square and above the console.
 * **Panel-inside-root-Ui.** `egui::Panel::bottom(...).show(ui, ...)` inside the `run_ui` root Ui is the 0.36 API; if a repaint or sizing issue appears, fall back to a full-window `CentralPanel` with a manual console rect.
-* **Deploy profile.** Debug is deployed now; a release switch is a later decision.
+* **Deploy profile.** The release build is deployed; `windows_subsystem = "windows"` applies to it, so the display has no console window. Debug builds keep the console for logs and panics.
 * **`cleanup.ps1` breadth.** Stopping by image name is simple; replace with tracked PIDs or a job object if it proves too broad.
 * **Window/console geometry** and the exact green are provisional and will be revisited when `display-lib` takes over the region.
 

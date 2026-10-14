@@ -57,7 +57,7 @@ try {
     if ($Test) {
         & cargo test --manifest-path 'rust\Cargo.toml'
     } else {
-        & cargo build --manifest-path 'rust\Cargo.toml'
+        & cargo build --release --manifest-path 'rust\Cargo.toml'
     }
     if ($LASTEXITCODE -ne 0) { throw "cargo build/test failed ($LASTEXITCODE)" }
 }
@@ -67,8 +67,11 @@ finally {
 
 # Assemble the deployable layout. Only build/deploy is durable; everything else
 # under build/ is temporary. Each story that adds an executable or library
-# extends this step.
-$deployBin = Join-Path $repoRoot 'build\deploy\bin'
-New-Item -ItemType Directory -Force -Path $deployBin | Out-Null
-Copy-Item -Path (Join-Path $repoRoot 'build\rust\debug\lil-d.exe') -Destination $deployBin -Force
-Write-Host "Deployed $(Join-Path $deployBin 'lil-d.exe')"
+# extends this step. The release build is deployed so the display is a GUI
+# application with no console window (see lil-d's windows_subsystem attribute).
+if (-not $Test) {
+    $deployBin = Join-Path $repoRoot 'build\deploy\bin'
+    New-Item -ItemType Directory -Force -Path $deployBin | Out-Null
+    Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\lil-d.exe') -Destination $deployBin -Force
+    Write-Host "Deployed $(Join-Path $deployBin 'lil-d.exe')"
+}
