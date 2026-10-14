@@ -64,3 +64,11 @@ try {
 finally {
     Pop-Location
 }
+
+# Assemble the deployable layout. Only build/deploy is durable; everything else
+# under build/ is temporary. Each story that adds an executable or library
+# extends this step.
+$deployBin = Join-Path $repoRoot 'build\deploy\bin'
+New-Item -ItemType Directory -Force -Path $deployBin | Out-Null
+Copy-Item -Path (Join-Path $repoRoot 'build\rust\debug\lil-d.exe') -Destination $deployBin -Force
+Write-Host "Deployed $(Join-Path $deployBin 'lil-d.exe')"

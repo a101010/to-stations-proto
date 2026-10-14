@@ -1,0 +1,18 @@
+[package]
+name = "lil-d"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "lil-d"
+path = "src/main.rs"
+
+[dependencies]
+winit = { workspace = true }
+glutin = { workspace = true }
+glutin-winit = { workspace = true }
+glow = { workspace = true }
+egui = { workspace = true }
+egui_glow = { workspace = true }
+clap = { workspace = true }
