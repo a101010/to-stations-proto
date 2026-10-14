@@ -120,10 +120,10 @@ Create the small display application (`lil-d`): a window and an egui console are
 - **Status:** done.
 
 ### display-lib
-Create the display library (`display-lib`) and have `lil-d` delegate the format-window region to it. It renders the default format, hardcoded: a solid color (different from the original `lil-d` color) with an x in a different color, owning the entire region delegated to the library.
+Create the display library (`display-lib`) as a C-ABI DLL and have `lil-d` load it and delegate the format-window region to it. It renders the default format, hardcoded: a solid color (different from the original `lil-d` color) with an x in a different color, owning the entire region delegated to the library. The ABI is the shared header `include/display_lib.h` (implemented in Rust and, later, C++), so a display app in either language can use a display library in either language (the hybrid deployment's in-process interop); `lil-d` selects the DLL with `--display-lib <path>`.
 - **Depends on:** lil-d.
-- **Minimal test:** the delegated region shows the default format.
-- **Status:** done.
+- **Minimal test:** the delegated region shows the default format when `lil-d` loads `display_lib.dll` through the C ABI.
+- **Status:** in progress.
 
 ### font-handling
 Load a font from `assets/fonts` and render text (the hello_world greeting) in the display library as part of the hello-world format. The greeting and attitude are hardcoded for now.

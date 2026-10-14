@@ -33,8 +33,11 @@ All the applications communicate using Distributed Data Services configured to u
 ### OpenGL context and safety
 `glow` marks every GL call `unsafe` because a GL context must be current on the calling thread, and the binding has no token that proves currentness. The Rust rendering libraries follow `egui_glow`: their public APIs are safe and document the assumption that a glow context is current on the calling thread, which the display application upholds by doing all GL work on its event-loop thread. This documented-assumption approach is limited to the GL-context-current precondition; other safety concerns are handled normally. The context is requested explicitly (OpenGL 3.3 core) so the shaders the libraries compile are guaranteed.
 
+### Display library ABI
+A display application and its display library are separate components joined by a shared C ABI (`include/display_lib.h`), not by static linking. The Rust and C++ display libraries both implement that ABI, and the Rust and C++ display applications both consume it, so any display application can use either language's display library (part of the hybrid deployment). The application supplies the OpenGL proc-address loader, so the ABI is independent of the windowing stack (winit/glutin or SDL3); the ABI carries only C types. The display library is deployed as a DLL next to its display application in `build/deploy/bin`, and the launch script or configuration chooses which implementation's DLL is loaded. The ABI is versioned (`display_lib_abi_version`) so a mismatched pair fails cleanly.
+
 ## Configurations
-The three configurations (`rust`, `c++`, `hybrid`) differ only in which language implementation of each application is launched. Applications interoperate because they share the same IDL types and speak DDSI-RTPS; a hybrid launch simply mixes the two implementations.
+The three configurations (`rust`, `c++`, `hybrid`) differ only in which language implementation of each application is launched. Applications interoperate because they share the same IDL types and speak DDSI-RTPS; a hybrid launch simply mixes the two implementations. A display application can also use either language's display library: both implement the same C ABI (`include/display_lib.h`), so a Rust display app can load the C++ display library and vice versa. That in-process interop is the hybrid deployment's other half, alongside the DDS/IDL interop.
 
 ## Formats and the distributed MVC constellation
 A *format* is a distributable model-view-controller constellation. Each format owns the following services:
@@ -82,7 +85,7 @@ There is deliberately no scope field in a contract: wiring is expressed by the I
 * **IDL modules are namespaces.** An IDL `module` maps to a Rust `pub mod`; the DDS type name is the fully-qualified IDL scope. Modules are top-level; there is no vendor root namespace.
 
 ## Files and folders
-* **Authored files** (written by people or agents) live in `planning/`, `docs/`, `DDS/`, `contracts/`, `scripts/`, `assets/`, `rust/`, and `cpp/`.
+* **Authored files** (written by people or agents) live in `planning/`, `docs/`, `DDS/`, `contracts/`, `include/`, `scripts/`, `assets/`, `rust/`, and `cpp/`.
 * **Build artifacts** live only under `build/`, which is never committed. `build/deploy/` is the only durable output; everything else under `build/` is temporary and freely deletable:
   * `build/deploy/` - the deployable layout: binaries, libraries, assets, and DDS configuration.
   * `build/gen/{rust,cpp}/` - IDL-generated sources.
@@ -90,6 +93,7 @@ There is deliberately no scope field in a contract: wiring is expressed by the I
   * `build/cpp/` - the CMake binary directory.
   * `build/topics.md` - the generated contract summary.
 * `DDS/` holds the IDL types and the Cyclone DDS configuration shared by all applications; it is authored, not generated.
+* `include/` holds shared C ABI headers (for example `display_lib.h`) implemented by both the Rust and C++ sides.
 
 ## IDL organization
 * `DDS/` holds authored IDL as module-sized files, one top-level IDL `module` per file (`math.idl` holds `module math`; `hello_world.idl` holds `module hello_world`). A module is not reopened across files: all of a module's types live in its one file, so a format's model/view/control structs share the format's file.
@@ -105,6 +109,7 @@ to-stations-proto/
                        input.idl, control.idl, format_manager.idl,
                        cyclonedds-config.xml
   contracts/           authored: topics.toml, services/<app>.toml
+  include/             authored: display_lib.h (shared C ABI)
   scripts/             authored: build.ps1, verify-loopback.ps1, cleanup.ps1,
                        launch-rust.ps1, launch-cpp.ps1, launch-hybrid.ps1,
                        subst-repo.ps1, install-subst-startup.ps1
