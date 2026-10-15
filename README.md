@@ -120,6 +120,21 @@ cmake -S C:\Libraries\src\cyclonedds -B C:\Libraries\cyclonedds-rust -G "Visual 
 cmake --build C:\Libraries\cyclonedds-rust --target ddsc --config Release
 ```
 
+### HarfBuzz
+
+Format text is rendered with HarfBuzz's experimental GPU library (`libharfbuzz-gpu`, the Slug algorithm). HarfBuzz `14.6.0` is built from source and installed to `C:\Libraries\harfbuzz`; the source is kept at `C:\Libraries\src\harfbuzz`.
+
+```
+git clone --branch 14.6.0 --depth 1 https://github.com/harfbuzz/harfbuzz.git C:\Libraries\src\harfbuzz
+cmake -S C:\Libraries\src\harfbuzz -B C:\Libraries\src\harfbuzz\build -G "Visual Studio 18 2026" -A x64 -DCMAKE_INSTALL_PREFIX=C:/Libraries/harfbuzz -DBUILD_SHARED_LIBS=ON -DHB_BUILD_GPU=ON -DHB_BUILD_GPU_DEMO=OFF -DHB_BUILD_SUBSET=OFF -DHB_BUILD_RASTER=OFF -DHB_BUILD_VECTOR=OFF -DHB_BUILD_UTILS=OFF
+cmake --build C:\Libraries\src\harfbuzz\build --config Release --parallel
+cmake --install C:\Libraries\src\harfbuzz\build --config Release
+```
+
+The install contains `bin\harfbuzz.dll`, `bin\harfbuzz-gpu.dll`, `lib\harfbuzz.lib`, `lib\harfbuzz-gpu.lib`, and `include\harfbuzz\hb-gpu.h`. The Rust crate `rust/lib/harfbuzz` links these from the external prefix (`EXT_PATH_PREFIX`, default `C:\Libraries`); `scripts/build.ps1` sets the variable and prepends `C:\Libraries\harfbuzz\bin` to the process `PATH` so the DLLs are found during build and test. No system or user `PATH` change is required.
+
+The HarfBuzz CMake port is community-maintained; if the GPU target does not build, Meson is the fallback (`meson setup build --prefix=C:/Libraries/harfbuzz -Dgpu=enabled -Dsubset=disabled -Draster=disabled -Dvector=disabled -Dutilities=disabled`).
+
 ### DDS configuration
 
 All DDS traffic uses IPv6 multicast on a Microsoft loopback adapter named `StationsDDS`. The shared configuration is `DDS/cyclonedds-config.xml`, applied through the `CYCLONEDDS_URI` environment variable.

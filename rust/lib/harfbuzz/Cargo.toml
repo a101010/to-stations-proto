@@ -1,0 +1,10 @@
+[package]
+name = "harfbuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+build = "build.rs"
+
+[lib]
+name = "harfbuzz"
+path = "src/lib.rs"

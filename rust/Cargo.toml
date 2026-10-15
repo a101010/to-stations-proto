@@ -1,9 +1,10 @@
 [workspace]
 resolver = "2"
-members = ["lib/stations-dds", "lib/display-lib", "tool/equirect-to-cubemap", "ui/lil-d"]
+members = ["lib/stations-dds", "lib/display-lib", "lib/harfbuzz", "tool/equirect-to-cubemap", "ui/lil-d"]
 
 [workspace.dependencies]
 cyclonedds = { git = "https://github.com/a101010/cyclonedds-rust", rev = "acef68438ef3c8eae56c45afbecdbb89f3d3e115", default-features = false, features = ["native"] }
+harfbuzz = { path = "lib/harfbuzz" }
 libloading = "0.8"
 winit = "0.30.13"
 glutin = "0.32.3"
@@ -14,4 +15,3 @@ egui-winit = "0.36.2"
 egui_glow = { version = "0.36.2", features = ["winit"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 clap = { version = "4", features = ["derive"] }
-skrifa = "0.44"

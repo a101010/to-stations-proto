@@ -15,8 +15,16 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 
 # The external prefix holds installed components (CycloneDDS, cyclonedds-cxx,
-# SDL3). Not needed yet; kept for the steps added later.
+# HarfBuzz, SDL3).
 $extPathPrefix = if ($env:EXT_PATH_PREFIX) { $env:EXT_PATH_PREFIX } else { 'C:\Libraries' }
+
+# Expose the prefix to build scripts (harfbuzz's build.rs) and provision the
+# HarfBuzz runtime for build and test without changing the user PATH.
+$env:EXT_PATH_PREFIX = $extPathPrefix
+$harfbuzzBin = Join-Path $extPathPrefix 'harfbuzz\bin'
+if (Test-Path $harfbuzzBin) {
+    $env:PATH = "$harfbuzzBin;$env:PATH"
+}
 
 # The fork's cyclonedds-idlc is Rust codegen (it wraps cyclonedds-build). The C
 # idlc.exe emits C/C++, not Rust.

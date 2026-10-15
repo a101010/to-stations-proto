@@ -868,6 +868,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "harfbuzz"
+version = "0.0.0"
+
+[[package]]
 name = "harfrust"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -97,8 +97,14 @@ It prints the HarfBuzz version, the shaped glyph count and advances for "Hello, 
 * **Struct layout.** `hb_glyph_info_t`/`hb_glyph_position_t` are declared in the crate and must match the C layout; the crate's test guards the positions used for layout.
 * **`skrifa` removal.** Confirm nothing else uses it before deleting the workspace entry.
 
+## Result
+
+Done and verified. HarfBuzz `14.6.0` is built with the CMake port and installed to `C:\Libraries\harfbuzz` (shared, GPU on, subset/raster/vector/utils off); `bin\harfbuzz.dll`, `bin\harfbuzz-gpu.dll`, `lib\harfbuzz.lib`, `lib\harfbuzz-gpu.lib`, and `include\harfbuzz\hb-gpu.h` are present. The crate `rust/lib/harfbuzz` links them from `EXT_PATH_PREFIX` and passes its two tests (shaping "Hello, world!" with FiraSans and encoding a glyph; shader sources present). The temporary smoke program (`build/harfbuzz-smoke/`) also passed: 13 glyphs shaped, a 1528-byte encoded blob, and non-empty GLSL shader sources. `scripts/build.ps1` now exports `EXT_PATH_PREFIX` and prepends the HarfBuzz `bin` to the process `PATH`; `scripts/build.ps1 -Test` and the deploy build both pass.
+
+Findings: the CMake port's exported targets carry a broken `INTERFACE_INCLUDE_DIRECTORIES` (an absolute `/harfbuzz`), so the smoke program links the installed libraries directly rather than via `find_package`; the Rust binding uses `build.rs` and is unaffected. The smoke program also needs `<hb-ot.h>` for `hb_ot_font_set_funcs` (not pulled in by `<hb.h>`).
+
 ## Files
 
-* Authored: `rust/lib/harfbuzz/{Cargo.toml,build.rs,src/lib.rs}`, `rust/lib/harfbuzz/tests/`.
-* Changed: `rust/Cargo.toml` (add the member and the `harfbuzz` workspace dependency; drop `skrifa`), `README.md`, `docs/versions.md`, `planning/{architecture,backlog,current_story}.md`.
+* Authored: `rust/lib/harfbuzz/{Cargo.toml,build.rs,src/lib.rs}`, `rust/lib/harfbuzz/tests/smoke.rs`.
+* Changed: `rust/Cargo.toml` (member plus the `harfbuzz` workspace dependency; dropped `skrifa`), `scripts/build.ps1`, `README.md`, `docs/versions.md`, `planning/{architecture,backlog,current_story}.md`.
 * Temporary: `build/harfbuzz-smoke/` (CMake project plus `smoke.cc`).

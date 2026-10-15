@@ -130,7 +130,7 @@ Create the display library (`display-lib`) as a C-ABI DLL and have `lil-d` load 
 Build and install HarfBuzz 14.6.0 with the experimental GPU library (`libharfbuzz-gpu`) to the external prefix, and add the Rust FFI crate `rust/lib/harfbuzz` (raw bindings plus thin wrappers) that links it. The CMake port builds and installs `harfbuzz` and `harfbuzz-gpu`; `hb-gpu.h` is installed under `include/harfbuzz`.
 - **Depends on:** none.
 - **Minimal test:** a temporary smoke program under `build/` shapes "Hello, world!" with FiraSans, encodes a glyph with `hb_gpu_draw_encode`, and asserts a non-empty blob and a non-null GLSL fragment shader source.
-- **Status:** todo.
+- **Status:** done.
 - **Records:** HarfBuzz (and `libharfbuzz-gpu`) in `docs/versions.md`.
 
 ### font-handling
