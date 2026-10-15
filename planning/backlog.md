@@ -19,7 +19,7 @@ Conventions:
 * Rendering: winit + glutin/glow + egui.
 * The model service and the view service are separate: the model publishes the greeting and the attitude (a 23.5 degree tilt, as a quaternion; one revolution every twelve minutes is added later); the view publishes the display message.
 * Earth projection: a cube map sampled on a sphere, oriented by the attitude quaternion, lit from the upper right.
-* Font handling (loading and rendering the greeting) is in scope.
+* Font handling (loading and rendering the greeting) is in scope; format text uses HarfBuzz's experimental GPU library (`libharfbuzz-gpu`).
 * Small display (`lil-d`): one square format window plus a console area with a single power button, `--station N`, and `--topics`.
 * The display library hosts a default format and the hello-world format and a format manager that switches the active format on a click in the region delegated to it.
 * Input handling is added per feature; the first is the format-manager click.
@@ -31,6 +31,7 @@ Conventions:
 * A short repository path on Windows (`scripts/subst-repo.ps1`; see `architecture.md`, "Path length").
 * Eclipse Cyclone DDS C core (11.x) and the Microsoft loopback adapter named `StationsDDS` with IPv6 multicast.
 * The to-stations fork of `cyclonedds-rust` (`https://github.com/a101010/cyclonedds-rust`, branch `multifile`, rev `acef684`), consumed as a pinned git dependency (`planning/cyclonedds-build-plan.md`).
+* HarfBuzz 14.6.0 with the experimental GPU library (`libharfbuzz-gpu`), installed to the external prefix (see the `harfbuzz` story).
 
 Third-party libraries are built/installed to an external prefix (for example `C:\Libraries`), never committed. Each install story records its component in `docs/versions.md`.
 
@@ -76,7 +77,7 @@ Build and install the C++ binding against the `cyclonedds-core` install.
 - **Records:** cyclonedds-cxx in `docs/versions.md`.
 
 ### rust-dds-binding
-Add the `cyclonedds` Rust crate and `cyclonedds-build` from the to-stations fork of `cyclonedds-rust` (branch `multifile`, rev `acef684`) as git dependencies pinned to that rev. The fork's copy of CycloneDDS C is built from the external prefix (`CYCLONEDDS_SRC`, `CYCLONEDDS_BUILD`) and linked statically so no runtime DLL is needed. IDL codegen is deferred to `hello-world-idl`; this story uses a hand-written `#[derive(DdsType)]` type.
+Add the `cyclonedds` Rust crate and `cyclonedds-build` from the to-stations fork of `cyclonedds-rust` (branch `multifile`, rev `acef684`) as git dependencies pinned to that rev. The fork's copy of CycloneDDS C is built from the external prefix (`CYCLONEDDS_SRC`, `CYCLONEDDS_BUILD`) and linked statically so no runtime DLL is needed. IDL codegen is deferred to `hello-world-idl`; this story uses a `#[derive(DdsType)]` type.
 - **Depends on:** none.
 - **Minimal test:** a Rust publisher and subscriber exchange one sample of an IDL-defined type.
 - **Status:** done.
@@ -125,9 +126,16 @@ Create the display library (`display-lib`) as a C-ABI DLL and have `lil-d` load 
 - **Minimal test:** the delegated region shows the default format when `lil-d` loads `display_lib.dll` through the C ABI.
 - **Status:** done.
 
+### harfbuzz
+Build and install HarfBuzz 14.6.0 with the experimental GPU library (`libharfbuzz-gpu`) to the external prefix, and add the Rust FFI crate `rust/lib/harfbuzz` (raw bindings plus thin wrappers) that links it. The CMake port builds and installs `harfbuzz` and `harfbuzz-gpu`; `hb-gpu.h` is installed under `include/harfbuzz`.
+- **Depends on:** none.
+- **Minimal test:** a temporary smoke program under `build/` shapes "Hello, world!" with FiraSans, encodes a glyph with `hb_gpu_draw_encode`, and asserts a non-empty blob and a non-null GLSL fragment shader source.
+- **Status:** todo.
+- **Records:** HarfBuzz (and `libharfbuzz-gpu`) in `docs/versions.md`.
+
 ### font-handling
-Load a font from `assets/fonts` and render text (the hello_world greeting) in the display library as part of the hello-world format. The greeting and attitude are hardcoded for now.
-- **Depends on:** display-lib.
+Load a font from `assets/fonts` in the display library and render the hello_world greeting with HarfBuzz (`hb-gpu`) as part of the hello-world format. The greeting is hardcoded for now.
+- **Depends on:** display-lib, harfbuzz.
 - **Minimal test:** the greeting renders in the loaded font.
 - **Status:** todo.
 

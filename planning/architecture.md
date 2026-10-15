@@ -28,13 +28,17 @@ All the applications communicate using Distributed Data Services configured to u
 ## Stack
 * DDS: Eclipse Cyclone DDS for all configurations - C core with `cyclonedds-cxx` (C++) and the `cyclonedds` Rust crate; shared IDL in `DDS/`; all topics over IPv6 multicast on the `StationsDDS` loopback adapter.
 * Rendering: Rust = winit + glutin/glow + egui. C++ = SDL3 + glad + Dear ImGui.
+* Text: HarfBuzz (`libharfbuzz` and the experimental `libharfbuzz-gpu`) for format text; the console uses egui's own text.
 * Build: `scripts/build.ps1` orchestrator; all artifacts under `build/`, where only `build/deploy/` is durable and everything else is temporary. The repository must be placed at a short path on Windows (see "Path length").
 
 ### OpenGL context and safety
 `glow` marks every GL call `unsafe` because a GL context must be current on the calling thread, and the binding has no token that proves currentness. The Rust rendering libraries follow `egui_glow`: their public APIs are safe and document the assumption that a glow context is current on the calling thread, which the display application upholds by doing all GL work on its event-loop thread. This documented-assumption approach is limited to the GL-context-current precondition; other safety concerns are handled normally. The context is requested explicitly (OpenGL 3.3 core) so the shaders the libraries compile are guaranteed.
 
 ### Display library ABI
-A display application and its display library are separate components joined by a shared C ABI (`include/display_lib.h`), not by static linking. The Rust and C++ display libraries both implement that ABI, and the Rust and C++ display applications both consume it, so any display application can use either language's display library (part of the hybrid deployment). The application supplies the OpenGL proc-address loader, so the ABI is independent of the windowing stack (winit/glutin or SDL3); the ABI carries only C types. The display library is deployed as a DLL next to its display application in `build/deploy/bin`, and the launch script or configuration chooses which implementation's DLL is loaded. The ABI is versioned (`display_lib_abi_version`) so a mismatched pair fails cleanly.
+A display application and its display library are separate components joined by a shared C ABI (`include/display_lib.h`), not by static linking. The Rust and C++ display libraries both implement that ABI, and the Rust and C++ display applications both consume it, so any display application can use either language's display library (part of the hybrid deployment). The application supplies the OpenGL proc-address loader, so the ABI is independent of the windowing stack (winit/glutin or SDL3); the ABI carries only C types. The display library is deployed as a DLL next to its display application in `build/deploy/bin`, and the launch script or configuration chooses which implementation's DLL is loaded. The ABI is versioned (`display_lib_abi_version`) so a mismatched pair fails cleanly. The library locates its own assets (fonts and the earth cube map) under `build/deploy/assets`, derived from the process executable path; no asset path crosses the ABI.
+
+### Text rendering
+Format text is rendered with HarfBuzz's experimental GPU library (`libharfbuzz-gpu`, the Slug algorithm). The display library shapes text with `hb_shape`, encodes each glyph's outline on the CPU into a compact `RGBA16I` blob, uploads the blobs into a single `GL_TEXTURE_BUFFER` atlas, and rasterizes them in a `#version 330` fragment shader supplied by HarfBuzz: the library concatenates `hb_gpu_shader_source` and `hb_gpu_draw_shader_source` ahead of its own `main()`. The result is resolution-independent and antialiased, and the same shader and blob format are used by the Rust and C++ display libraries. It requires OpenGL 3.3, which the display applications already request (see "OpenGL context and safety"); there is no font hinting. The `harfbuzz` story installs the library and the `harfbuzz` Rust crate wraps it.
 
 ## Configurations
 The three configurations (`rust`, `c++`, `hybrid`) differ only in which language implementation of each application is launched. Applications interoperate because they share the same IDL types and speak DDSI-RTPS; a hybrid launch simply mixes the two implementations. A display application can also use either language's display library: both implement the same C ABI (`include/display_lib.h`), so a Rust display app can load the C++ display library and vice versa. That in-process interop is the hybrid deployment's other half, alongside the DDS/IDL interop.
@@ -142,6 +146,7 @@ to-stations-proto/
 * `ui/` holds GUI applications, `service/` holds headless services, `lib/` holds shared libraries, `tool/` holds developer tools; `test/` is deferred.
 * A `-service` crate holds a format's model (non-display business logic); `-view-service` and `-ctl-service` crates are services tied to the display library.
 * Common DDS support lives in `stations-dds`; other common support lives in one or more `lib/` crates.
+* `harfbuzz` (at `rust/lib/harfbuzz`) is an FFI binding to the installed HarfBuzz, including the experimental `libharfbuzz-gpu`; the display library uses it for format text.
 * Rust programs use `clap` for command-line parsing.
 * `stations-dds` lives at `rust/lib/stations-dds`.
 
@@ -170,7 +175,6 @@ The repository is therefore required to live at a short path on Windows. `script
 Each configuration has a launch script; all configurations share `cleanup.ps1`. `scripts/verify-loopback.ps1` verifies the loopback adapter and its IPv6 prerequisites; creating the adapter is a documented manual step (see `docs/`). Launch and cleanup scripts operate only on `build/deploy/`.
 
 ## Deferred decisions
-* Text rendering: SDF/MSDF for format text (prefer a `skrifa`-based generator if MSDF is chosen); the console uses egui's own text.
 * displayLib internal architecture: it may split into smaller libraries; per-format rendering and communications are at least separate modules. The format manager has a view service, a control service, and one or more displayLib modules.
 * `test/` layout.
 * The C++ side mirroring the `ui/service/lib/tool/test` layout.

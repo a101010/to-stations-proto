@@ -1,256 +1,104 @@
-# Current story: display-lib
+# Current story: harfbuzz
 
 This file is the detailed, living plan for the one active story. It is rewritten for each story. The backlog in `backlog.md` holds all work and the per-story status.
 
 ## Story
 
-Create the display library (`display-lib`) and have `lil-d` delegate the format-window region to it. It renders the default format, hardcoded: a solid color (different from the original `lil-d` color) with an x in a different color, owning the entire region delegated to the library.
+Build and install HarfBuzz 14.6.0 with the experimental GPU library (`libharfbuzz-gpu`) to the external prefix, and add the Rust FFI crate `rust/lib/harfbuzz` (raw bindings plus thin RAII wrappers) that links it. Format text is rendered by the later `font-handling` story using hb-gpu; this story provides the dependency and the binding only.
 
-The display library is a C-ABI DLL (`display_lib.dll`) built from a shared header (`include/display_lib.h`); `lil-d` loads it at runtime. This is the hybrid interop seam: a display app in either language can use a display library in either language. This story implements the Rust side; the C++ implementation is a later increment.
-
-- **Depends on:** lil-d.
-- **Minimal test:** the delegated region shows the default format when `lil-d` loads `display_lib.dll` via the C ABI.
+- **Depends on:** none.
+- **Minimal test:** a temporary smoke program under `build/` shapes "Hello, world!" with FiraSans, encodes a glyph with `hb_gpu_draw_encode`, and asserts a non-empty blob and a non-null GLSL fragment shader source.
 
 ## Context
 
-`lil-d` currently owns the window, GL context, layout, console, and (from the previous story) a `display-lib` Rust library that it links statically and calls through a Rust API (`Display::new` / `render`).
+`architecture.md` ("Text rendering") records that format text is rendered with HarfBuzz's experimental GPU library (the Slug algorithm): the display library shapes text, encodes glyph outlines into `RGBA16I` blobs, and rasterizes them in a `#version 330` fragment shader supplied by HarfBuzz. `font-handling` is the story that uses this; this story installs HarfBuzz and provides the Rust binding.
 
-The hybrid deployment requires a display app and its display library to be separate components joined by a C ABI, so a Rust app can load the C++ display library and a C++ app can load the Rust one. That means the boundary must carry only C types and must not depend on the app's windowing stack; the app supplies the OpenGL proc-address loader.
-
-`glow` exposes every GL call as `unsafe`; the documented GL-context-current assumption from the previous story still applies inside the library (see `architecture.md`, "OpenGL context and safety").
+HarfBuzz is a C library built and installed to the external prefix, like CycloneDDS and cyclonedds-cxx. The upstream `harfbuzz-sys` bindings do not cover the experimental `hb-gpu` API (newer than the bindings, and the `bundled` build does not enable the GPU library), so this crate provides its own FFI binding.
 
 ## Decisions
 
-* **Shared ABI header.** `include/display_lib.h` is the hand-written source of truth, shared by both languages. C types only.
-* **Rust implementation.** `display-lib` is a `cdylib` exporting the ABI with `extern "C"` + `#[no_mangle]`; it keeps its `glow`-only dependency and builds its own `glow::Context` from the app-provided loader.
-* **Rust consumer.** `lil-d` does not link the library; it loads the DLL with `libloading` and calls `extern "C"` fn-pointer types. `--display-lib <path>` selects the DLL (default `display_lib.dll`, resolved against the exe's directory when relative), for the future hybrid choice.
-* **ABI version.** `display_lib_abi_version()` returns `DISPLAY_LIB_ABI_VERSION` (1); the app checks it before use.
-* **No Rust types cross.** The app passes a loader fn pointer + userdata; the library builds its own GL context, so no `glow::Context` crosses the boundary.
-* **Rendering / default format.** Unchanged from the previous story: the amber background with the green corner-to-corner x, drawn with a `#version 330 core` program in the region's NDC.
-* **Deploy.** `scripts/build.ps1` copies `display_lib.dll` next to `lil-d.exe` in `build/deploy/bin`.
+* **Version.** Pin HarfBuzz `14.6.0`: the GPU draw API is since 14.0, the shader-stage/paint API since 14.2, and the API was declared stabilization-ready in 14.2. Recorded in `docs/versions.md`.
+* **Components.** Build only `libharfbuzz` and `libharfbuzz-gpu`; disable subset, raster, vector, and utils. Utils are off because they are not needed and the `hb-gpu` demo utility would pull GLEW, GLFW, and OpenGL.
+* **Shared, not static.** `BUILD_SHARED_LIBS=ON`, so the display library needs no C++-runtime static link. The runtime DLLs are deployed to `build/deploy/bin` like `ddsc.dll`, per `architecture.md` ("Build and launch").
+* **Install location.** The external prefix (`EXT_PATH_PREFIX`, default `C:\Libraries`): install to `C:\Libraries\harfbuzz`, source at `C:\Libraries\src\harfbuzz`.
+* **CMake first, Meson fallback.** The community-maintained CMake port builds and installs `harfbuzz-gpu` (target `harfbuzz-gpu` linking `harfbuzz`), installs `hb-gpu.h` under `include/harfbuzz`, and exports a CMake package (`harfbuzz::harfbuzz`, `harfbuzz::harfbuzz-gpu`). Because it is community-maintained, Meson is the documented fallback.
+* **Rust binding.** A new path crate `rust/lib/harfbuzz` with `extern "C"` declarations and thin RAII wrappers; `build.rs` emits the link search path and libraries from `EXT_PATH_PREFIX`. No external crates.
+* **Drop `skrifa`.** No crate references it now that text rendering uses hb-gpu; remove it from `rust/Cargo.toml` `[workspace.dependencies]`.
 
-## ABI: `include/display_lib.h`
+## Build and install
 
-```c
-#ifndef DISPLAY_LIB_H
-#define DISPLAY_LIB_H
-
-#include <stdint.h>
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-#define DISPLAY_LIB_ABI_VERSION 1u
-
-/* Opaque display library handle. */
-typedef struct display_lib display_lib;
-
-/* Returns the address of a GL function by name, for the current context. */
-typedef void* (*display_lib_gl_loader)(const char* name, void* userdata);
-
-uint32_t     display_lib_abi_version(void);
-
-/* Returns a handle, or NULL on failure (see display_lib_last_error). */
-display_lib* display_lib_create(display_lib_gl_loader loader, void* userdata);
-
-/* framebuffer_height flips the top-left region into GL's bottom-left origin. */
-void         display_lib_render(display_lib* d, int framebuffer_height,
-                                int x, int y, int width, int height);
-
-void         display_lib_destroy(display_lib* d);
-
-/* Message from the last failed display_lib_create; valid until the next call. */
-const char*  display_lib_last_error(void);
-
-#ifdef __cplusplus
-}
-#endif
-
-#endif /* DISPLAY_LIB_H */
-```
-
-The Rust implementation (`#[no_mangle] pub extern "C"`) and the Rust consumer's `extern "C"` fn-pointer types mirror this header by hand.
-
-## Rust `display-lib` (`rust/lib/display-lib`)
-
-`Cargo.toml`: `[lib] crate-type = ["cdylib"]` (keep `name = "display_lib"`); deps `glow` only.
-
-`lib.rs`:
-
-```rust
-use std::cell::RefCell;
-use std::ffi::{c_char, c_int, c_void, CStr, CString};
-
-const ABI_VERSION: u32 = 1;
-
-/// A GL proc-address loader supplied by the display application.
-type GlLoader = extern "C" fn(*const c_char, *mut c_void) -> *const c_void;
-
-struct Display {
-    gl: glow::Context,          // owned; built from the loader
-    default: gl::ColoredMesh,
-}
-
-impl Display {
-    fn new(loader: impl FnMut(&str) -> *const c_void) -> Result<Self, DisplayError>;
-    fn render(&self, framebuffer_height: i32, x: i32, y: i32, width: i32, height: i32);
-}
-
-thread_local! {
-    static LAST_ERROR: RefCell<Option<CString>> = const { RefCell::new(None) };
-}
-```
-
-Exports (pseudocode):
+Documented in `README.md` next to the CycloneDDS sections. From a shell with the VS toolchain and CMake:
 
 ```
-#[no_mangle] pub extern "C" fn display_lib_abi_version() -> u32:
-    ABI_VERSION
-
-#[no_mangle] pub extern "C" fn display_lib_create(loader: GlLoader, userdata: *mut c_void) -> *mut Display:
-    let result = Display::new(|name| {
-        let cname = CString::new(name).expect("gl proc name")
-        loader(cname.as_ptr(), userdata)
-    })
-    match result:
-        Ok(display) => Box::into_raw(Box::new(display))
-        Err(err)    => { set_last_error(err.to_string()); null_mut() }
-
-#[no_mangle] pub extern "C" fn display_lib_render(d: *mut Display, framebuffer_height: c_int, x: c_int, y: c_int, width: c_int, height: c_int):
-    if d.is_null(): return
-    unsafe { &*d }.render(framebuffer_height, x, y, width, height)
-
-#[no_mangle] pub extern "C" fn display_lib_destroy(d: *mut Display):
-    if d.is_null(): return
-    unsafe { drop(Box::from_raw(d)) }
-
-#[no_mangle] pub extern "C" fn display_lib_last_error() -> *const c_char:
-    LAST_ERROR.with(|e| e.borrow().as_ref().map_or(null(), |s| s.as_ptr()))
+git clone --branch 14.6.0 --depth 1 https://github.com/harfbuzz/harfbuzz.git C:\Libraries\src\harfbuzz
+cmake -S C:\Libraries\src\harfbuzz -B C:\Libraries\src\harfbuzz\build -G "Visual Studio 18 2026" -A x64 ^
+  -DCMAKE_INSTALL_PREFIX=C:/Libraries/harfbuzz -DBUILD_SHARED_LIBS=ON ^
+  -DHB_BUILD_GPU=ON -DHB_BUILD_GPU_DEMO=OFF ^
+  -DHB_BUILD_SUBSET=OFF -DHB_BUILD_RASTER=OFF -DHB_BUILD_VECTOR=OFF -DHB_BUILD_UTILS=OFF
+cmake --build C:\Libraries\src\harfbuzz\build --config Release --parallel
+cmake --install C:\Libraries\src\harfbuzz\build --config Release
 ```
 
-`Display::new` builds the context with `glow::Context::from_loader_function(|name| loader(name))`, then `gl::ColoredMesh::new(&gl, &default_format::vertices())`. `render` is the previous story's region render (scissor clear + viewport + `ColoredMesh::draw`), unchanged. `gl.rs` and `default_format.rs` are unchanged.
+Expected install under `C:\Libraries\harfbuzz`:
 
-`display_lib_destroy` calls no GL (the `ColoredMesh` has no `Drop`), so it is safe to call off the event-loop thread; keep that property when a `destroy` that deletes GL objects is added.
+* `bin\harfbuzz.dll`, `bin\harfbuzz-gpu.dll`.
+* `lib\harfbuzz.lib`, `lib\harfbuzz-gpu.lib`.
+* `include\harfbuzz\hb.h`, `include\harfbuzz\hb-gpu.h`, `include\harfbuzz\hb-features.h`, and the rest.
+* `lib\cmake\harfbuzz\` (the `harfbuzzConfig` package).
 
-## `lil-d` (`rust/ui/lil-d`)
-
-`Cargo.toml`: drop `display-lib`; add `libloading`.
-
-`src/cli.rs`: add
-
-```rust
-/// Path to the display library DLL (default: display_lib.dll next to the exe).
-#[arg(long, default_value = "display_lib.dll")]
-pub display_lib: std::path::PathBuf,
-```
-
-`src/display.rs` (new):
-
-```rust
-pub type GlLoader = extern "C" fn(*const c_char, *mut c_void) -> *const c_void;
-
-type CreateFn      = unsafe extern "C" fn(GlLoader, *mut c_void) -> *mut c_void;
-type RenderFn      = unsafe extern "C" fn(*mut c_void, c_int, c_int, c_int, c_int, c_int);
-type DestroyFn     = unsafe extern "C" fn(*mut c_void);
-type AbiVersionFn  = unsafe extern "C" fn() -> u32;
-type LastErrorFn   = unsafe extern "C" fn() -> *const c_char;
-
-const EXPECTED_ABI_VERSION: u32 = 1;
-
-pub struct Display {
-    _lib: libloading::Library, // keeps the DLL loaded
-    handle: *mut c_void,
-    render: RenderFn,
-    destroy: DestroyFn,
-}
-
-impl Display {
-    pub fn load(path: &Path, loader: GlLoader, userdata: *mut c_void) -> Result<Self, String>;
-    pub fn render(&mut self, framebuffer_height: i32, rect: crate::layout::Rect);
-}
-
-impl Drop for Display { fn drop(&mut self) { unsafe { (self.destroy)(self.handle) } } }
-```
-
-Pseudocode for `load`:
+Meson fallback (needs Python and Ninja):
 
 ```
-let lib = unsafe { Library::new(path) }.map_err(|e| format!("failed to load {}: {e}", path.display()))?
-unsafe {
-    let abi_version = *lib.get(b"display_lib_abi_version\0")?
-    if abi_version() != EXPECTED_ABI_VERSION:
-        return Err(format!("display-lib ABI {} != expected {}", abi_version(), EXPECTED_ABI_VERSION))
-    let create      = *lib.get(b"display_lib_create\0")?
-    let render      = *lib.get(b"display_lib_render\0")?
-    let destroy     = *lib.get(b"display_lib_destroy\0")?
-    let last_error  = *lib.get(b"display_lib_last_error\0")?
-    let handle = create(loader, userdata)
-    if handle.is_null():
-        let msg = last_error()
-        return Err(if msg.is_null() { "display_lib_create failed".into() } else { CStr::from_ptr(msg).to_string_lossy().into_owned() })
-    Ok(Display { _lib: lib, handle, render, destroy })
-}
+meson setup C:\Libraries\src\harfbuzz\build --prefix=C:/Libraries/harfbuzz ^
+  -Dgpu=enabled -Dsubset=disabled -Draster=disabled -Dvector=disabled -Dutilities=disabled
+ninja -C C:\Libraries\src\harfbuzz\build
+meson install -C C:\Libraries\src\harfbuzz\build
 ```
 
-The path is resolved in `main`/`setup`: if `args.display_lib` is relative, join it with `current_exe().parent()`.
+## `rust/lib/harfbuzz`
 
-`src/gl_window.rs`: add
+`Cargo.toml`: `publish = false`, edition 2021, no dependencies. `build.rs`:
 
-```rust
-pub type GlLoaderFn = extern "C" fn(*const c_char, *mut c_void) -> *const c_void;
+* Read `EXT_PATH_PREFIX` (default `C:\Libraries`); the prefix is `<EXT_PATH_PREFIX>\harfbuzz`.
+* `cargo:rustc-link-search=native=<prefix>\lib`.
+* `cargo:rustc-link-lib=harfbuzz-gpu` and `cargo:rustc-link-lib=harfbuzz` (we call symbols from both).
 
-impl GlWindow {
-    /// The GL proc-address loader and its userdata (the glutin display), for
-    /// the display library.
-    pub fn gl_loader(&self) -> (GlLoaderFn, *mut c_void) {
-        extern "C" fn load(name: *const c_char, userdata: *mut c_void) -> *const c_void {
-            use glutin::display::GlDisplay as _;
-            let display = unsafe { &*(userdata as *const glutin::display::Display) };
-            display.get_proc_address(unsafe { CStr::from_ptr(name) })
-        }
-        (load, &self.gl_display as *const _ as *mut c_void)
-    }
-}
-```
+`src/lib.rs`: raw `extern "C"` declarations for exactly what the renderer needs, plus thin RAII wrappers. Categories:
 
-`src/app.rs`: `App.display: Option<display::Display>`; in `setup`, after the GL context, `let (loader, userdata) = gl_window.gl_loader(); let display = display::Display::load(&path, loader, userdata).expect("display-lib load");`; in `render`, when the format is on, `display.render(size.height as i32, layout.format)`. Remove the old `display_lib::{Display, Region}` import and the `Display::new(Arc::clone(&gl))` call.
+* **Common.** `hb_version_string`; `hb_blob_create` (with `HB_MEMORY_MODE_DUPLICATE` so HarfBuzz copies the bytes), `hb_blob_get_data`, `hb_blob_get_length`, `hb_blob_destroy`; `hb_face_create`, `hb_face_get_upem`, `hb_face_destroy`; `hb_font_create`, `hb_font_destroy`, `hb_ot_font_set_funcs`, `hb_font_set_scale`, `hb_font_get_scale`.
+* **Shaping.** `hb_buffer_create`/`hb_buffer_destroy`, `hb_buffer_add_utf8`, `hb_buffer_guess_segment_properties`, `hb_buffer_set_direction`/`hb_buffer_set_script`/`hb_buffer_set_language`, `hb_buffer_get_length`, `hb_buffer_get_glyph_infos`, `hb_buffer_get_glyph_positions`, `hb_shape`. The `hb_glyph_info_t` and `hb_glyph_position_t` structs are declared `#[repr(C)]` to match the C layout.
+* **GPU.** `hb_gpu_shader_source`, `hb_gpu_draw_shader_source`, `hb_gpu_draw_create_or_fail`, `hb_gpu_draw_destroy`, `hb_gpu_draw_glyph`, `hb_gpu_draw_encode` (writes an `hb_glyph_extents_t`), `hb_gpu_draw_recycle_blob`, `hb_gpu_draw_get_scale`, `hb_glyph_extents_t`.
 
-## Workspace / build
-
-* `rust/Cargo.toml`: remove the `display-lib = { path = "lib/display-lib" }` workspace-dependency entry (no member depends on it now); keep `lib/display-lib` as a member; add `libloading = "0.8"` to `[workspace.dependencies]`.
-* `scripts/build.ps1`: in the deploy step, also copy `build/rust/release/display_lib.dll` into `build/deploy/bin`.
-* `lil-d` no longer links the library, so `cargo run -p lil-d` alone will not build the DLL; the workspace build (`cargo build`, `scripts/build.ps1`) does. Record this in `README.md`.
+Wrappers own their handles and free them on drop; `Blob`, `Face`, `Font`, `Buffer`, `GpuDraw`. The crate exposes just enough for `font-handling` and nothing GL-related.
 
 ## Tests
 
-* `default_format.rs` unit tests (unchanged) still build from source under `cdylib`.
-* No unit test for the ABI itself (it needs a GL context); the loader path is verified by the minimal test and the negative checks.
+* The temporary smoke program under `build/harfbuzz-smoke/` (the minimal test, below). It uses the installed CMake package: a two-line `CMakeLists.txt` with `find_package(harfbuzz CONFIG REQUIRED)` and `target_link_libraries(smoke PRIVATE harfbuzz::harfbuzz-gpu)`, configured with `-DCMAKE_PREFIX_PATH=C:/Libraries/harfbuzz`.
+* The crate's `#[test]`s (durable): load `assets/fonts/FiraSans-Regular.ttf` (located through `REPO_ROOT`, supplied by Cargo), shape "Hello, world!", assert the glyph count is non-zero and that a glyph encodes to a non-empty blob; assert the GLSL vertex and fragment shader sources are non-null and non-empty. These need no GL context.
+* No GL test here; the shader is compiled and drawn by `font-handling`.
 
 ## Minimal test
 
 ```
-.\scripts\build.ps1
-.\scripts\launch-rust.ps1
+# configure, build, and run the temporary smoke program
+cmake -S build\harfbuzz-smoke -B build\harfbuzz-smoke\out -G "Visual Studio 18 2026" -A x64 -DCMAKE_PREFIX_PATH=C:/Libraries/harfbuzz
+cmake --build build\harfbuzz-smoke\out --config Release
+build\harfbuzz-smoke\out\Release\smoke.exe assets\fonts\FiraSans-Regular.ttf
 ```
 
-The delegated region shows the default format (amber background, green corner-to-corner x) now rendered by `display_lib.dll` through the C ABI; the power button still toggles the region; `.\scripts\cleanup.ps1` stops it.
-
-Negative checks:
-* `.\build\deploy\bin\lil-d.exe --display-lib missing.dll` fails cleanly with a loader error.
-* A DLL with a different ABI version fails with the version-mismatch error.
+It prints the HarfBuzz version, the shaped glyph count and advances for "Hello, world!", and the encoded blob length, then exits 0. Negative check: passing a missing font path fails with a non-zero exit.
 
 ## Risks and follow-ups
 
-* **ABI drift.** The header and the Rust `extern "C"` declarations are hand-written and can diverge; keep them in step. 
-* **FFI discipline.** Only C types cross; `display_lib_create` catches `DisplayError`; `render` is infallible; `display_lib_destroy` must not call GL.
-* **Loader lifetime.** The loader + userdata are only used during `display_lib_create` (glow resolves all pointers there), so the glutin display pointer only needs to be valid at setup.
-* **`--display-lib` resolution.** Relative paths resolve against the exe directory; a stale DLL next to a rebuilt exe can shadow a fresh build.
-* **`cargo run`.** The DLL is not built by `cargo run -p lil-d` alone.
-* **C++ side.** The C++ display library and C++ display app that implement/consume this ABI are later increments.
+* **Experimental API.** `hb-gpu` is marked experimental; pinning `14.6.0` and recording it in `docs/versions.md` bounds the churn. If a later story upgrades it, re-check the shader-stage and encode signatures.
+* **CMake port.** Community-maintained and warns as such; if the GPU target does not build, use the Meson fallback.
+* **Linking and runtime.** Link both import libraries; deploy `harfbuzz.dll` and `harfbuzz-gpu.dll` to `build/deploy/bin` in `font-handling` so the loaded `display_lib.dll` resolves them (the app exe is in the same directory).
+* **`EXT_PATH_PREFIX`.** `build.rs` defaults to `C:\Libraries`; `scripts/build.ps1` must export `EXT_PATH_PREFIX` before invoking Cargo so a custom prefix is honored.
+* **Struct layout.** `hb_glyph_info_t`/`hb_glyph_position_t` are declared in the crate and must match the C layout; the crate's test guards the positions used for layout.
+* **`skrifa` removal.** Confirm nothing else uses it before deleting the workspace entry.
 
 ## Files
 
-* Authored: `include/display_lib.h`, `rust/ui/lil-d/src/display.rs`.
-* Changed: `rust/lib/display-lib/Cargo.toml`, `rust/lib/display-lib/src/lib.rs`, `rust/ui/lil-d/Cargo.toml`, `rust/ui/lil-d/src/{cli,app,gl_window}.rs`, `rust/Cargo.toml`, `scripts/build.ps1`, `README.md`.
-* Planning: `planning/architecture.md`, `planning/backlog.md`, `planning/current_story.md`.
+* Authored: `rust/lib/harfbuzz/{Cargo.toml,build.rs,src/lib.rs}`, `rust/lib/harfbuzz/tests/`.
+* Changed: `rust/Cargo.toml` (add the member and the `harfbuzz` workspace dependency; drop `skrifa`), `README.md`, `docs/versions.md`, `planning/{architecture,backlog,current_story}.md`.
+* Temporary: `build/harfbuzz-smoke/` (CMake project plus `smoke.cc`).
