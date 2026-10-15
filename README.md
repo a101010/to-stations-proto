@@ -74,6 +74,8 @@ The small display app (`lil-d`) renders its format region through a display libr
 
 `scripts/build.ps1` builds `display_lib.dll` and deploys it next to `lil-d.exe` in `build/deploy/bin`. `lil-d` takes `--display-lib <path>` to choose the DLL (default `display_lib.dll`, resolved next to the exe). Because `lil-d` does not link the library, `cargo run -p lil-d` alone does not build the DLL; run `scripts/build.ps1` (or `cargo build` for the whole workspace) first.
 
+`build.ps1` also copies `assets/` to `build/deploy/assets` and the HarfBuzz runtime (`harfbuzz.dll`, `harfbuzz-gpu.dll`) next to the display library. The library loads its font from `<deploy>/assets` (resolved from the executable path, so the exe must live in `build/deploy/bin`); run it through the launch script rather than `cargo run`.
+
 ### Cyclone DDS (C)
 
 Eclipse Cyclone DDS `11.0.1` is built from source and installed to `C:\Libraries\cyclonedds`; the source is kept at `C:\Libraries\src\cyclonedds`.

@@ -343,6 +343,12 @@ Negative check: remove or rename `build\deploy\assets\fonts\FiraSans-Regular.ttf
 * **Offsets.** Applied, but zero for the Latin greeting, so the minimal test does not exercise them; the `build_vertices` unit test covers a non-zero case.
 * **C++ side.** The C++ display library reimplements this pipeline against the same HarfBuzz shaders.
 
+## Result
+
+Done and verified. `display-lib` loads `assets/fonts/FiraSans-Regular.ttf`, shapes the greeting with HarfBuzz, encodes glyphs into a growable `GL_TEXTURE_BUFFER` atlas (`GL_RGBA16I`), and rasterizes them with the hb-gpu Slug shader; the region shows "Hello, world!" in Fira Sans, centered on the dark background, with the console and power button intact. `scripts/build.ps1` now copies `assets/` to `build/deploy/assets` and `harfbuzz.dll` + `harfbuzz-gpu.dll` to `build/deploy/bin`. `scripts/build.ps1 -Test` and the deploy build pass; `display-lib` has 5 tests (2 new: vertex layout with offsets, font load + shape).
+
+Deviations from the plan: `build_vertices` is a free function (taking `upem`, the atlas, and the glyphs) rather than a method, so it is unit-testable without a GL context; `DisplayError` keeps the planned `Shader`/`Io`/`Font` variants and uses `Shader` for GL object-creation failures. The default format and `ColoredMesh::draw` are marked `#[allow(dead_code)]` while retained for the format manager.
+
 ## Files
 
 * Authored: `rust/lib/display-lib/src/text.rs`, `rust/lib/display-lib/src/hello_world.rs`.

@@ -78,9 +78,16 @@ finally {
 # extends this step. The release build is deployed so the display is a GUI
 # application with no console window (see lil-d's windows_subsystem attribute).
 if (-not $Test) {
-    $deployBin = Join-Path $repoRoot 'build\deploy\bin'
+    $deployRoot = Join-Path $repoRoot 'build\deploy'
+    $deployBin = Join-Path $deployRoot 'bin'
     New-Item -ItemType Directory -Force -Path $deployBin | Out-Null
     Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\lil-d.exe') -Destination $deployBin -Force
     Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\display_lib.dll') -Destination $deployBin -Force
-    Write-Host "Deployed $(Join-Path $deployBin 'lil-d.exe') and display_lib.dll"
+
+    # The display library loads its font and (later) the earth cube map from
+    # <deploy>/assets, and links the HarfBuzz runtime from next to the exe.
+    Copy-Item -Path (Join-Path $repoRoot 'assets') -Destination $deployRoot -Recurse -Force
+    Copy-Item -Path (Join-Path $extPathPrefix 'harfbuzz\bin\harfbuzz.dll') -Destination $deployBin -Force
+    Copy-Item -Path (Join-Path $extPathPrefix 'harfbuzz\bin\harfbuzz-gpu.dll') -Destination $deployBin -Force
+    Write-Host "Deployed lil-d.exe, display_lib.dll, assets, and the HarfBuzz runtime"
 }

@@ -26,6 +26,7 @@ void main() {
 /// Number of floats per vertex: `x, y, r, g, b, a`.
 const FLOATS_PER_VERTEX: usize = 6;
 
+#[allow(dead_code)] // the default format is retained for the format manager
 pub(crate) struct ColoredMesh {
     program: glow::Program,
     vao: glow::VertexArray,
@@ -70,6 +71,7 @@ impl ColoredMesh {
     }
 
     /// Draw the mesh. Assumes a glow context is current on the calling thread.
+    #[allow(dead_code)] // the default format is retained for the format manager
     pub(crate) fn draw(&self, gl: &glow::Context) {
         unsafe {
             gl.use_program(Some(self.program));
@@ -93,7 +95,7 @@ fn compile(gl: &glow::Context, kind: u32, src: &str) -> Result<glow::Shader, Dis
     }
 }
 
-fn link(gl: &glow::Context, vs_src: &str, fs_src: &str) -> Result<glow::Program, DisplayError> {
+pub(crate) fn link(gl: &glow::Context, vs_src: &str, fs_src: &str) -> Result<glow::Program, DisplayError> {
     unsafe {
         let vs = compile(gl, glow::VERTEX_SHADER, vs_src)?;
         let fs = compile(gl, glow::FRAGMENT_SHADER, fs_src)?;
