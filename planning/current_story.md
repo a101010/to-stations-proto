@@ -1,110 +1,349 @@
-# Current story: harfbuzz
+# Current story: font-handling
 
 This file is the detailed, living plan for the one active story. It is rewritten for each story. The backlog in `backlog.md` holds all work and the per-story status.
 
 ## Story
 
-Build and install HarfBuzz 14.6.0 with the experimental GPU library (`libharfbuzz-gpu`) to the external prefix, and add the Rust FFI crate `rust/lib/harfbuzz` (raw bindings plus thin RAII wrappers) that links it. Format text is rendered by the later `font-handling` story using hb-gpu; this story provides the dependency and the binding only.
+Load `FiraSans-Regular.ttf` from the assets directory in the display library and render the hardcoded hello_world greeting with HarfBuzz + hb-gpu as the active format. The `default_format` is retained but not rendered until the format manager exists.
 
-- **Depends on:** none.
-- **Minimal test:** a temporary smoke program under `build/` shapes "Hello, world!" with FiraSans, encodes a glyph with `hb_gpu_draw_encode`, and asserts a non-empty blob and a non-null GLSL fragment shader source.
+- **Depends on:** display-lib, harfbuzz.
+- **Minimal test:** the delegated region shows the greeting rendered in the loaded font.
 
 ## Context
 
-`architecture.md` ("Text rendering") records that format text is rendered with HarfBuzz's experimental GPU library (the Slug algorithm): the display library shapes text, encodes glyph outlines into `RGBA16I` blobs, and rasterizes them in a `#version 330` fragment shader supplied by HarfBuzz. `font-handling` is the story that uses this; this story installs HarfBuzz and provides the Rust binding.
-
-HarfBuzz is a C library built and installed to the external prefix, like CycloneDDS and cyclonedds-cxx. The upstream `harfbuzz-sys` bindings do not cover the experimental `hb-gpu` API (newer than the bindings, and the `bundled` build does not enable the GPU library), so this crate provides its own FFI binding.
+`display-lib` is a `cdylib` implementing `include/display_lib.h`; its `Display` owns a `glow::Context` built from the app-supplied loader and renders `default_format` (`lib.rs:58`). The `harfbuzz` crate (story done) exposes shaping and the `hb-gpu` encoder, and its DLLs are linked from the external prefix. The ABI is unchanged: the library resolves its own assets from the process exe path, and `display_lib_render` gains an internal `&mut` (no signature change). `architecture.md` ("Text rendering") records the approach.
 
 ## Decisions
 
-* **Version.** Pin HarfBuzz `14.6.0`: the GPU draw API is since 14.0, the shader-stage/paint API since 14.2, and the API was declared stabilization-ready in 14.2. Recorded in `docs/versions.md`.
-* **Components.** Build only `libharfbuzz` and `libharfbuzz-gpu`; disable subset, raster, vector, and utils. Utils are off because they are not needed and the `hb-gpu` demo utility would pull GLEW, GLFW, and OpenGL.
-* **Shared, not static.** `BUILD_SHARED_LIBS=ON`, so the display library needs no C++-runtime static link. The runtime DLLs are deployed to `build/deploy/bin` like `ddsc.dll`, per `architecture.md` ("Build and launch").
-* **Install location.** The external prefix (`EXT_PATH_PREFIX`, default `C:\Libraries`): install to `C:\Libraries\harfbuzz`, source at `C:\Libraries\src\harfbuzz`.
-* **CMake first, Meson fallback.** The community-maintained CMake port builds and installs `harfbuzz-gpu` (target `harfbuzz-gpu` linking `harfbuzz`), installs `hb-gpu.h` under `include/harfbuzz`, and exports a CMake package (`harfbuzz::harfbuzz`, `harfbuzz::harfbuzz-gpu`). Because it is community-maintained, Meson is the documented fallback.
-* **Rust binding.** A new path crate `rust/lib/harfbuzz` with `extern "C"` declarations and thin RAII wrappers; `build.rs` emits the link search path and libraries from `EXT_PATH_PREFIX`. No external crates.
-* **Drop `skrifa`.** No crate references it now that text rendering uses hb-gpu; remove it from `rust/Cargo.toml` `[workspace.dependencies]`.
+* **Assets.** The library resolves its assets from the process exe path: `<exe_dir>/../assets` (exe at `build/deploy/bin`, assets at `build/deploy/assets`). No asset path crosses the ABI.
+* **Font.** `assets/fonts/FiraSans-Regular.ttf`, loaded at `display_lib_create`.
+* **Active format.** `render` draws the hello-world format; `default` is retained (unused) with `#[allow(dead_code)]`.
+* **Text.** Shape with `hb_shape` at the face's units per em; encode glyphs on demand into a growable `GL_TEXTURE_BUFFER` atlas (`GL_RGBA16I`); rasterize with the hb-gpu Slug fragment shader.
+* **Mutable render.** The atlas grows during drawing, so `Display::render` takes `&mut self` and `display_lib_render` casts to `*mut Display`.
+* **Colors.** Hello-world background `[0.02, 0.03, 0.08, 1.0]`, text `[1.0, 1.0, 1.0, 1.0]` (placeholders).
+* **Offsets.** Shaping `x_offset`/`y_offset` are applied to each glyph's drawn position (needed for mark attachment and complex scripts); only advances move the pen.
+* **Deploy.** `scripts/build.ps1` copies `assets/` to `build/deploy/assets` and `harfbuzz.dll` + `harfbuzz-gpu.dll` to `build/deploy/bin`.
 
-## Build and install
+## Interfaces
 
-Documented in `README.md` next to the CycloneDDS sections. From a shell with the VS toolchain and CMake:
+### Used from `rust/lib/harfbuzz` (existing)
 
-```
-git clone --branch 14.6.0 --depth 1 https://github.com/harfbuzz/harfbuzz.git C:\Libraries\src\harfbuzz
-cmake -S C:\Libraries\src\harfbuzz -B C:\Libraries\src\harfbuzz\build -G "Visual Studio 18 2026" -A x64 ^
-  -DCMAKE_INSTALL_PREFIX=C:/Libraries/harfbuzz -DBUILD_SHARED_LIBS=ON ^
-  -DHB_BUILD_GPU=ON -DHB_BUILD_GPU_DEMO=OFF ^
-  -DHB_BUILD_SUBSET=OFF -DHB_BUILD_RASTER=OFF -DHB_BUILD_VECTOR=OFF -DHB_BUILD_UTILS=OFF
-cmake --build C:\Libraries\src\harfbuzz\build --config Release --parallel
-cmake --install C:\Libraries\src\harfbuzz\build --config Release
-```
-
-Expected install under `C:\Libraries\harfbuzz`:
-
-* `bin\harfbuzz.dll`, `bin\harfbuzz-gpu.dll`.
-* `lib\harfbuzz.lib`, `lib\harfbuzz-gpu.lib`.
-* `include\harfbuzz\hb.h`, `include\harfbuzz\hb-gpu.h`, `include\harfbuzz\hb-features.h`, and the rest.
-* `lib\cmake\harfbuzz\` (the `harfbuzzConfig` package).
-
-Meson fallback (needs Python and Ninja):
-
-```
-meson setup C:\Libraries\src\harfbuzz\build --prefix=C:/Libraries/harfbuzz ^
-  -Dgpu=enabled -Dsubset=disabled -Draster=disabled -Dvector=disabled -Dutilities=disabled
-ninja -C C:\Libraries\src\harfbuzz\build
-meson install -C C:\Libraries\src\harfbuzz\build
+```rust
+Blob::from_bytes(&[u8]) -> Blob
+Face::new(&Blob) -> Face ;  Face::upem(&self) -> u32
+Font::new(&Face) -> Font ;  Font::set_scale(&mut self, i32, i32) ; Font::scale(&self) -> (i32, i32)
+Buffer::new() -> Buffer ; Buffer::add_str(&mut self, &str) ; Buffer::guess_segment_properties(&mut self)
+Buffer::shape(&mut self, &Font) ; Buffer::glyph_infos(&self) -> Vec<hb_glyph_info_t> ; Buffer::glyph_positions(&self) -> Vec<hb_glyph_position_t>
+GpuDraw::new() -> Option<GpuDraw> ; GpuDraw::glyph(&mut self, &Font, u32) ; GpuDraw::encode(&mut self) -> (Vec<u8>, hb_glyph_extents_t)
+shader_source(ShaderStage, ShaderLang) -> Option<&'static str> ; draw_shader_source(ShaderStage, ShaderLang) -> Option<&'static str>
+// hb_glyph_info_t { codepoint: u32, .. }
+// hb_glyph_position_t { x_advance, y_advance, x_offset, y_offset: i32, .. }
+// hb_glyph_extents_t { x_bearing, y_bearing, width, height: i32 }
 ```
 
-## `rust/lib/harfbuzz`
+### `rust/lib/display-lib/src/text.rs` (new)
 
-`Cargo.toml`: `publish = false`, edition 2021, no dependencies. `build.rs`:
+```rust
+pub(crate) const INITIAL_ATLAS_BYTES: usize = 4096;   // multiple of 8
 
-* Read `EXT_PATH_PREFIX` (default `C:\Libraries`); the prefix is `<EXT_PATH_PREFIX>\harfbuzz`.
-* `cargo:rustc-link-search=native=<prefix>\lib`.
-* `cargo:rustc-link-lib=harfbuzz-gpu` and `cargo:rustc-link-lib=harfbuzz` (we call symbols from both).
+pub(crate) struct Font {
+    _blob: harfbuzz::Blob,
+    _face: harfbuzz::Face,
+    font: harfbuzz::Font,      // scale set to upem
+    upem: f32,
+}
+impl Font {
+    pub fn load(path: &std::path::Path) -> Result<Font, DisplayError>;
+    pub fn shape(&self, text: &str) -> Vec<Glyph>;     // font units
+}
 
-`src/lib.rs`: raw `extern "C"` declarations for exactly what the renderer needs, plus thin RAII wrappers. Categories:
+pub(crate) struct Glyph { pub id: u32, pub x_advance: f32, pub y_advance: f32, pub x_offset: f32, pub y_offset: f32 }
 
-* **Common.** `hb_version_string`; `hb_blob_create` (with `HB_MEMORY_MODE_DUPLICATE` so HarfBuzz copies the bytes), `hb_blob_get_data`, `hb_blob_get_length`, `hb_blob_destroy`; `hb_face_create`, `hb_face_get_upem`, `hb_face_destroy`; `hb_font_create`, `hb_font_destroy`, `hb_ot_font_set_funcs`, `hb_font_set_scale`, `hb_font_get_scale`.
-* **Shaping.** `hb_buffer_create`/`hb_buffer_destroy`, `hb_buffer_add_utf8`, `hb_buffer_guess_segment_properties`, `hb_buffer_set_direction`/`hb_buffer_set_script`/`hb_buffer_set_language`, `hb_buffer_get_length`, `hb_buffer_get_glyph_infos`, `hb_buffer_get_glyph_positions`, `hb_shape`. The `hb_glyph_info_t` and `hb_glyph_position_t` structs are declared `#[repr(C)]` to match the C layout.
-* **GPU.** `hb_gpu_shader_source`, `hb_gpu_draw_shader_source`, `hb_gpu_draw_create_or_fail`, `hb_gpu_draw_destroy`, `hb_gpu_draw_glyph`, `hb_gpu_draw_encode` (writes an `hb_glyph_extents_t`), `hb_gpu_draw_recycle_blob`, `hb_gpu_draw_get_scale`, `hb_glyph_extents_t`.
+struct AtlasGlyph { loc: u32, min_x: f32, max_x: f32, min_y: f32, max_y: f32, empty: bool }
 
-Wrappers own their handles and free them on drop; `Blob`, `Face`, `Font`, `Buffer`, `GpuDraw`. The crate exposes just enough for `font-handling` and nothing GL-related.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct Vertex { pos: [f32; 2], tex: [f32; 2], normal: [f32; 2], em_per_pos: f32, glyph_loc: u32 } // 32 bytes
+
+pub(crate) struct TextRenderer {
+    program: glow::Program,
+    vao: glow::VertexArray,
+    vbo: glow::Buffer,
+    atlas_buffer: glow::Buffer,       // GL_TEXTURE_BUFFER
+    atlas_texture: glow::Texture,     // GL_RGBA16I view
+    atlas_loc: Option<glow::UniformLocation>,
+    mvp_loc: Option<glow::UniformLocation>,
+    viewport_loc: Option<glow::UniformLocation>,
+    fg_loc: Option<glow::UniformLocation>,
+    atlas_data: Vec<u8>,              // CPU copy; length multiple of 8
+    atlas_capacity: usize,
+    glyphs: std::collections::HashMap<u32, AtlasGlyph>,
+    encoder: harfbuzz::GpuDraw,
+    font: Font,
+    vertices: Vec<Vertex>,
+}
+impl TextRenderer {
+    pub fn new(gl: &glow::Context, font_path: &std::path::Path) -> Result<TextRenderer, DisplayError>;
+    /// Draw `text` centered in a `width`x`height` pixel region (viewport already set).
+    pub fn draw(&mut self, gl: &glow::Context, width: i32, height: i32,
+                text: &str, color: [f32; 4], font_size_px: f32);
+
+    fn ensure_glyph(&mut self, gl: &glow::Context, gid: u32);
+    fn build_vertices(&self, glyphs: &[Glyph], width: i32, height: i32, font_size_px: f32) -> Vec<Vertex>;
+}
+
+fn assemble_vertex_shader() -> String;
+fn assemble_fragment_shader() -> String;
+fn ortho_pixels(width: i32, height: i32) -> [f32; 16];   // column-major, pixels -> NDC
+fn push_quad(v: &mut Vec<Vertex>, g: &AtlasGlyph, pen_x: f32, pen_y: f32, scale: f32, em_per_pos: f32);
+```
+
+### `rust/lib/display-lib/src/hello_world.rs` (new)
+
+```rust
+pub(crate) const BACKGROUND: [f32; 4];   // [0.02, 0.03, 0.08, 1.0]
+pub(crate) const TEXT_COLOR: [f32; 4];   // [1.0, 1.0, 1.0, 1.0]
+pub(crate) const GREETING: &str = "Hello, world!";
+const FONT_FILE: &str = "fonts/FiraSans-Regular.ttf";
+const FONT_SIZE_FRACTION: f32 = 0.15;    // of region height
+
+pub(crate) struct HelloWorld { text: text::TextRenderer }
+impl HelloWorld {
+    pub fn new(gl: &glow::Context, assets_root: &std::path::Path) -> Result<HelloWorld, DisplayError>;
+    pub fn render(&mut self, gl: &glow::Context, framebuffer_height: i32, x: i32, y: i32, w: i32, h: i32);
+}
+```
+
+### `rust/lib/display-lib/src/lib.rs` (changed)
+
+```rust
+mod hello_world; mod text;
+
+enum DisplayError { Shader(String), Io(String), Font(String) }   // +Io, +Font
+
+struct Display {
+    gl: glow::Context,
+    hello_world: hello_world::HelloWorld,
+    #[allow(dead_code)] default: gl::ColoredMesh,   // used by format-manager later
+}
+impl Display {
+    fn new(loader: impl FnMut(&str) -> *const c_void) -> Result<Self, DisplayError>;
+    fn render(&mut self, framebuffer_height: i32, x: i32, y: i32, width: i32, height: i32);
+}
+fn assets_root() -> std::path::PathBuf;   // current_exe().parent().parent().join("assets")
+```
+
+`display_lib_render` casts to `*mut Display` and calls `display.render(...)`.
+
+### `rust/lib/display-lib/src/gl.rs` (changed)
+
+`fn link` -> `pub(crate) fn link` (reused by `text.rs`).
+
+### `rust/lib/display-lib/Cargo.toml` (changed)
+
+Add `harfbuzz = { workspace = true }`.
+
+### `scripts/build.ps1` (changed)
+
+In the deploy step, copy `assets/` to `build/deploy/assets`, and copy `harfbuzz.dll` and `harfbuzz-gpu.dll` from `$extPathPrefix\harfbuzz\bin` to `build/deploy/bin`.
+
+## Pseudocode
+
+### `Font::load` / `Font::shape`
+
+```
+load(path):
+    bytes = read(path)  -> DisplayError::Io on failure
+    blob = Blob::from_bytes(bytes)
+    face = Face::new(blob);  upem = face.upem()
+    font = Font::new(face);  font.set_scale(upem, upem)
+    return Font { _blob: blob, _face: face, font, upem: upem as f32 }
+
+shape(text):
+    buf = Buffer::new(); buf.add_str(text); buf.guess_segment_properties(); buf.shape(&self.font)
+    zip(buf.glyph_infos(), buf.glyph_positions())
+        .map(|(i, p)| Glyph {
+            id: i.codepoint,
+            x_advance: p.x_advance as f32, y_advance: p.y_advance as f32,
+            x_offset: p.x_offset as f32, y_offset: p.y_offset as f32 })
+        .collect()
+```
+
+### `TextRenderer::new`
+
+```
+font = Font::load(font_path)?
+program = gl::link(gl, assemble_vertex_shader(), assemble_fragment_shader())?
+locs = get_uniform_location(program, name) for { hb_gpu_atlas, u_matViewProjection, u_viewport, u_foreground }
+vao = create_vertex_array(); vbo = create_buffer()
+bind_vertex_array(vao); bind_buffer(ARRAY_BUFFER, vbo)
+for i in 0..=4: enable_vertex_attrib_array(i)
+vertex_attrib_pointer_f32(0, 2, FLOAT, false, 32, 0)
+vertex_attrib_pointer_f32(1, 2, FLOAT, false, 32, 8)
+vertex_attrib_pointer_f32(2, 2, FLOAT, false, 32, 16)
+vertex_attrib_pointer_f32(3, 1, FLOAT, false, 32, 24)
+vertex_attrib_pointer_i32(4, 1, UNSIGNED_INT, 32, 28)
+bind_vertex_array(None)
+atlas_buffer = create_buffer(); bind_buffer(TEXTURE_BUFFER, atlas_buffer)
+buffer_data_size(TEXTURE_BUFFER, INITIAL_ATLAS_BYTES, DYNAMIC_DRAW)
+atlas_texture = create_texture(); bind_texture(TEXTURE_BUFFER, atlas_texture)
+tex_buffer(TEXTURE_BUFFER, RGBA16I, atlas_buffer)
+encoder = GpuDraw::new() or Err(DisplayError::Font("gpu encoder"))
+return TextRenderer { ..., atlas_data: [], atlas_capacity: INITIAL_ATLAS_BYTES, glyphs: {}, font, vertices: [] }
+```
+
+### `ensure_glyph`
+
+Make sure the atlas holds glyph `gid`, encoding and uploading it on first use; idempotent.
+
+```
+if glyphs.contains_key(gid): return
+encoder.glyph(&font.font, gid)
+(bytes, ext) = encoder.encode()
+if bytes.is_empty():                      // no ink (space)
+    glyphs.insert(gid, AtlasGlyph::empty()); return
+loc = atlas_data.len() / 8
+atlas_data.extend_from_slice(&bytes)
+bind_buffer(TEXTURE_BUFFER, atlas_buffer)
+if atlas_data.len() > atlas_capacity:
+    atlas_capacity = max(atlas_capacity * 2, atlas_data.len())
+    buffer_data_size(TEXTURE_BUFFER, atlas_capacity, DYNAMIC_DRAW)
+    buffer_sub_data_u8_slice(TEXTURE_BUFFER, 0, &atlas_data)
+else:
+    buffer_sub_data_u8_slice(TEXTURE_BUFFER, loc * 8, &bytes)
+glyphs.insert(gid, AtlasGlyph {
+    loc, empty: false,
+    min_x: ext.x_bearing as f32, max_x: (ext.x_bearing + ext.width) as f32,
+    min_y: (ext.y_bearing + ext.height) as f32, max_y: ext.y_bearing as f32 })
+```
+
+### `push_quad`
+
+```
+for (cx, cy) in [(0,0),(1,0),(0,1),(0,1),(1,0),(1,1)]:
+    ex = lerp(g.min_x, g.max_x, cx);  ey = lerp(g.min_y, g.max_y, cy)
+    v.push(Vertex {
+        pos: [pen_x + scale * ex, pen_y - scale * ey],
+        tex: [ex, ey],
+        normal: [2 * cx - 1, 1 - 2 * cy],
+        em_per_pos, glyph_loc: g.loc })
+```
+
+### `TextRenderer::draw`
+
+```
+glyphs = font.shape(text)
+for g in glyphs: ensure_glyph(gl, g.id)
+scale = font_size_px / font.upem
+total = sum(g.x_advance) * scale
+pen_x = (width as f32 - total) / 2.0
+pen_y = height as f32 / 2.0 + 0.5 * font_size_px     // em-box baseline
+em_per_pos = font.upem / font_size_px
+vertices.clear()
+for g in glyphs:
+    if let Some(a) = glyphs.get(g.id) and !a.empty:
+        push_quad(vertices, a, pen_x + scale * g.x_offset, pen_y - scale * g.y_offset, scale, em_per_pos)
+    pen_x += g.x_advance * scale
+bind_buffer(ARRAY_BUFFER, vbo); buffer_data_u8_slice(ARRAY_BUFFER, as_bytes(vertices), DYNAMIC_DRAW)
+use_program(program)
+uniform_matrix_4_f32_slice(mvp_loc, false, &ortho_pixels(width, height))
+uniform_2_f32(viewport_loc, width as f32, height as f32)
+uniform_4_f32(fg_loc, color[0], color[1], color[2], color[3])
+active_texture(TEXTURE0); bind_texture(TEXTURE_BUFFER, atlas_texture); uniform_1_i32(atlas_loc, 0)
+enable(BLEND); blend_func(SRC_ALPHA, ONE_MINUS_SRC_ALPHA)
+bind_vertex_array(vao); draw_arrays(TRIANGLES, 0, vertices.len())
+disable(BLEND); bind_vertex_array(None); use_program(None)
+```
+
+### Shader assembly
+
+```
+assemble_vertex_shader() =
+    "#version 330\n" + shader_source(Vertex, Glsl) + draw_shader_source(Vertex, Glsl) + VERTEX_MAIN
+
+VERTEX_MAIN =
+    layout(location=0) in vec2 a_position;
+    layout(location=1) in vec2 a_texcoord;
+    layout(location=2) in vec2 a_normal;
+    layout(location=3) in float a_emPerPos;
+    layout(location=4) in uint a_glyphLoc;
+    uniform mat4 u_matViewProjection; uniform vec2 u_viewport;
+    out vec2 v_texcoord; flat out uint v_glyphLoc;
+    main():
+        pos = a_position; tex = a_texcoord; jac = vec4(a_emPerPos, 0, 0, -a_emPerPos)
+        hb_gpu_dilate(pos, tex, a_normal, jac, u_matViewProjection, u_viewport)
+        gl_Position = u_matViewProjection * vec4(pos, 0, 1)
+        v_texcoord = tex; v_glyphLoc = a_glyphLoc
+
+assemble_fragment_shader() =
+    "#version 330\n" + shader_source(Fragment, Glsl) + draw_shader_source(Fragment, Glsl) + FRAGMENT_MAIN
+
+FRAGMENT_MAIN =
+    uniform vec4 u_foreground;
+    in vec2 v_texcoord; flat in uint v_glyphLoc; out vec4 f_color;
+    main(): f_color = vec4(u_foreground.rgb, u_foreground.a * hb_gpu_draw(v_texcoord, v_glyphLoc))
+```
+
+### `ortho_pixels`
+
+```
+[ 2/w, 0, 0, 0,   0, -2/h, 0, 0,   0, 0, -1, 0,   -1, 1, 0, 1 ]   // column-major; (0,0)->(-1,1), (w,h)->(1,-1)
+```
+
+### `HelloWorld::render`
+
+```
+if w <= 0 or h <= 0: return
+y_gl = framebuffer_height - y - h
+enable(SCISSOR_TEST); scissor(x, y_gl, w, h); clear_color(BACKGROUND); clear(COLOR_BUFFER_BIT); disable(SCISSOR_TEST)
+viewport(x, y_gl, w, h)
+text.draw(gl, w, h, GREETING, TEXT_COLOR, h as f32 * FONT_SIZE_FRACTION)
+```
+
+### `Display::new` / `render` / `assets_root`
+
+```
+new(loader):
+    gl = glow::Context::from_loader_function(loader)
+    hello_world = HelloWorld::new(&gl, &assets_root())?
+    default = gl::ColoredMesh::new(&gl, &default_format::vertices())?
+    return Display { gl, hello_world, default }
+
+render(fh, x, y, w, h): hello_world.render(&self.gl, fh, x, y, w, h)
+
+assets_root():
+    exe = current_exe(); dir = exe.parent()
+    return dir.parent().map(|d| d.join("assets")).unwrap_or(PathBuf::from("assets"))
+```
 
 ## Tests
 
-* The temporary smoke program under `build/harfbuzz-smoke/` (the minimal test, below). It uses the installed CMake package: a two-line `CMakeLists.txt` with `find_package(harfbuzz CONFIG REQUIRED)` and `target_link_libraries(smoke PRIVATE harfbuzz::harfbuzz-gpu)`, configured with `-DCMAKE_PREFIX_PATH=C:/Libraries/harfbuzz`.
-* The crate's `#[test]`s (durable): load `assets/fonts/FiraSans-Regular.ttf` (located through `REPO_ROOT`, supplied by Cargo), shape "Hello, world!", assert the glyph count is non-zero and that a glyph encodes to a non-empty blob; assert the GLSL vertex and fragment shader sources are non-null and non-empty. These need no GL context.
-* No GL test here; the shader is compiled and drawn by `font-handling`.
+* `text.rs` unit test (no GL): `build_vertices` with synthetic `Glyph`/`AtlasGlyph` asserts 6 vertices per non-empty glyph, total-advance centering, `em_per_pos` values, and that non-zero `x_offset`/`y_offset` shift the quad.
+* `text.rs` unit test (no GL): `Font::load(REPO_ROOT/assets/fonts/FiraSans-Regular.ttf)` then `shape("Hello, world!")` asserts non-empty and some `x_advance > 0`.
+* `default_format.rs` tests unchanged.
+* No GL test; the shader compiles and the atlas uploads only with a live context.
 
 ## Minimal test
 
 ```
-# configure, build, and run the temporary smoke program
-cmake -S build\harfbuzz-smoke -B build\harfbuzz-smoke\out -G "Visual Studio 18 2026" -A x64 -DCMAKE_PREFIX_PATH=C:/Libraries/harfbuzz
-cmake --build build\harfbuzz-smoke\out --config Release
-build\harfbuzz-smoke\out\Release\smoke.exe assets\fonts\FiraSans-Regular.ttf
+.\scripts\build.ps1
+.\scripts\launch-rust.ps1
 ```
 
-It prints the HarfBuzz version, the shaped glyph count and advances for "Hello, world!", and the encoded blob length, then exits 0. Negative check: passing a missing font path fails with a non-zero exit.
+The delegated region shows a dark background with "Hello, world!" rendered in Fira Sans, centered and resolution-independent; the power button still toggles the region; `.\scripts\cleanup.ps1` stops it.
+
+Negative check: remove or rename `build\deploy\assets\fonts\FiraSans-Regular.ttf`; `lil-d` fails at startup with the loader's `last_error` (font I/O).
 
 ## Risks and follow-ups
 
-* **Experimental API.** `hb-gpu` is marked experimental; pinning `14.6.0` and recording it in `docs/versions.md` bounds the churn. If a later story upgrades it, re-check the shader-stage and encode signatures.
-* **CMake port.** Community-maintained and warns as such; if the GPU target does not build, use the Meson fallback.
-* **Linking and runtime.** Link both import libraries; deploy `harfbuzz.dll` and `harfbuzz-gpu.dll` to `build/deploy/bin` in `font-handling` so the loaded `display_lib.dll` resolves them (the app exe is in the same directory).
-* **`EXT_PATH_PREFIX`.** `build.rs` defaults to `C:\Libraries`; `scripts/build.ps1` must export `EXT_PATH_PREFIX` before invoking Cargo so a custom prefix is honored.
-* **Struct layout.** `hb_glyph_info_t`/`hb_glyph_position_t` are declared in the crate and must match the C layout; the crate's test guards the positions used for layout.
-* **`skrifa` removal.** Confirm nothing else uses it before deleting the workspace entry.
-
-## Result
-
-Done and verified. HarfBuzz `14.6.0` is built with the CMake port and installed to `C:\Libraries\harfbuzz` (shared, GPU on, subset/raster/vector/utils off); `bin\harfbuzz.dll`, `bin\harfbuzz-gpu.dll`, `lib\harfbuzz.lib`, `lib\harfbuzz-gpu.lib`, and `include\harfbuzz\hb-gpu.h` are present. The crate `rust/lib/harfbuzz` links them from `EXT_PATH_PREFIX` and passes its two tests (shaping "Hello, world!" with FiraSans and encoding a glyph; shader sources present). The temporary smoke program (`build/harfbuzz-smoke/`) also passed: 13 glyphs shaped, a 1528-byte encoded blob, and non-empty GLSL shader sources. `scripts/build.ps1` now exports `EXT_PATH_PREFIX` and prepends the HarfBuzz `bin` to the process `PATH`; `scripts/build.ps1 -Test` and the deploy build both pass.
-
-Findings: the CMake port's exported targets carry a broken `INTERFACE_INCLUDE_DIRECTORIES` (an absolute `/harfbuzz`), so the smoke program links the installed libraries directly rather than via `find_package`; the Rust binding uses `build.rs` and is unaffected. The smoke program also needs `<hb-ot.h>` for `hb_ot_font_set_funcs` (not pulled in by `<hb.h>`).
+* **Atlas growth.** `buffer_data_size` reallocates in place and re-uploads the whole atlas; the texture-buffer association survives reallocation.
+* **hb-gpu vertex mapping.** Corner/normal/`jac`/`emPerPos` follow the manual; verify dilation and coverage at small sizes.
+* **Assets resolution.** `<exe_dir>/../assets` matches `build/deploy`; `cargo run` (exe under `build/rust`) will not find assets, so use the launch script.
+* **Baseline.** Vertical centering approximates the em box (`center + 0.5 * font_size`); refine with font extents if needed.
+* **Offsets.** Applied, but zero for the Latin greeting, so the minimal test does not exercise them; the `build_vertices` unit test covers a non-zero case.
+* **C++ side.** The C++ display library reimplements this pipeline against the same HarfBuzz shaders.
 
 ## Files
 
-* Authored: `rust/lib/harfbuzz/{Cargo.toml,build.rs,src/lib.rs}`, `rust/lib/harfbuzz/tests/smoke.rs`.
-* Changed: `rust/Cargo.toml` (member plus the `harfbuzz` workspace dependency; dropped `skrifa`), `scripts/build.ps1`, `README.md`, `docs/versions.md`, `planning/{architecture,backlog,current_story}.md`.
-* Temporary: `build/harfbuzz-smoke/` (CMake project plus `smoke.cc`).
+* Authored: `rust/lib/display-lib/src/text.rs`, `rust/lib/display-lib/src/hello_world.rs`.
+* Changed: `rust/lib/display-lib/src/{lib.rs,gl.rs}`, `rust/lib/display-lib/Cargo.toml`, `scripts/build.ps1`, `README.md`, `planning/{backlog,current_story}.md`.

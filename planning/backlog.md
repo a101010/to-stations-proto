@@ -137,7 +137,7 @@ Build and install HarfBuzz 14.6.0 with the experimental GPU library (`libharfbuz
 Load a font from `assets/fonts` in the display library and render the hello_world greeting with HarfBuzz (`hb-gpu`) as part of the hello-world format. The greeting is hardcoded for now.
 - **Depends on:** display-lib, harfbuzz.
 - **Minimal test:** the greeting renders in the loaded font.
-- **Status:** todo.
+- **Status:** in progress.
 
 ### earth-rendering
 Render the cube map on a sphere in the display library, orient it with the attitude quaternion, and light it from the upper right, completing the hello-world format. The cube map, attitude, and light direction are hardcoded for now.
