@@ -8,10 +8,7 @@
 //! Every function that calls OpenGL assumes a glow context is current on the
 //! calling thread (see `architecture.md`, "OpenGL context and safety").
 
-#[allow(dead_code)] // retained for the format manager
-mod default_format;
-mod gl;
-mod hello_world;
+mod formats;
 mod text;
 
 use std::cell::RefCell;
@@ -49,22 +46,14 @@ impl std::error::Error for DisplayError {}
 /// The state behind the opaque `display_lib*` handle.
 struct Display {
     gl: glow::Context,
-    hello_world: hello_world::HelloWorld,
-    /// The default format, retained for the format manager.
-    #[allow(dead_code)]
-    default: gl::ColoredMesh,
+    hello_world: formats::hello_world::HelloWorld,
 }
 
 impl Display {
     fn new(loader: impl FnMut(&str) -> *const c_void) -> Result<Self, DisplayError> {
         let gl = unsafe { glow::Context::from_loader_function(loader) };
-        let hello_world = hello_world::HelloWorld::new(&gl, &assets_root())?;
-        let default = gl::ColoredMesh::new(&gl, &default_format::vertices())?;
-        Ok(Self {
-            gl,
-            hello_world,
-            default,
-        })
+        let hello_world = formats::hello_world::HelloWorld::new(&gl, &assets_root())?;
+        Ok(Self { gl, hello_world })
     }
 
     /// Render the active format into the region (physical pixels, top-left

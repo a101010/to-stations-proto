@@ -343,13 +343,31 @@ Negative check: remove or rename `build\deploy\assets\fonts\FiraSans-Regular.ttf
 * **Offsets.** Applied, but zero for the Latin greeting, so the minimal test does not exercise them; the `build_vertices` unit test covers a non-zero case.
 * **C++ side.** The C++ display library reimplements this pipeline against the same HarfBuzz shaders.
 
+## Module layout
+
+Post-2018 layout (`foo.rs` plus a `foo/` directory; no `mod.rs`):
+
+```
+src/lib.rs                    ABI, Display, DisplayError, assets_root
+src/formats.rs                declares the live formats
+src/formats/hello_world.rs    the hello-world format
+src/formats/default.rs        the default format (dormant)
+src/text.rs                   text rendering (Font, TextRenderer, compile/link)
+```
+
+* Each format is a submodule of `formats`; a format's unique details (colors, geometry, strings, its mesh and shaders) live in its own file.
+* The default format is retained at `formats/default.rs` but not declared in `formats.rs`, so it is not compiled and produces no dead-code warnings; the format manager reactivates it by declaring `mod default;`. Its tests are kept in the file but do not run.
+* `gl.rs` is deleted: `compile`/`link` moved into `text.rs` (their only live user) and `ColoredMesh` moved into `formats/default.rs` (the default format's own mesh).
+* Shared code is extracted only when a second user appears; `mesh` and `format_manager` become top-level modules then.
+
 ## Result
 
 Done and verified. `display-lib` loads `assets/fonts/FiraSans-Regular.ttf`, shapes the greeting with HarfBuzz, encodes glyphs into a growable `GL_TEXTURE_BUFFER` atlas (`GL_RGBA16I`), and rasterizes them with the hb-gpu Slug shader; the region shows "Hello, world!" in Fira Sans, centered on the dark background, with the console and power button intact. `scripts/build.ps1` now copies `assets/` to `build/deploy/assets` and `harfbuzz.dll` + `harfbuzz-gpu.dll` to `build/deploy/bin`. `scripts/build.ps1 -Test` and the deploy build pass; `display-lib` has 5 tests (2 new: vertex layout with offsets, font load + shape).
 
-Deviations from the plan: `build_vertices` is a free function (taking `upem`, the atlas, and the glyphs) rather than a method, so it is unit-testable without a GL context; `DisplayError` keeps the planned `Shader`/`Io`/`Font` variants and uses `Shader` for GL object-creation failures. The default format and `ColoredMesh::draw` are marked `#[allow(dead_code)]` while retained for the format manager.
+Deviations from the plan: `build_vertices` is a free function (taking `upem`, the atlas, and the glyphs) rather than a method, so it is unit-testable without a GL context; `DisplayError` keeps the planned `Shader`/`Io`/`Font` variants and uses `Shader` for GL object-creation failures. The module layout was reorganized (see "Module layout"): `gl.rs` is deleted, the default format is retained dormant and is not compiled, and `Display` no longer constructs it, so no `#[allow(dead_code)]` is needed.
 
 ## Files
 
-* Authored: `rust/lib/display-lib/src/text.rs`, `rust/lib/display-lib/src/hello_world.rs`.
-* Changed: `rust/lib/display-lib/src/{lib.rs,gl.rs}`, `rust/lib/display-lib/Cargo.toml`, `scripts/build.ps1`, `README.md`, `planning/{backlog,current_story}.md`.
+* Authored: `rust/lib/display-lib/src/text.rs`, `rust/lib/display-lib/src/formats.rs`, `rust/lib/display-lib/src/formats/{hello_world,default}.rs`.
+* Deleted: `rust/lib/display-lib/src/{gl.rs,default_format.rs,hello_world.rs}`.
+* Changed: `rust/lib/display-lib/src/lib.rs`, `rust/lib/display-lib/Cargo.toml`, `scripts/build.ps1`, `README.md`, `planning/{architecture,backlog,current_story}.md`.

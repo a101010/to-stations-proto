@@ -175,7 +175,7 @@ The repository is therefore required to live at a short path on Windows. `script
 Each configuration has a launch script; all configurations share `cleanup.ps1`. `scripts/verify-loopback.ps1` verifies the loopback adapter and its IPv6 prerequisites; creating the adapter is a documented manual step (see `docs/`). Launch and cleanup scripts operate only on `build/deploy/`.
 
 ## Deferred decisions
-* displayLib internal architecture: it may split into smaller libraries; per-format rendering and communications are at least separate modules. The format manager has a view service, a control service, and one or more displayLib modules.
+* displayLib internal architecture: its top-level modules are `formats` (one submodule per format), `format_manager`, `text`, and `mesh` (the latter two are rendering capabilities, added when a second user appears). A format's unique details (colors, geometry, strings, its mesh and shaders) live in its own submodule; shared code is extracted only when a second format needs it. The default format is retained dormant at `formats/default.rs` (not declared, so not compiled) until the format manager reactivates it. It may still split into smaller libraries. The format manager has a view service, a control service, and one or more displayLib modules.
 * `test/` layout.
 * The C++ side mirroring the `ui/service/lib/tool/test` layout.
 
