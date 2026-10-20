@@ -8,7 +8,9 @@
 //! Every function that calls OpenGL assumes a glow context is current on the
 //! calling thread (see `architecture.md`, "OpenGL context and safety").
 
+mod earth;
 mod formats;
+mod shader;
 mod text;
 
 use std::cell::RefCell;
@@ -29,6 +31,8 @@ enum DisplayError {
     Io(String),
     /// The font or its GPU encoder could not be created.
     Font(String),
+    /// An image asset (an earth cube-map face) could not be loaded or decoded.
+    Image(String),
 }
 
 impl std::fmt::Display for DisplayError {
@@ -37,6 +41,7 @@ impl std::fmt::Display for DisplayError {
             DisplayError::Shader(msg) => write!(f, "shader error: {msg}"),
             DisplayError::Io(msg) => write!(f, "io error: {msg}"),
             DisplayError::Font(msg) => write!(f, "font error: {msg}"),
+            DisplayError::Image(msg) => write!(f, "image error: {msg}"),
         }
     }
 }

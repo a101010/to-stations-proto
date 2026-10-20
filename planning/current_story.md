@@ -27,7 +27,8 @@ Two facts constrain the design:
 * **Cube map.** Six JPEGs loaded with `image::open(..).to_rgb8()`, uploaded as a `GL_TEXTURE_CUBE_MAP` in face order `px, nx, py, ny, pz, nz`. Rows are uploaded in memory order **without vertical flip**, because the CREDITS `t` axis runs downward and GL's first row is `t = 0`. `LINEAR_MIPMAP_LINEAR` min / `LINEAR` mag, `CLAMP_TO_EDGE` S/T, `generate_mipmap`.
 * **Sphere.** A unit-direction UV sphere generated on the CPU, `+Y` = north (matching the cube convention). The only vertex attribute is `a_dir: vec3` (position = normal = cube-sample direction). Indexed draw via a `GL_ELEMENT_ARRAY_BUFFER`; `sphere_indices` emits CCW-outward winding.
 * **Orientation and lighting.** Vertex shader: `view = u_attitude * a_dir`, passing `v_dir = a_dir` (object space, for the cube sample) and `v_normal = view` (view space, so the light stays fixed to the region while the texture rotates). Fragment: `tex * (ambient + max(dot(normalize(v_normal), normalize(u_light)), 0))`, `ambient = 0.15`, `u_light = normalize(vec3(0.6, 0.8, 0.7))` (upper right, toward the viewer).
-* **Attitude placeholder.** 23.5 deg about `+X`: `(sin(11.75 deg), 0, 0, cos(11.75 deg))`.
+* **Winding.** `sphere_indices` winds CCW as seen from outside (`[a, a+1, b, a+1, b+1, b]`) so `cull_face(BACK)` keeps the front hemisphere. An earlier CW winding culled the front and showed the antipode (mirrored, south pole toward the viewer).
+* **Attitude.** The camera faces `(VIEW_LATITUDE_DEG, VIEW_LONGITUDE_DEG) = (45 deg N, 100 deg W)` (North America) with the north pole tilted into view. `R = Rx(lat) * Ry(-lon)`, built from `quat_from_axis_angle` and `quat_mul`; the camera looks down `-Z`, so the surface point at `R^T * +Z` is the one facing the viewer. (This replaces the earlier arbitrary 23.5 deg `+X` tilt, which centered on Africa/Europe.)
 * **Error.** Add `DisplayError::Image(String)` for a face that fails to load or decode.
 * **Deploy.** No `build.ps1` change (`assets/` is already copied recursively). Add `image = { workspace = true }` to `display-lib/Cargo.toml`.
 
@@ -73,22 +74,27 @@ impl Earth {
 pub(crate) fn sphere_vertices(stacks: u32, slices: u32) -> Vec<[f32; 3]>;   // unit directions
 pub(crate) fn sphere_indices(stacks: u32, slices: u32) -> Vec<u32>;         // CCW outward
 pub(crate) fn quat_to_mat3(q: [f32; 4]) -> [f32; 9];                        // column-major
+pub(crate) fn quat_from_axis_angle(axis: [f32; 3], angle_rad: f32) -> [f32; 4];
+pub(crate) fn quat_mul(a: [f32; 4], b: [f32; 4]) -> [f32; 4];               // a * b
 pub(crate) fn perspective_view_proj(aspect: f32) -> [f32; 16];             // column-major
 ```
 
 ### `rust/lib/display-lib/src/formats/hello_world.rs` (changed)
 
 ```rust
-/// Axial-tilt placeholder: 23.5 deg about +X.
-const ATTITUDE: [f32; 4] = [0.20364, 0.0, 0.0, 0.97908];
+/// Point the camera faces (North America).
+const VIEW_LATITUDE_DEG: f32 = 45.0;
+const VIEW_LONGITUDE_DEG: f32 = -100.0;
 /// Light direction (view space): upper right, toward the viewer.
 const LIGHT_DIR: [f32; 3] = [0.6, 0.8, 0.7];
+fn view_attitude() -> [f32; 4];   // R = Rx(lat) * Ry(-lon)
 
-pub(crate) struct HelloWorld { earth: Earth, text: TextRenderer }
+pub(crate) struct HelloWorld { earth: Earth, text: TextRenderer, attitude: [f32; 4] }
 // new():    earth = Earth::new(gl, assets_root)?; text = TextRenderer::new(gl, font)?
+//           attitude = view_attitude()
 // render(): if width <= 0 || height <= 0: return
 //           scissor + clear color; viewport; disable DEPTH_TEST
-//           earth.render(gl, width, height, ATTITUDE, LIGHT_DIR)
+//           earth.render(gl, width, height, attitude, LIGHT_DIR)
 //           text.draw(gl, width, height, GREETING, TEXT_COLOR, height * FONT_SIZE_FRACTION)
 ```
 
@@ -269,6 +275,14 @@ src/formats/default.rs        the default format (dormant)
 * `shader.rs` is a new shared capability: `text.rs` and `earth.rs` both link shader programs.
 * `earth.rs` is a new rendering capability, parallel to `text.rs`.
 * `formats/hello_world.rs` composes the background, the earth, and the text, and owns the format's values (attitude, light, greeting, colors).
+
+## Result
+
+Implemented. `display-lib` loads the six `assets/earth` faces into a `GL_TEXTURE_CUBE_MAP`, draws a unit-direction sphere with a perspective projection, samples the cube map along the object-space direction, and lights it with a fixed view-space direction, with the greeting drawn on top. The shared shader helpers moved from `text.rs` to `shader.rs`; `lil-d` now requests a 24-bit depth buffer and clears it each frame. `scripts/build.ps1 -Test` passes (`display-lib` has 8 tests: 5 new earth tests plus the existing text tests), and the release deploy build succeeds with no warnings.
+
+Deviation from the plan: `Earth`'s `vbo`/`ebo` fields carry `#[allow(dead_code)]` (kept for a future `destroy`, matching `default.rs`'s `ColoredMesh`).
+
+Correction after visual review: the sphere was rendering the antipode (mirrored, centered on the South Pacific with Antarctica toward the viewer) because `sphere_indices` wound the triangles clockwise-outward, so `cull_face(BACK)` culled the front hemisphere. Fixed the winding to CCW-outward (`[a, a+1, b, a+1, b+1, b]`, with a regression test) and replaced the arbitrary 23.5 deg `+X` tilt with a view-based attitude facing North America (`45 deg N, 100 deg W`) with the north pole tilted into view. `display-lib` now has 10 tests. The visual minimal test (the tilted, lit earth in the delegated region) remains for the user to confirm with `scripts/launch-rust.ps1`.
 
 ## Files
 

@@ -39,7 +39,7 @@ impl GlWindow {
 
         let config_template = glutin::config::ConfigTemplateBuilder::new()
             .prefer_hardware_accelerated(None)
-            .with_depth_size(0)
+            .with_depth_size(24)
             .with_stencil_size(0)
             .with_transparency(false);
 

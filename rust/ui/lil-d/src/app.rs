@@ -186,6 +186,6 @@ fn clear(gl: &glow::Context, gl_window: &GlWindow, color: [f32; 4]) {
     unsafe {
         gl.viewport(0, 0, size.width as i32, size.height as i32);
         gl.clear_color(color[0], color[1], color[2], color[3]);
-        gl.clear(glow::COLOR_BUFFER_BIT);
+        gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
     }
 }

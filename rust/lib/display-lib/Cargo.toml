@@ -12,3 +12,4 @@ crate-type = ["cdylib"]
 [dependencies]
 glow = { workspace = true }
 harfbuzz = { workspace = true }
+image = { workspace = true }

@@ -138,7 +138,7 @@ impl TextRenderer {
     /// Build the renderer for the font at `font_path`.
     pub(crate) fn new(gl: &glow::Context, font_path: &Path) -> Result<Self, DisplayError> {
         let font = Font::load(font_path)?;
-        let program = link(gl, &assemble_vertex_shader(), &assemble_fragment_shader())?;
+        let program = crate::shader::link(gl, &assemble_vertex_shader(), &assemble_fragment_shader())?;
 
         let (vao, vbo) = unsafe {
             let vao = gl.create_vertex_array().map_err(DisplayError::Shader)?;
@@ -436,37 +436,6 @@ void main() {
     float cov = hb_gpu_draw(v_texcoord, v_glyphLoc);
     f_color = vec4(u_foreground.rgb, u_foreground.a * cov);
 }"#;
-
-fn compile(gl: &glow::Context, kind: u32, src: &str) -> Result<glow::Shader, DisplayError> {
-    unsafe {
-        let shader = gl.create_shader(kind).map_err(DisplayError::Shader)?;
-        gl.shader_source(shader, src);
-        gl.compile_shader(shader);
-        if !gl.get_shader_compile_status(shader) {
-            return Err(DisplayError::Shader(gl.get_shader_info_log(shader)));
-        }
-        Ok(shader)
-    }
-}
-
-fn link(gl: &glow::Context, vs_src: &str, fs_src: &str) -> Result<glow::Program, DisplayError> {
-    unsafe {
-        let vs = compile(gl, glow::VERTEX_SHADER, vs_src)?;
-        let fs = compile(gl, glow::FRAGMENT_SHADER, fs_src)?;
-        let program = gl.create_program().map_err(DisplayError::Shader)?;
-        gl.attach_shader(program, vs);
-        gl.attach_shader(program, fs);
-        gl.link_program(program);
-        if !gl.get_program_link_status(program) {
-            return Err(DisplayError::Shader(gl.get_program_info_log(program)));
-        }
-        gl.detach_shader(program, vs);
-        gl.detach_shader(program, fs);
-        gl.delete_shader(vs);
-        gl.delete_shader(fs);
-        Ok(program)
-    }
-}
 
 #[cfg(test)]
 mod tests {
