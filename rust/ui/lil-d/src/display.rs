@@ -10,13 +10,14 @@ use libloading::Library;
 
 /// ABI version this app expects. Mirrors `DISPLAY_LIB_ABI_VERSION` in
 /// `include/display_lib.h`.
-const EXPECTED_ABI_VERSION: u32 = 1;
+const EXPECTED_ABI_VERSION: u32 = 2;
 
 /// A GL proc-address loader, as passed to the display library.
 pub type GlLoader = extern "C" fn(*const c_char, *mut c_void) -> *const c_void;
 
 type CreateFn = unsafe extern "C" fn(GlLoader, *mut c_void) -> *mut c_void;
 type RenderFn = unsafe extern "C" fn(*mut c_void, c_int, c_int, c_int, c_int, c_int);
+type MouseButtonFn = unsafe extern "C" fn(*mut c_void, c_int, c_int, c_int, c_int);
 type DestroyFn = unsafe extern "C" fn(*mut c_void);
 type AbiVersionFn = unsafe extern "C" fn() -> u32;
 type LastErrorFn = unsafe extern "C" fn() -> *const c_char;
@@ -26,6 +27,7 @@ pub struct Display {
     _lib: Library, // keeps the DLL loaded for the lifetime of the handle
     handle: *mut c_void,
     render: RenderFn,
+    mouse_button: MouseButtonFn,
     destroy: DestroyFn,
 }
 
@@ -55,6 +57,9 @@ impl Display {
             let render: RenderFn = *lib
                 .get(b"display_lib_render\0")
                 .map_err(|e| format!("missing display_lib_render: {e}"))?;
+            let mouse_button: MouseButtonFn = *lib
+                .get(b"display_lib_mouse_button\0")
+                .map_err(|e| format!("missing display_lib_mouse_button: {e}"))?;
             let destroy: DestroyFn = *lib
                 .get(b"display_lib_destroy\0")
                 .map_err(|e| format!("missing display_lib_destroy: {e}"))?;
@@ -76,6 +81,7 @@ impl Display {
                 _lib: lib,
                 handle,
                 render,
+                mouse_button,
                 destroy,
             })
         }
@@ -92,6 +98,14 @@ impl Display {
                 rect.w,
                 rect.h,
             );
+        }
+    }
+
+    /// Forward a mouse button event (physical pixels, top-left origin).
+    /// `button` is 0=left / 1=right / 2=middle / 3=back / 4=forward / 5=other.
+    pub fn mouse_button(&mut self, x: i32, y: i32, button: i32, pressed: bool) {
+        unsafe {
+            (self.mouse_button)(self.handle, x, y, button, pressed as c_int);
         }
     }
 }

@@ -63,10 +63,12 @@ impl HelloWorld {
             attitude: view_attitude(),
         })
     }
+}
 
+impl crate::formats::Format for HelloWorld {
     /// Render into the region (physical pixels, top-left origin).
     /// `framebuffer_height` is the whole framebuffer height.
-    pub(crate) fn render(
+    fn render(
         &mut self,
         gl: &glow::Context,
         framebuffer_height: i32,

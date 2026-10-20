@@ -9,6 +9,7 @@
 //! calling thread (see `architecture.md`, "OpenGL context and safety").
 
 mod earth;
+mod format_manager;
 mod formats;
 mod shader;
 mod text;
@@ -18,7 +19,7 @@ use std::ffi::{c_char, c_int, c_void, CString};
 
 /// ABI version implemented by this library. Mirrors `DISPLAY_LIB_ABI_VERSION`
 /// in `include/display_lib.h`.
-const ABI_VERSION: u32 = 1;
+const ABI_VERSION: u32 = 2;
 
 /// A GL proc-address loader supplied by the display application.
 type GlLoader = extern "C" fn(*const c_char, *mut c_void) -> *const c_void;
@@ -51,21 +52,26 @@ impl std::error::Error for DisplayError {}
 /// The state behind the opaque `display_lib*` handle.
 struct Display {
     gl: glow::Context,
-    hello_world: formats::hello_world::HelloWorld,
+    format_manager: format_manager::FormatManager,
 }
 
 impl Display {
     fn new(loader: impl FnMut(&str) -> *const c_void) -> Result<Self, DisplayError> {
         let gl = unsafe { glow::Context::from_loader_function(loader) };
-        let hello_world = formats::hello_world::HelloWorld::new(&gl, &assets_root())?;
-        Ok(Self { gl, hello_world })
+        let format_manager = format_manager::FormatManager::new(&gl, &assets_root())?;
+        Ok(Self { gl, format_manager })
     }
 
     /// Render the active format into the region (physical pixels, top-left
     /// origin). `framebuffer_height` is the whole framebuffer height.
     fn render(&mut self, framebuffer_height: i32, x: i32, y: i32, width: i32, height: i32) {
-        self.hello_world
+        self.format_manager
             .render(&self.gl, framebuffer_height, x, y, width, height);
+    }
+
+    /// Forward a mouse button event (physical pixels, top-left origin).
+    fn mouse_button(&mut self, x: i32, y: i32, button: i32, pressed: bool) {
+        self.format_manager.mouse_button(x, y, button, pressed);
     }
 }
 
@@ -127,6 +133,24 @@ pub extern "C" fn display_lib_render(
     }
     let display = unsafe { &mut *(display as *mut Display) };
     display.render(framebuffer_height, x, y, width, height);
+}
+
+/// Forwards a mouse button event: `(x, y)` are physical pixels from the
+/// window's top-left, `button` is 0=left / 1=right / 2=middle / 3=back /
+/// 4=forward / 5=other, and `pressed` is nonzero on press.
+#[no_mangle]
+pub extern "C" fn display_lib_mouse_button(
+    display: *mut c_void,
+    x: c_int,
+    y: c_int,
+    button: c_int,
+    pressed: c_int,
+) {
+    if display.is_null() {
+        return;
+    }
+    let display = unsafe { &mut *(display as *mut Display) };
+    display.mouse_button(x, y, button, pressed != 0);
 }
 
 /// Destroys a display library created by [`display_lib_create`].

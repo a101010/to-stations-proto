@@ -1,9 +1,8 @@
 //! The default format: an amber background with a green x.
 //!
-//! DORMANT: this file is retained but not declared in `formats.rs`, so it is not
-//! compiled. The format manager reactivates it by declaring `mod default;`. It
-//! is self-contained; when it returns, its shader helpers are reconciled with
-//! the text renderer's.
+//! One of the formats the format manager can switch between. Its own mesh and
+//! shaders live here; the shader compile/link helpers are shared via
+//! `crate::shader`.
 
 use glow::HasContext as _;
 
@@ -94,7 +93,7 @@ impl ColoredMesh {
     ///
     /// Assumes a glow context is current on the calling thread.
     pub(crate) fn new(gl: &glow::Context, vertices: &[f32]) -> Result<Self, DisplayError> {
-        let program = link(gl, VERTEX_SRC, FRAGMENT_SRC)?;
+        let program = crate::shader::link(gl, VERTEX_SRC, FRAGMENT_SRC)?;
         unsafe {
             let vao = gl.create_vertex_array().map_err(DisplayError::Shader)?;
             let vbo = gl.create_buffer().map_err(DisplayError::Shader)?;
@@ -136,39 +135,6 @@ impl ColoredMesh {
     }
 }
 
-// --- Shader helpers --------------------------------------------------------
-
-fn compile(gl: &glow::Context, kind: u32, src: &str) -> Result<glow::Shader, DisplayError> {
-    unsafe {
-        let shader = gl.create_shader(kind).map_err(DisplayError::Shader)?;
-        gl.shader_source(shader, src);
-        gl.compile_shader(shader);
-        if !gl.get_shader_compile_status(shader) {
-            return Err(DisplayError::Shader(gl.get_shader_info_log(shader)));
-        }
-        Ok(shader)
-    }
-}
-
-fn link(gl: &glow::Context, vs_src: &str, fs_src: &str) -> Result<glow::Program, DisplayError> {
-    unsafe {
-        let vs = compile(gl, glow::VERTEX_SHADER, vs_src)?;
-        let fs = compile(gl, glow::FRAGMENT_SHADER, fs_src)?;
-        let program = gl.create_program().map_err(DisplayError::Shader)?;
-        gl.attach_shader(program, vs);
-        gl.attach_shader(program, fs);
-        gl.link_program(program);
-        if !gl.get_program_link_status(program) {
-            return Err(DisplayError::Shader(gl.get_program_info_log(program)));
-        }
-        gl.detach_shader(program, vs);
-        gl.detach_shader(program, fs);
-        gl.delete_shader(vs);
-        gl.delete_shader(fs);
-        Ok(program)
-    }
-}
-
 // --- Format ----------------------------------------------------------------
 
 /// The default format.
@@ -182,10 +148,12 @@ impl Default {
         let mesh = ColoredMesh::new(gl, &vertices())?;
         Ok(Self { mesh })
     }
+}
 
+impl crate::formats::Format for Default {
     /// Render into the region (physical pixels, top-left origin).
     /// `framebuffer_height` is the whole framebuffer height.
-    pub(crate) fn render(
+    fn render(
         &mut self,
         gl: &glow::Context,
         framebuffer_height: i32,

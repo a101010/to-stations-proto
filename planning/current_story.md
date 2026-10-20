@@ -220,6 +220,12 @@ src/formats/default.rs        the default format (reactivated)
 src/formats/hello_world.rs    the hello-world format
 ```
 
+## Result
+
+Implemented. `display-lib` now has a `format_manager` module holding the format registry (`formats::registry`: hello-world then default) and the active format; `render` remembers the region and delegates to the active format, and `mouse_button` advances to the next format on a left-button press inside that region. The `Format` trait lives in `formats.rs`; the default format is reactivated and its local `compile`/`link` moved onto `crate::shader`. The ABI grew `display_lib_mouse_button` and bumped to version 2 across `include/display_lib.h`, `lib.rs`, and `lil-d`'s `display.rs`; `lil-d` tracks the cursor and forwards unconsumed (`EventResponse::consumed == false`) left-button events in the format region, then repaints. `scripts/build.ps1 -Test` passes (`display-lib` has 18 tests: 5 new format-manager tests plus the reactivated default-format tests), and the release deploy build succeeds with no warnings.
+
+Deviation from the plan: `forward_mouse` lives on `impl App` (a plain helper), and the manager's test-only helpers are `with_region`/`active` behind `#[cfg(test)]`. The visual minimal test (clicking in the region switches formats) remains for the user to confirm with `scripts/launch-rust.ps1`.
+
 ## Files
 
 * Authored: `rust/lib/display-lib/src/format_manager.rs`.

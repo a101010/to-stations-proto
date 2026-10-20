@@ -23,7 +23,7 @@ extern "C" {
 #endif
 
 /* ABI version. A display application checks this before use. */
-#define DISPLAY_LIB_ABI_VERSION 1u
+#define DISPLAY_LIB_ABI_VERSION 2u
 
 /* Opaque display library handle. */
 typedef struct display_lib display_lib;
@@ -39,6 +39,12 @@ display_lib* display_lib_create(display_lib_gl_loader loader, void* userdata);
 /* framebuffer_height flips the top-left region into GL's bottom-left origin. */
 void display_lib_render(display_lib* d, int framebuffer_height,
                         int x, int y, int width, int height);
+
+/* Mouse button event. (x, y) are physical pixels from the window's top-left.
+ * button: 0 = left, 1 = right, 2 = middle, 3 = back, 4 = forward, 5 = other.
+ * pressed: nonzero on press, zero on release. The library hit-tests the region
+ * it was last asked to render and may change the active format. */
+void display_lib_mouse_button(display_lib* d, int x, int y, int button, int pressed);
 
 void display_lib_destroy(display_lib* d);
 

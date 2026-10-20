@@ -34,6 +34,9 @@ pub struct App {
     gl: Option<Arc<glow::Context>>,
     egui_glow: Option<EguiGlow>,
     display: Option<display::Display>,
+    /// The last cursor position (physical pixels, top-left origin), needed to
+    /// place mouse button events.
+    cursor: Option<winit::dpi::PhysicalPosition<f64>>,
 }
 
 impl App {
@@ -45,6 +48,7 @@ impl App {
             gl: None,
             egui_glow: None,
             display: None,
+            cursor: None,
         }
     }
 
@@ -134,6 +138,27 @@ impl App {
             gl_window.swap_buffers();
         }
     }
+
+    /// Forward an unconsumed left-button event in the format region to the
+    /// display library, then repaint in case the active format changed.
+    fn forward_mouse(&mut self, state: winit::event::ElementState, button: winit::event::MouseButton) {
+        if !self.state.format_on || button != winit::event::MouseButton::Left {
+            return;
+        }
+        let Some(position) = self.cursor else {
+            return;
+        };
+        {
+            let Some(display) = self.display.as_mut() else {
+                return;
+            };
+            let pressed = state == winit::event::ElementState::Pressed;
+            display.mouse_button(position.x as i32, position.y as i32, 0, pressed);
+        }
+        if let Some(gl_window) = self.gl_window.as_ref() {
+            gl_window.window().request_redraw();
+        }
+    }
 }
 
 impl ApplicationHandler for App {
@@ -144,11 +169,14 @@ impl ApplicationHandler for App {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
-        // Let egui see the event first (mouse, keyboard, focus).
+        // Let egui see the event first (mouse, keyboard, focus). `consumed`
+        // tells us whether egui used the event (e.g. the console power button).
+        let mut consumed = false;
         if let (Some(gl_window), Some(egui_glow)) =
             (self.gl_window.as_ref(), self.egui_glow.as_mut())
         {
             let response = egui_glow.on_window_event(gl_window.window(), &event);
+            consumed = response.consumed;
             if response.repaint {
                 gl_window.window().request_redraw();
             }
@@ -156,6 +184,14 @@ impl ApplicationHandler for App {
 
         match event {
             WindowEvent::CloseRequested | WindowEvent::Destroyed => event_loop.exit(),
+            WindowEvent::CursorMoved { position, .. } => {
+                self.cursor = Some(position);
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                if !consumed {
+                    self.forward_mouse(state, button);
+                }
+            }
             WindowEvent::Resized(size) => {
                 if let Some(gl_window) = self.gl_window.as_ref() {
                     let width = core::num::NonZeroU32::new(size.width)
