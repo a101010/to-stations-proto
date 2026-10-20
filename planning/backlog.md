@@ -143,7 +143,7 @@ Load a font from `assets/fonts` in the display library and render the hello_worl
 Render the cube map on a sphere in the display library, orient it with the attitude quaternion, and light it from the upper right, completing the hello-world format. The cube map, attitude, and light direction are hardcoded for now.
 - **Depends on:** display-lib.
 - **Minimal test:** the tilted, lit earth is visible in the delegated region.
-- **Status:** todo.
+- **Status:** in progress.
 
 ### format-manager
 Add the format manager to the display library: a registry of the default and hello-world formats and the active format. `lil-d` forwards mouse and other window input events to the library; clicking in the region delegated to the display library switches the active format.
