@@ -1,242 +1,189 @@
-# Current story: earth-rendering
+# Current story: format-manager
 
 This file is the detailed, living plan for the one active story. It is rewritten for each story. The backlog in `backlog.md` holds all work and the per-story status.
 
 ## Story
 
-Render the earth cube map on a sphere in the display library, orient it with the attitude quaternion, and light it from the upper right, completing the hello-world format. The cube map, attitude, and light direction are hardcoded for now.
+Add the format manager to the display library: a registry of the default and hello-world formats and the active format. `lil-d` forwards pointer input to the library; clicking in the region delegated to the display library switches the active format.
 
-- **Depends on:** display-lib.
-- **Minimal test:** the tilted, lit earth is visible in the delegated region.
+- **Depends on:** display-lib, font-handling, earth-rendering.
+- **Minimal test:** clicking in the delegated region switches between the default and hello-world formats.
 
 ## Context
 
-`formats/hello_world.rs` currently draws a dark background and the centered greeting via `text::TextRenderer` (`hello_world.rs:39`). The assets already ship: `assets/earth/{px,nx,py,ny,pz,nz}.jpg` (1024x1024, ~80 KB each) with the exact face convention in `assets/earth/CREDITS.md`, which matches OpenGL cube-map sampling (`rust/tool/equirect-to-cubemap/src/cubemap.rs:45` `face_direction` is the inverse of the GL spec's face selection). `scripts/build.ps1` copies all of `assets/` recursively, so no deploy change is needed. `image` is already a workspace dependency with `jpeg` (`rust/Cargo.toml`).
-
-Two facts constrain the design:
-
-* `lil-d` currently requests **no depth buffer** (`rust/ui/lil-d/src/gl_window.rs:42`, `with_depth_size(0)`), and the ABI carries no depth information. The earth uses depth testing, so the display application must request a depth buffer (a documented precondition of the display library).
-* Shader `compile`/`link` are private to `text.rs` (`text.rs:440`, `text.rs:452`). Earth is the **second user**, the architecture's "extract shared code when a second user appears" case.
+* `Display` (`lib.rs:47`) holds a single `formats::hello_world::HelloWorld`; `render` delegates straight to it.
+* `formats/default.rs` is dormant (not declared in `formats.rs`) and still has its own local `compile`/`link` that must be reconciled with `src/shader.rs`.
+* The ABI (`include/display_lib.h`) is versioned (`ABI_VERSION` / `DISPLAY_LIB_ABI_VERSION` / `EXPECTED_ABI_VERSION` = 1) but has no input function.
+* `lil-d` (`app.rs`) already computes the region as `layout.format` (`Rect`, physical pixels, top-left origin, `layout.rs:8`) and calls `egui_glow.on_window_event` first, which returns `EventResponse { consumed, repaint }`. For `MouseInput`, `consumed` is `egui_wants_pointer_input()`, so clicks over egui widgets (the console) are consumed and clicks in the empty format region are not.
+* `CursorMoved` carries a `PhysicalPosition<f64>`; `MouseInput` carries only the button and state, so the application must remember the last cursor position.
+* Architecture (`architecture.md:72`) already states the manager's first form lives inside the display library and switches on a click; the deferred decision (`architecture.md:178`) names a top-level `format_manager` module.
 
 ## Decisions
 
-* **Shared helper module `shader.rs`.** Move `compile`/`link` out of `text.rs` into a focused top-level `shader` module, used by both `text` and `earth`. The name is deliberately narrow: the only universal GL concern the two share is shader program compilation and linking.
-* **Earth capability `earth.rs`.** A top-level module (parallel to `text.rs`) owning the cube map, the sphere mesh, the shader, and the draw. Format-specific values (attitude, light) live in `hello_world.rs`.
-* **Perspective projection.** Unit sphere at the origin, camera at `(0, 0, d)` looking down `-Z`; a combined `u_viewproj` (mat4) uniform. `fovy = 45 deg`, `d = 1 / sin(GLOBE_FRACTION * fovy/2)` with `GLOBE_FRACTION = 0.9`, so the globe fills about 90% of the half-fov; `near`/`far` bracket the sphere.
-* **Depth buffer in `lil-d`.** `gl_window.rs` requests `with_depth_size(24)`; `app.rs`'s `clear()` clears `COLOR_BUFFER_BIT | DEPTH_BUFFER_BIT` each frame. `earth.render` enables `DEPTH_TEST` with `depth_func(LESS)` and disables it before the text; back-face culling is kept as a cheap optimization.
-* **Cube map.** Six JPEGs loaded with `image::open(..).to_rgb8()`, uploaded as a `GL_TEXTURE_CUBE_MAP` in face order `px, nx, py, ny, pz, nz`. Rows are uploaded in memory order **without vertical flip**, because the CREDITS `t` axis runs downward and GL's first row is `t = 0`. `LINEAR_MIPMAP_LINEAR` min / `LINEAR` mag, `CLAMP_TO_EDGE` S/T, `generate_mipmap`.
-* **Sphere.** A unit-direction UV sphere generated on the CPU, `+Y` = north (matching the cube convention). The only vertex attribute is `a_dir: vec3` (position = normal = cube-sample direction). Indexed draw via a `GL_ELEMENT_ARRAY_BUFFER`; `sphere_indices` emits CCW-outward winding.
-* **Orientation and lighting.** Vertex shader: `view = u_attitude * a_dir`, passing `v_dir = a_dir` (object space, for the cube sample) and `v_normal = view` (view space, so the light stays fixed to the region while the texture rotates). Fragment: `tex * (ambient + max(dot(normalize(v_normal), normalize(u_light)), 0))`, `ambient = 0.15`, `u_light = normalize(vec3(0.6, 0.8, 0.7))` (upper right, toward the viewer).
-* **Winding.** `sphere_indices` winds CCW as seen from outside (`[a, a+1, b, a+1, b+1, b]`) so `cull_face(BACK)` keeps the front hemisphere. An earlier CW winding culled the front and showed the antipode (mirrored, south pole toward the viewer).
-* **Attitude.** The camera faces `(VIEW_LATITUDE_DEG, VIEW_LONGITUDE_DEG) = (45 deg N, 100 deg W)` (North America) with the north pole tilted into view. `R = Rx(lat) * Ry(-lon)`, built from `quat_from_axis_angle` and `quat_mul`; the camera looks down `-Z`, so the surface point at `R^T * +Z` is the one facing the viewer. (This replaces the earlier arbitrary 23.5 deg `+X` tilt, which centered on Africa/Europe.)
-* **Error.** Add `DisplayError::Image(String)` for a face that fails to load or decode.
-* **Deploy.** No `build.ps1` change (`assets/` is already copied recursively). Add `image = { workspace = true }` to `display-lib/Cargo.toml`.
+* **`Format` trait and registry in `formats.rs`.** `pub(crate) trait Format { fn render(&mut self, gl, framebuffer_height, x, y, w, h); }`; `formats::registry(gl, assets_root) -> Result<Vec<Box<dyn Format>>, DisplayError>` builds the list. Both formats implement the trait; their inherent `render` bodies move into the trait impl, which becomes the only `render`.
+* **`format_manager.rs` top-level module.** `FormatManager { formats, active, region }`: `render` remembers the last region `(x, y, w, h)` and delegates to the active format; `mouse_button` hit-tests that region and, on a left-button press inside it, advances to the next format (wrapping).
+* **Default format reactivated.** `formats.rs` declares `pub(crate) mod default;`; `default.rs` drops its local `compile`/`link`, uses `crate::shader`, and implements `Format`. `ColoredMesh` stays local: no second mesh user, so no `mesh` module yet.
+* **Initial format.** Registry order `[HelloWorld, Default]` with `active = 0`, so startup is the hello-world format (as today) and a click shows the default.
+* **ABI grows a focused input function.** `display_lib_mouse_button(d, x, y, button, pressed)`; `(x, y)` are physical pixels from the window's top-left, `button` is 0=left / 1=right / 2=middle / 3=back / 4=forward / 5=other, and `pressed` is nonzero on press. Only the events the feature needs are added (input handling is added per feature). The ABI version bumps to **2** in all three places; a stale DLL then fails cleanly.
+* **Region hit-test in the library.** The application forwards window-space coordinates; the library compares them against the region it was last asked to render. No region crosses the ABI.
+* **`lil-d` forwarding.** Track the last `CursorMoved`; on `MouseInput`, if `!consumed`, `format_on`, and the left button, forward to the library and request a redraw. The library changes the format; the redraw shows it.
 
 ## Interfaces
 
-### `rust/lib/display-lib/src/shader.rs` (new)
+### `include/display_lib.h` (changed)
 
-```rust
-pub(crate) fn compile(gl: &glow::Context, kind: u32, src: &str) -> Result<glow::Shader, DisplayError>;
-pub(crate) fn link(gl: &glow::Context, vs_src: &str, fs_src: &str) -> Result<glow::Program, DisplayError>;
+```c
+#define DISPLAY_LIB_ABI_VERSION 2u
+
+/* Mouse button event. (x, y) are physical pixels from the window's top-left.
+ * button: 0 = left, 1 = right, 2 = middle, 3 = back, 4 = forward, 5 = other.
+ * pressed: nonzero on press, zero on release. The library hit-tests the region
+ * it was last asked to render and may change the active format. */
+void display_lib_mouse_button(display_lib* d, int x, int y, int button, int pressed);
 ```
 
-### `rust/lib/display-lib/src/earth.rs` (new)
+### `rust/lib/display-lib/src/formats.rs` (changed)
 
 ```rust
-pub(crate) const FACE_FILES: [&str; 6] =
-    ["earth/px.jpg", "earth/nx.jpg", "earth/py.jpg",
-     "earth/ny.jpg", "earth/pz.jpg", "earth/nz.jpg"];
-pub(crate) const STACKS: u32 = 32;   // latitude bands
-pub(crate) const SLICES: u32 = 64;   // longitude segments
-pub(crate) const FOV_Y: f32 = std::f32::consts::FRAC_PI_4;   // 45 deg
-pub(crate) const GLOBE_FRACTION: f32 = 0.9;                  // of the half-fov
+pub(crate) mod default;
+pub(crate) mod hello_world;
 
-pub(crate) struct Earth {
-    program: glow::Program,
-    vao: glow::VertexArray,
-    vbo: glow::Buffer,
-    ebo: glow::Buffer,
-    texture: glow::Texture,
-    index_count: i32,
-    viewproj_loc: Option<glow::UniformLocation>,
-    attitude_loc: Option<glow::UniformLocation>,
-    light_loc:    Option<glow::UniformLocation>,
-    cube_loc:     Option<glow::UniformLocation>,
-}
-impl Earth {
-    pub(crate) fn new(gl: &glow::Context, assets_root: &std::path::Path) -> Result<Earth, DisplayError>;
-    /// Draw into the region; the viewport and scissor are already set to (width, height).
-    pub(crate) fn render(&self, gl: &glow::Context, width: i32, height: i32,
-                         attitude: [f32; 4], light: [f32; 3]);
+pub(crate) trait Format {
+    fn render(&mut self, gl: &glow::Context, framebuffer_height: i32,
+              x: i32, y: i32, width: i32, height: i32);
 }
 
-pub(crate) fn sphere_vertices(stacks: u32, slices: u32) -> Vec<[f32; 3]>;   // unit directions
-pub(crate) fn sphere_indices(stacks: u32, slices: u32) -> Vec<u32>;         // CCW outward
-pub(crate) fn quat_to_mat3(q: [f32; 4]) -> [f32; 9];                        // column-major
-pub(crate) fn quat_from_axis_angle(axis: [f32; 3], angle_rad: f32) -> [f32; 4];
-pub(crate) fn quat_mul(a: [f32; 4], b: [f32; 4]) -> [f32; 4];               // a * b
-pub(crate) fn perspective_view_proj(aspect: f32) -> [f32; 16];             // column-major
+pub(crate) fn registry(
+    gl: &glow::Context,
+    assets_root: &std::path::Path,
+) -> Result<Vec<Box<dyn Format>>, DisplayError>;
 ```
 
-### `rust/lib/display-lib/src/formats/hello_world.rs` (changed)
+### `rust/lib/display-lib/src/format_manager.rs` (new)
 
 ```rust
-/// Point the camera faces (North America).
-const VIEW_LATITUDE_DEG: f32 = 45.0;
-const VIEW_LONGITUDE_DEG: f32 = -100.0;
-/// Light direction (view space): upper right, toward the viewer.
-const LIGHT_DIR: [f32; 3] = [0.6, 0.8, 0.7];
-fn view_attitude() -> [f32; 4];   // R = Rx(lat) * Ry(-lon)
+pub(crate) struct FormatManager {
+    formats: Vec<Box<dyn crate::formats::Format>>,
+    active: usize,
+    region: (i32, i32, i32, i32),
+}
+impl FormatManager {
+    pub(crate) fn new(gl: &glow::Context, assets_root: &std::path::Path)
+        -> Result<Self, DisplayError>;
+    pub(crate) fn render(&mut self, gl: &glow::Context, framebuffer_height: i32,
+                         x: i32, y: i32, width: i32, height: i32);
+    pub(crate) fn mouse_button(&mut self, x: i32, y: i32, button: i32, pressed: bool);
+}
 
-pub(crate) struct HelloWorld { earth: Earth, text: TextRenderer, attitude: [f32; 4] }
-// new():    earth = Earth::new(gl, assets_root)?; text = TextRenderer::new(gl, font)?
-//           attitude = view_attitude()
-// render(): if width <= 0 || height <= 0: return
-//           scissor + clear color; viewport; disable DEPTH_TEST
-//           earth.render(gl, width, height, attitude, LIGHT_DIR)
-//           text.draw(gl, width, height, GREETING, TEXT_COLOR, height * FONT_SIZE_FRACTION)
+fn contains(region: (i32, i32, i32, i32), x: i32, y: i32) -> bool;
+fn advance(active: usize, len: usize) -> usize;
+
+#[cfg(test)]
+impl FormatManager {
+    fn with_region(formats: Vec<Box<dyn crate::formats::Format>>,
+                   region: (i32, i32, i32, i32)) -> Self;
+    fn active(&self) -> usize;
+}
 ```
 
 ### `rust/lib/display-lib/src/lib.rs` (changed)
 
 ```rust
-mod earth; mod shader; mod text; mod formats;
+mod earth; mod format_manager; mod formats; mod shader; mod text;
 
-enum DisplayError { Shader(String), Io(String), Font(String), Image(String) }   // +Image
+const ABI_VERSION: u32 = 2;
+
+struct Display { gl: glow::Context, format_manager: format_manager::FormatManager }
+impl Display {
+    fn new(loader: impl FnMut(&str) -> *const c_void) -> Result<Self, DisplayError>;
+    fn render(&mut self, framebuffer_height: i32, x: i32, y: i32, width: i32, height: i32);
+    fn mouse_button(&mut self, x: i32, y: i32, button: i32, pressed: bool);
+}
+
+#[no_mangle]
+pub extern "C" fn display_lib_mouse_button(
+    display: *mut c_void, x: c_int, y: c_int, button: c_int, pressed: c_int);
 ```
 
-### `rust/ui/lil-d/src/gl_window.rs` / `rust/ui/lil-d/src/app.rs` (changed)
+### `rust/lib/display-lib/src/formats/default.rs` (changed)
 
 ```rust
-// gl_window.rs: ConfigTemplateBuilder ... .with_depth_size(24) ...
-// app.rs clear(): gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
+impl crate::formats::Format for Default {
+    fn render(&mut self, gl: &glow::Context, framebuffer_height: i32,
+              x: i32, y: i32, width: i32, height: i32) { /* existing body */ }
+}
+// local compile/link removed; uses crate::shader::{compile, link}; dormant doc comment updated.
+```
+
+### `rust/lib/display-lib/src/formats/hello_world.rs` (changed)
+
+```rust
+impl crate::formats::Format for HelloWorld {
+    fn render(&mut self, gl: &glow::Context, framebuffer_height: i32,
+              x: i32, y: i32, width: i32, height: i32) { /* existing body */ }
+}
+```
+
+### `rust/ui/lil-d/src/display.rs` (changed)
+
+```rust
+const EXPECTED_ABI_VERSION: u32 = 2;
+type MouseButtonFn = unsafe extern "C" fn(*mut c_void, c_int, c_int, c_int, c_int);
+// loads b"display_lib_mouse_button\0"; adds:
+pub fn mouse_button(&mut self, x: i32, y: i32, button: i32, pressed: bool);
+```
+
+### `rust/ui/lil-d/src/app.rs` (changed)
+
+```rust
+struct App { /* ... */ cursor: Option<winit::dpi::PhysicalPosition<f64>> }
+// window_event:
+//   let response = egui_glow.on_window_event(...);   // keep response.consumed
+//   CursorMoved { position, .. } => self.cursor = Some(position)
+//   MouseInput { state, button, .. } =>
+//       if !response.consumed && self.state.format_on {
+//           if let (Some(pos), MouseButton::Left) = (self.cursor, button) {
+//               display.mouse_button(pos.x as i32, pos.y as i32, 0, state == Pressed);
+//               window.request_redraw();
+//           }
+//       }
 ```
 
 ## Pseudocode
 
-### `Earth::new`
+### `FormatManager::render` / `mouse_button`
 
 ```
-program = shader::link(gl, VERTEX_SRC, FRAGMENT_SRC)?
-locs = get_uniform_location for { u_viewproj, u_attitude, u_light, u_cube }
-verts = sphere_vertices(STACKS, SLICES); idx = sphere_indices(STACKS, SLICES)
-vao, vbo, ebo = create
-bind vao
-    bind ARRAY_BUFFER vbo; buffer_data_u8_slice(as_bytes(verts), STATIC_DRAW)
-    enable_vertex_attrib_array(0); vertex_attrib_pointer_f32(0, 3, FLOAT, false, 12, 0)
-    bind ELEMENT_ARRAY_BUFFER ebo; buffer_data_u8_slice(as_bytes(idx), STATIC_DRAW)
-unbind vao
-texture = load_cube_map(gl, assets_root)?
-return Earth { .., index_count: idx.len() as i32 }
+render(gl, fh, x, y, w, h):
+    region = (x, y, w, h)
+    if let Some(f) = formats.get_mut(active): f.render(gl, fh, x, y, w, h)
+
+mouse_button(x, y, button, pressed):
+    if button != 0 || !pressed: return          // left press only
+    if contains(region, x, y) && !formats.is_empty():
+        active = advance(active, formats.len())
+
+contains((rx, ry, rw, rh), x, y) = x >= rx && x < rx + rw && y >= ry && y < ry + rh
+advance(active, len) = (active + 1) % len
 ```
 
-### `load_cube_map`
+### `formats::registry`
 
 ```
-tex = create_texture(); bind TEXTURE_CUBE_MAP
-size = None
-for (i, file) in FACE_FILES.enumerate():
-    img = image::open(assets_root.join(file)).map_err(DisplayError::Image)?.to_rgb8()
-    if size.is_none(): size = (img.width(), img.height())
-    tex_image_2d(CUBE_MAP_POSITIVE_X + i, 0, RGB8, w, h, 0, RGB, UNSIGNED_BYTE, Some(img.as_raw()))
-tex_parameter_i32(MIN_FILTER, LINEAR_MIPMAP_LINEAR); tex_parameter_i32(MAG_FILTER, LINEAR)
-tex_parameter_i32(WRAP_S, CLAMP_TO_EDGE); tex_parameter_i32(WRAP_T, CLAMP_TO_EDGE)
-generate_mipmap(TEXTURE_CUBE_MAP)
-```
-
-### `Earth::render`
-
-```
-if width <= 0 || height <= 0: return
-use_program(program)
-uniform_matrix_4_f32_slice(viewproj_loc, false, &perspective_view_proj(width as f32 / height as f32))
-uniform_matrix_3_f32_slice(attitude_loc, false, &quat_to_mat3(attitude))
-uniform_3_f32(light_loc, normalize(light))
-active_texture(TEXTURE0); bind_texture(TEXTURE_CUBE_MAP, texture); uniform_1_i32(cube_loc, 0)
-enable(DEPTH_TEST); depth_func(LESS)
-enable(CULL_FACE); cull_face(BACK); front_face(CCW)
-bind_vertex_array(vao); draw_elements(TRIANGLES, index_count, UNSIGNED_INT, 0)
-bind_vertex_array(None); disable(CULL_FACE); disable(DEPTH_TEST); use_program(None)
-```
-
-### Shaders
-
-```glsl
-// vertex
-#version 330 core
-layout(location = 0) in vec3 a_dir;
-uniform mat4 u_viewproj;
-uniform mat3 u_attitude;
-out vec3 v_dir;
-out vec3 v_normal;
-void main() {
-    vec3 view = u_attitude * a_dir;
-    v_dir = a_dir;
-    v_normal = view;
-    gl_Position = u_viewproj * vec4(view, 1.0);
-}
-
-// fragment
-#version 330 core
-in vec3 v_dir;
-in vec3 v_normal;
-uniform samplerCube u_cube;
-uniform vec3 u_light;
-out vec4 f_color;
-void main() {
-    float diff = max(dot(normalize(v_normal), normalize(u_light)), 0.0);
-    vec3 tex = texture(u_cube, normalize(v_dir)).rgb;
-    f_color = vec4(tex * (0.15 + diff), 1.0);
-}
-```
-
-### `sphere_vertices` / `sphere_indices`
-
-```
-for i in 0..=stacks:
-    phi = pi * i / stacks
-    for j in 0..=slices:
-        theta = 2 * pi * j / slices
-        push [ sin(phi) * cos(theta), cos(phi), sin(phi) * sin(theta) ]
-for i in 0..stacks:
-    for j in 0..slices:
-        a = i * (slices + 1) + j; b = a + slices + 1
-        push a, b, a + 1   and   a + 1, b, b + 1
-```
-
-### `perspective_view_proj`
-
-```
-d = 1.0 / (GLOBE_FRACTION * (FOV_Y / 2).sin())
-near = d - 1.5; far = d + 1.5; f = 1.0 / (FOV_Y / 2).tan()
-P = [ f/aspect, 0, 0, 0,
-      0, f, 0, 0,
-      0, 0, (far + near) / (near - far), -1,
-      0, 0, 2 * far * near / (near - far), 0 ]   // column-major
-V = translate(0, 0, -d)
-return P * V
-```
-
-### `quat_to_mat3` (x, y, z, w)
-
-```
-xx=x*x, yy=y*y, zz=z*z, xy=x*y, xz=x*z, yz=y*z, wx=w*x, wy=w*y, wz=w*z
-[ 1-2(yy+zz), 2(xy+wz),   2(xz-wy),
-  2(xy-wz),   1-2(xx+zz), 2(yz+wx),
-  2(xz+wy),   2(yz-wx),   1-2(xx+yy) ]
+registry(gl, assets_root):
+    vec![ Box::new(HelloWorld::new(gl, assets_root)?),
+          Box::new(Default::new(gl)?) ]
 ```
 
 ## Tests
 
 No GL context:
 
-* `quat_to_mat3`: identity quaternion gives the identity matrix; 90 deg about Z maps `(1, 0, 0)` to `(0, 1, 0)`; the columns stay orthonormal.
-* `sphere_vertices`: count is `(STACKS + 1) * (SLICES + 1)`, every vertex is unit length, and `(0, 1, 0)` is at the north pole.
-* `sphere_indices`: count is `STACKS * SLICES * 6`, every index is in range, and a known triangle winds CCW outward.
-* `perspective_view_proj`: the sphere's front point `(0, 0, d - 1)` projects near the NDC center with `w > 0`.
-* Assets: load the six `REPO_ROOT/assets/earth/*.jpg`, assert they are all equal square sizes.
-* Existing `text.rs` tests still pass (they now reach `crate::shader::link`).
+* `format_manager::contains`: inside, outside (all four sides), and the boundaries (`x == rx`, `x == rx + rw`).
+* `format_manager::advance`: increments and wraps at `len`.
+* `format_manager` with fake `Format`s via `with_region`: a left press inside advances `active`; a left press outside does not; a right press does not; a release does not.
+* `formats/default.rs` existing tests unchanged (x geometry).
+* No GL test for `registry` (it constructs GL objects).
 
 ## Minimal test
 
@@ -245,18 +192,18 @@ No GL context:
 .\scripts\launch-rust.ps1
 ```
 
-The delegated region shows the tilted, lit earth behind "Hello, world!"; the power button still toggles the region; `.\scripts\cleanup.ps1` stops it.
+Clicking in the delegated region switches between the hello-world format (earth and greeting) and the default format (amber background, green x); the power button still toggles the region; `.\scripts\cleanup.ps1` stops it.
 
-Negative check: rename `build\deploy\assets\earth\px.jpg`; `lil-d` fails at startup with the loader's `last_error` (image).
+Negative check: an old `display_lib.dll` (ABI 1) against the new `lil-d` fails at load with the ABI-version mismatch message.
 
 ## Risks and follow-ups
 
-* **Depth buffer is a new display-application requirement.** `lil-d` must clear depth each frame, and the future C++ display app must request and clear a depth buffer too. The ABI still carries no depth information (a documented precondition).
-* **Winding / `front_face`.** An inverted winding makes the globe render inside-out; this is visible in the minimal test.
-* **Cube orientation.** Verify continents are upright and not mirrored; the rows are deliberately uploaded unflipped.
-* **`shader` module boundary.** If a broader set of universal GL helpers emerges (for example the deferred `mesh`), revisit the boundary then.
-* **C++ side.** The C++ display library reimplements this pipeline against the same cube faces.
-* **`docs/versions.md`.** Add the `image` crate to the recorded Rust dependencies (optional).
+* **egui event consumption.** The click must reach the library only when egui did not consume it; verify clicks in the empty central region report `consumed == false` and console clicks report `true`.
+* **Coordinate space.** `CursorMoved` is physical pixels, matching the physical `layout.format` region; no scale conversion is needed. A `MouseInput` with no prior `CursorMoved` is ignored.
+* **Stale region.** The region is only updated by `render`; forwarding is gated on `format_on`, so a hidden region never changes the format.
+* **ABI growth.** The C++ display library and application (later stories) must implement and consume `display_lib_mouse_button` and match ABI 2.
+* **Format count.** Cycling assumes at least one format; guarded.
+* **Module boundary.** `mesh` stays deferred (the default's `ColoredMesh` and the earth's sphere share no code).
 
 ## Module layout
 
@@ -265,26 +212,15 @@ Post-2018 layout (`foo.rs` plus a `foo/` directory; no `mod.rs`):
 ```
 src/lib.rs                    ABI, Display, DisplayError, assets_root
 src/shader.rs                 shared shader compile/link
-src/text.rs                   text rendering (Font, TextRenderer)
-src/earth.rs                  earth rendering (cube map, sphere, shader)
-src/formats.rs                declares the live formats
-src/formats/hello_world.rs    the hello-world format (background, earth, text)
-src/formats/default.rs        the default format (dormant)
+src/text.rs                   text rendering
+src/earth.rs                  earth rendering
+src/format_manager.rs         registry, active format, region hit-test
+src/formats.rs                the Format trait and the registry
+src/formats/default.rs        the default format (reactivated)
+src/formats/hello_world.rs    the hello-world format
 ```
-
-* `shader.rs` is a new shared capability: `text.rs` and `earth.rs` both link shader programs.
-* `earth.rs` is a new rendering capability, parallel to `text.rs`.
-* `formats/hello_world.rs` composes the background, the earth, and the text, and owns the format's values (attitude, light, greeting, colors).
-
-## Result
-
-Implemented. `display-lib` loads the six `assets/earth` faces into a `GL_TEXTURE_CUBE_MAP`, draws a unit-direction sphere with a perspective projection, samples the cube map along the object-space direction, and lights it with a fixed view-space direction, with the greeting drawn on top. The shared shader helpers moved from `text.rs` to `shader.rs`; `lil-d` now requests a 24-bit depth buffer and clears it each frame. `scripts/build.ps1 -Test` passes (`display-lib` has 8 tests: 5 new earth tests plus the existing text tests), and the release deploy build succeeds with no warnings.
-
-Deviation from the plan: `Earth`'s `vbo`/`ebo` fields carry `#[allow(dead_code)]` (kept for a future `destroy`, matching `default.rs`'s `ColoredMesh`).
-
-Correction after visual review: the sphere was rendering the antipode (mirrored, centered on the South Pacific with Antarctica toward the viewer) because `sphere_indices` wound the triangles clockwise-outward, so `cull_face(BACK)` culled the front hemisphere. Fixed the winding to CCW-outward (`[a, a+1, b, a+1, b+1, b]`, with a regression test) and replaced the arbitrary 23.5 deg `+X` tilt with a view-based attitude facing North America (`45 deg N, 100 deg W`) with the north pole tilted into view. `display-lib` now has 10 tests. The visual minimal test (the tilted, lit earth in the delegated region) remains for the user to confirm with `scripts/launch-rust.ps1`.
 
 ## Files
 
-* Authored: `rust/lib/display-lib/src/earth.rs`, `rust/lib/display-lib/src/shader.rs`.
-* Changed: `rust/lib/display-lib/src/formats/hello_world.rs`, `rust/lib/display-lib/src/text.rs`, `rust/lib/display-lib/src/lib.rs`, `rust/lib/display-lib/Cargo.toml`, `rust/ui/lil-d/src/gl_window.rs`, `rust/ui/lil-d/src/app.rs`, `planning/{architecture,backlog,current_story}.md`, optionally `docs/versions.md`.
+* Authored: `rust/lib/display-lib/src/format_manager.rs`.
+* Changed: `include/display_lib.h`, `rust/lib/display-lib/src/{lib.rs,formats.rs}`, `rust/lib/display-lib/src/formats/{default.rs,hello_world.rs}`, `rust/ui/lil-d/src/{display.rs,app.rs}`, `planning/{architecture,backlog,current_story}.md`, optionally `README.md`.

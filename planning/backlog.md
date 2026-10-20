@@ -143,13 +143,13 @@ Load a font from `assets/fonts` in the display library and render the hello_worl
 Render the cube map on a sphere in the display library, orient it with the attitude quaternion, and light it from the upper right, completing the hello-world format. The cube map, attitude, and light direction are hardcoded for now.
 - **Depends on:** display-lib.
 - **Minimal test:** the tilted, lit earth is visible in the delegated region.
-- **Status:** in progress.
+- **Status:** done.
 
 ### format-manager
 Add the format manager to the display library: a registry of the default and hello-world formats and the active format. `lil-d` forwards mouse and other window input events to the library; clicking in the region delegated to the display library switches the active format.
 - **Depends on:** display-lib, font-handling, earth-rendering.
 - **Minimal test:** clicking in the delegated region switches between the default and hello-world formats.
-- **Status:** todo.
+- **Status:** in progress.
 
 ### dds-and-service-contracts
 Define the DDS layer and the service contracts in `stations-dds`: create the participant from `DDS/cyclonedds-config.xml` and typed readers/writers; define the topic-contract schema and loader for `contracts/topics.toml` and `contracts/services/<app>.toml`; validate each service's declared topics at startup; support a `--topics` flag that prints a service's contract; and write a readable summary to `build/topics.md`. Provisional: the nature and scope of the DDS layer and the contracts still need refinement, and this may be split again.
