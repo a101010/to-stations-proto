@@ -155,7 +155,7 @@ Add the format manager to the display library: a registry of the default and hel
 Define the DDS layer and the service contracts in `stations-dds`: create the participant from `DDS/cyclonedds-config.xml` and typed readers/writers; define the topic-contract schema and loader for `contracts/topics.toml` and `contracts/services/<app>.toml`; validate each service's declared topics at startup; support a `--topics` flag that prints a service's contract; and write a readable summary to `build/topics.md`. Provisional: the nature and scope of the DDS layer and the contracts still need refinement, and this may be split again.
 - **Depends on:** none.
 - **Minimal test:** a typed publish/subscribe round-trip; a sample contract loads, validates, prints with `--topics`, and matches `build/topics.md`.
-- **Status:** todo.
+- **Status:** in progress.
 
 ### dds-echo
 Subscribe to any named topic and print received samples.

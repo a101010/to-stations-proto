@@ -74,15 +74,17 @@ The format manager is **per display** (not per station) and is itself a model-vi
 ## Topic contracts
 Every service declares the topics it publishes and subscribes to so that the contract of a service is easy to read:
 
-* `contracts/topics.toml` - the topic registry: topic name, IDL type, QoS, and key fields. A topic's registry name and IDL type are the same scoped DDS name (for example `HelloWorldTopic`), per the naming conventions.
+* `contracts/topics.toml` - the topic registry: the short wire/registry name, the scoped IDL type name, QoS, and key fields. The wire name ends in `Topic` (for example `HelloWorldTopic`); the IDL type is its fully-qualified scope (`hello_world::HelloWorldTopic`, the value of `DdsType::type_name()`).
 * `contracts/services/<app>.toml` - for each service, the topics it publishes and the topics it subscribes to.
 
 Contracts are validated when a service starts, each service can print its own contract with `--topics`, and `scripts/build.ps1` regenerates a readable summary into `build/topics.md`.
 
+The DDS layer lives in `stations-dds`: it creates the domain participant and typed readers and writers. CycloneDDS applies the shared configuration (`DDS/cyclonedds-config.xml`) through the `CYCLONEDDS_URI` environment variable; `scripts/build.ps1` deploys the configuration to `build/deploy/config/`. The `dds-contracts` tool (`rust/tool/dds-contracts`) validates the contracts and writes `build/topics.md`.
+
 There is deliberately no scope field in a contract: wiring is expressed by the IDL type's fields and by command-line arguments, and decided by each format's implementation.
 
 ## Naming conventions
-* **Topics.** A topic's DDS type name and its wire topic name are identical and end in `Topic`: the format's model payload is `<Format>Topic` (for example `HelloWorldTopic`), the view payload `<Format>ViewTopic`, and the control payload `<Format>CtlTopic`.
+* **Topics.** A topic's wire topic name is the short `<Format>Topic` (for example `HelloWorldTopic`); its IDL/DDS type name is the scoped `format::<Format>Topic` (the fully-qualified IDL scope, what `DdsType::type_name()` returns). The topic registry records both. The format's model payload is `<Format>Topic`, the view payload `<Format>ViewTopic`, and the control payload `<Format>CtlTopic`.
 * **Value types.** Embedded structs that are not topics are bare nouns (for example `Quaternion`).
 * **Services.** Service executables (and their crate names) end in `Service`: `<Format>Service`, `<Format>ViewService`, `<Format>CtlService`; generic control services (for example the joystick controller service) follow the same rule.
 * **`Model` is not a name.** `Model` is never used as a type, service, or code name; `Model`, `View`, and `Controller` appear only as role descriptions (see "Formats and the distributed MVC constellation").

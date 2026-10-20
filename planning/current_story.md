@@ -1,232 +1,267 @@
-# Current story: format-manager
+# Current story: dds-and-service-contracts
 
 This file is the detailed, living plan for the one active story. It is rewritten for each story. The backlog in `backlog.md` holds all work and the per-story status.
 
 ## Story
 
-Add the format manager to the display library: a registry of the default and hello-world formats and the active format. `lil-d` forwards pointer input to the library; clicking in the region delegated to the display library switches the active format.
+Define the DDS layer and the service contracts in `stations-dds`: create the participant from `DDS/cyclonedds-config.xml` and typed readers/writers; define the topic-contract schema and loader for `contracts/topics.toml` and `contracts/services/<app>.toml`; validate each service's declared topics at startup; support a `--topics` flag that prints a service's contract; and write a readable summary to `build/topics.md`.
 
-- **Depends on:** display-lib, font-handling, earth-rendering.
-- **Minimal test:** clicking in the delegated region switches between the default and hello-world formats.
+- **Depends on:** none.
+- **Minimal test:** a typed publish/subscribe round-trip; a sample contract loads, validates, prints with `--topics`, and matches `build/topics.md`.
 
 ## Context
 
-* `Display` (`lib.rs:47`) holds a single `formats::hello_world::HelloWorld`; `render` delegates straight to it.
-* `formats/default.rs` is dormant (not declared in `formats.rs`) and still has its own local `compile`/`link` that must be reconciled with `src/shader.rs`.
-* The ABI (`include/display_lib.h`) is versioned (`ABI_VERSION` / `DISPLAY_LIB_ABI_VERSION` / `EXPECTED_ABI_VERSION` = 1) but has no input function.
-* `lil-d` (`app.rs`) already computes the region as `layout.format` (`Rect`, physical pixels, top-left origin, `layout.rs:8`) and calls `egui_glow.on_window_event` first, which returns `EventResponse { consumed, repaint }`. For `MouseInput`, `consumed` is `egui_wants_pointer_input()`, so clicks over egui widgets (the console) are consumed and clicks in the empty format region are not.
-* `CursorMoved` carries a `PhysicalPosition<f64>`; `MouseInput` carries only the button and state, so the application must remember the last cursor position.
-* Architecture (`architecture.md:72`) already states the manager's first form lives inside the display library and switches on a click; the deferred decision (`architecture.md:178`) names a top-level `format_manager` module.
+* `stations-dds` currently only re-exports `cyclonedds`, exposes `type_name::<T>()`, and `include!`s the generated IDL (`lib.rs:16`). The generated types `hello_world::HelloWorldTopic` and `math::Quaternion` exist.
+* The pinned `cyclonedds` fork exposes `DomainParticipant::new/with_qos`, `create_topic::<T>(name)`, `create_publisher/subscriber`, `create_writer[_with_qos]::<T>`, `create_reader[_with_qos]::<T>`, `DataWriter::write`, `DataReader::read/take/read_next/take_next`, `Qos::builder()` (`reliable`/`best_effort`/`transient_local`/`keep_last`), and `WaitSet`/`ReadCondition`.
+* CycloneDDS applies `DDS/cyclonedds-config.xml` through the `CYCLONEDDS_URI` environment variable (`docs/loopback-adapter.md`); participant creation itself takes no config argument.
+* `contracts/` holds only `.gitkeep`; `build.ps1` does not yet generate `build/topics.md` or deploy the config.
+* Architecture (`architecture.md:74`) fixes the contract shape: `contracts/topics.toml` (topic name, IDL type, QoS, key fields) and `contracts/services/<app>.toml` (publish/subscribe); validated at startup; `--topics`; `build/topics.md`. `rust/tool/dds-contracts` is already named in the folder structure.
 
 ## Decisions
 
-* **`Format` trait and registry in `formats.rs`.** `pub(crate) trait Format { fn render(&mut self, gl, framebuffer_height, x, y, w, h); }`; `formats::registry(gl, assets_root) -> Result<Vec<Box<dyn Format>>, DisplayError>` builds the list. Both formats implement the trait; their inherent `render` bodies move into the trait impl, which becomes the only `render`.
-* **`format_manager.rs` top-level module.** `FormatManager { formats, active, region }`: `render` remembers the last region `(x, y, w, h)` and delegates to the active format; `mouse_button` hit-tests that region and, on a left-button press inside it, advances to the next format (wrapping).
-* **Default format reactivated.** `formats.rs` declares `pub(crate) mod default;`; `default.rs` drops its local `compile`/`link`, uses `crate::shader`, and implements `Format`. `ColoredMesh` stays local: no second mesh user, so no `mesh` module yet.
-* **Initial format.** Registry order `[HelloWorld, Default]` with `active = 0`, so startup is the hello-world format (as today) and a click shows the default.
-* **ABI grows a focused input function.** `display_lib_mouse_button(d, x, y, button, pressed)`; `(x, y)` are physical pixels from the window's top-left, `button` is 0=left / 1=right / 2=middle / 3=back / 4=forward / 5=other, and `pressed` is nonzero on press. Only the events the feature needs are added (input handling is added per feature). The ABI version bumps to **2** in all three places; a stale DLL then fails cleanly.
-* **Region hit-test in the library.** The application forwards window-space coordinates; the library compares them against the region it was last asked to render. No region crosses the ABI.
-* **`lil-d` forwarding.** Track the last `CursorMoved`; on `MouseInput`, if `!consumed`, `format_on`, and the left button, forward to the library and request a redraw. The library changes the format; the redraw shows it.
+* **`Node` DDS wrapper** (`stations-dds::dds`) over `DomainParticipant`, with typed `writer`/`reader` helpers and a QoS-by-name map. A temporary `Publisher`/`Subscriber` per endpoint is fine: the binding's guards keep them alive for the writer/reader's lifetime.
+* **Config via `CYCLONEDDS_URI`.** The layer creates the participant and documents that CycloneDDS reads the shared config from `CYCLONEDDS_URI`; the round-trip test sets it to `<REPO_ROOT>/DDS/cyclonedds-config.xml`, and the launch scripts will point at the deployed `build/deploy/config/`. `build.ps1` begins copying the config to `build/deploy/config/`.
+* **Topic names are short** (`HelloWorldTopic`) for the registry and the wire; the scoped IDL/DDS type (`hello_world::HelloWorldTopic`) is recorded separately in the registry as `type`. Validation requires `type` to equal a known `DdsType::type_name()`.
+* **Contracts** live in `stations-dds::contract` (schema, loader, validation, `render`), using `serde` + `toml`.
+* **`dds-contracts` tool** (`rust/tool/dds-contracts`) loads the repo contracts, validates them, writes `build/topics.md`, and prints a service with `--topics <app>`. It is a developer tool, not deployed (like `equirect-to-cubemap`).
+* **`--topics` and startup validation are helpers.** `ServiceContract::render()` is exposed by the tool now and called by real services later; deploying contracts to `build/deploy/config/` for runtime service loading is a follow-up.
+* **The round-trip is a committed integration test** that runs in `cargo test` (and `build.ps1 -Test`); it requires the `StationsDDS` adapter, an existing environment prerequisite.
 
 ## Interfaces
 
-### `include/display_lib.h` (changed)
-
-```c
-#define DISPLAY_LIB_ABI_VERSION 2u
-
-/* Mouse button event. (x, y) are physical pixels from the window's top-left.
- * button: 0 = left, 1 = right, 2 = middle, 3 = back, 4 = forward, 5 = other.
- * pressed: nonzero on press, zero on release. The library hit-tests the region
- * it was last asked to render and may change the active format. */
-void display_lib_mouse_button(display_lib* d, int x, int y, int button, int pressed);
-```
-
-### `rust/lib/display-lib/src/formats.rs` (changed)
+### `rust/lib/stations-dds/src/dds.rs` (new)
 
 ```rust
-pub(crate) mod default;
-pub(crate) mod hello_world;
-
-pub(crate) trait Format {
-    fn render(&mut self, gl: &glow::Context, framebuffer_height: i32,
-              x: i32, y: i32, width: i32, height: i32);
+pub struct Node { participant: cyclonedds::DomainParticipant }
+impl Node {
+    /// Create the participant for `domain`. CycloneDDS applies the shared
+    /// configuration (DDS/cyclonedds-config.xml) through CYCLONEDDS_URI.
+    pub fn new(domain: u32) -> cyclonedds::DdsResult<Self>;
+    pub fn participant(&self) -> &cyclonedds::DomainParticipant;
+    /// A typed writer on the short wire `topic` name.
+    pub fn writer<T: cyclonedds::DdsType>(&self, topic: &str, qos: &cyclonedds::Qos)
+        -> cyclonedds::DdsResult<cyclonedds::DataWriter<T>>;
+    /// A typed reader on the short wire `topic` name.
+    pub fn reader<T: cyclonedds::DdsType>(&self, topic: &str, qos: &cyclonedds::Qos)
+        -> cyclonedds::DdsResult<cyclonedds::DataReader<T>>;
 }
 
-pub(crate) fn registry(
-    gl: &glow::Context,
-    assets_root: &std::path::Path,
-) -> Result<Vec<Box<dyn Format>>, DisplayError>;
+/// The QoS named by a contract ("default" | "reliable" | "best_effort" | "transient_local").
+pub fn qos(name: &str) -> Option<cyclonedds::Qos>;
 ```
 
-### `rust/lib/display-lib/src/format_manager.rs` (new)
+### `rust/lib/stations-dds/src/contract.rs` (new)
 
 ```rust
-pub(crate) struct FormatManager {
-    formats: Vec<Box<dyn crate::formats::Format>>,
-    active: usize,
-    region: (i32, i32, i32, i32),
+#[derive(serde::Deserialize)] pub struct TopicRegistry { pub topics: Vec<TopicDef> }
+#[derive(serde::Deserialize)] pub struct TopicDef {
+    pub name: String,    // short wire/registry name, e.g. "HelloWorldTopic"
+    pub r#type: String,  // scoped IDL/DDS type, e.g. "hello_world::HelloWorldTopic"
+    pub qos: String,
+    #[serde(default)] pub key: Vec<String>,
 }
-impl FormatManager {
-    pub(crate) fn new(gl: &glow::Context, assets_root: &std::path::Path)
-        -> Result<Self, DisplayError>;
-    pub(crate) fn render(&mut self, gl: &glow::Context, framebuffer_height: i32,
-                         x: i32, y: i32, width: i32, height: i32);
-    pub(crate) fn mouse_button(&mut self, x: i32, y: i32, button: i32, pressed: bool);
+#[derive(serde::Deserialize)] pub struct ServiceContract {
+    pub service: ServiceMeta,
+    #[serde(default)] pub publish: Vec<TopicRef>,
+    #[serde(default)] pub subscribe: Vec<TopicRef>,
 }
+#[derive(serde::Deserialize)] pub struct ServiceMeta { pub name: String }
+#[derive(serde::Deserialize)] pub struct TopicRef { pub topic: String }
 
-fn contains(region: (i32, i32, i32, i32), x: i32, y: i32) -> bool;
-fn advance(active: usize, len: usize) -> usize;
-
-#[cfg(test)]
-impl FormatManager {
-    fn with_region(formats: Vec<Box<dyn crate::formats::Format>>,
-                   region: (i32, i32, i32, i32)) -> Self;
-    fn active(&self) -> usize;
+impl TopicRegistry {
+    pub fn load(path: &std::path::Path) -> Result<Self, ContractError>;
+    pub fn from_toml(text: &str) -> Result<Self, ContractError>;
+    pub fn validate(&self) -> Result<(), ContractError>;   // known types + known QoS + unique names
 }
-```
-
-### `rust/lib/display-lib/src/lib.rs` (changed)
-
-```rust
-mod earth; mod format_manager; mod formats; mod shader; mod text;
-
-const ABI_VERSION: u32 = 2;
-
-struct Display { gl: glow::Context, format_manager: format_manager::FormatManager }
-impl Display {
-    fn new(loader: impl FnMut(&str) -> *const c_void) -> Result<Self, DisplayError>;
-    fn render(&mut self, framebuffer_height: i32, x: i32, y: i32, width: i32, height: i32);
-    fn mouse_button(&mut self, x: i32, y: i32, button: i32, pressed: bool);
+impl ServiceContract {
+    pub fn load(path: &std::path::Path) -> Result<Self, ContractError>;   // checks name == file stem
+    pub fn validate(&self, registry: &TopicRegistry) -> Result<(), ContractError>;
+    pub fn render(&self) -> String;                                       // the `--topics` text
 }
 
-#[no_mangle]
-pub extern "C" fn display_lib_mouse_button(
-    display: *mut c_void, x: c_int, y: c_int, button: c_int, pressed: c_int);
-```
+/// Scoped DDS type names of the generated topic types.
+pub fn known_types() -> &'static [&'static str];
 
-### `rust/lib/display-lib/src/formats/default.rs` (changed)
-
-```rust
-impl crate::formats::Format for Default {
-    fn render(&mut self, gl: &glow::Context, framebuffer_height: i32,
-              x: i32, y: i32, width: i32, height: i32) { /* existing body */ }
-}
-// local compile/link removed; uses crate::shader::{compile, link}; dormant doc comment updated.
-```
-
-### `rust/lib/display-lib/src/formats/hello_world.rs` (changed)
-
-```rust
-impl crate::formats::Format for HelloWorld {
-    fn render(&mut self, gl: &glow::Context, framebuffer_height: i32,
-              x: i32, y: i32, width: i32, height: i32) { /* existing body */ }
+pub enum ContractError {
+    Io(String), Toml(String), UnknownTopic(String), UnknownType(String),
+    UnknownQos(String), NameMismatch { expected: String, found: String }, Duplicate(String),
 }
 ```
 
-### `rust/ui/lil-d/src/display.rs` (changed)
+### `rust/lib/stations-dds/src/lib.rs` (changed)
 
 ```rust
-const EXPECTED_ABI_VERSION: u32 = 2;
-type MouseButtonFn = unsafe extern "C" fn(*mut c_void, c_int, c_int, c_int, c_int);
-// loads b"display_lib_mouse_button\0"; adds:
-pub fn mouse_button(&mut self, x: i32, y: i32, button: i32, pressed: bool);
+pub mod contract;
+pub mod dds;
+
+pub use cyclonedds;
+pub fn type_name<T: cyclonedds::DdsType>() -> &'static str;
+
+include!(concat!(env!("REPO_ROOT"), "/build/gen/rust/hello_world.rs"));
 ```
 
-### `rust/ui/lil-d/src/app.rs` (changed)
+### `rust/lib/stations-dds/Cargo.toml` (changed)
+
+Add `serde = { workspace = true }` and `toml = { workspace = true }`.
+
+### `contracts/topics.toml` (new, authored)
+
+```toml
+# The topic registry. `name` is the short wire/registry name; `type` is the
+# scoped IDL/DDS type name (it must match a generated DdsType::type_name()).
+
+[[topics]]
+name = "HelloWorldTopic"
+type = "hello_world::HelloWorldTopic"
+qos = "default"
+key = []
+```
+
+### `contracts/services/hello-service.toml` (new, authored)
+
+```toml
+[service]
+name = "hello-service"
+
+[[publish]]
+topic = "HelloWorldTopic"
+
+[[subscribe]]
+```
+
+### `rust/tool/dds-contracts/{Cargo.toml,src/main.rs}` (new)
+
+```
+dds-contracts --contracts <dir> [--summary <path>] [--topics <app>] [--check]
+```
+
+Default: load and validate the registry and every `services/*.toml`, then write `--summary` (default `build/topics.md`). `--topics <app>` prints that service's `render()` and exits. `--check` validates only.
+
+### `rust/lib/stations-dds/tests/round_trip.rs` (new)
 
 ```rust
-struct App { /* ... */ cursor: Option<winit::dpi::PhysicalPosition<f64>> }
-// window_event:
-//   let response = egui_glow.on_window_event(...);   // keep response.consumed
-//   CursorMoved { position, .. } => self.cursor = Some(position)
-//   MouseInput { state, button, .. } =>
-//       if !response.consumed && self.state.format_on {
-//           if let (Some(pos), MouseButton::Left) = (self.cursor, button) {
-//               display.mouse_button(pos.x as i32, pos.y as i32, 0, state == Pressed);
-//               window.request_redraw();
-//           }
-//       }
+// set CYCLONEDDS_URI = "file://<REPO_ROOT>/DDS/cyclonedds-config.xml"
+// node = Node::new(0)?;
+// writer = node.writer::<HelloWorldTopic>("HelloWorldTopic", &qos("reliable")?)?;
+// reader = node.reader::<HelloWorldTopic>("HelloWorldTopic", &qos("reliable")?)?;
+// writer.write(&sample)?;
+// loop up to ~5 s: if let Some(s) = reader.take()?.into_iter().next() { assert_eq!(s, sample); return }
+// panic!("no sample received")
 ```
+
+### `rust/Cargo.toml` and `scripts/build.ps1` (changed)
+
+```toml
+# rust/Cargo.toml
+members = [..., "tool/dds-contracts"]
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+```
+
+`build.ps1` runs `dds-contracts --contracts <repoRoot>\contracts --summary <repoRoot>\build\topics.md` after the build (both `-Test` and normal), and in the deploy step copies `DDS/cyclonedds-config.xml` to `build/deploy/config/`.
 
 ## Pseudocode
 
-### `FormatManager::render` / `mouse_button`
+### `Node::new` / `writer` / `reader`
 
 ```
-render(gl, fh, x, y, w, h):
-    region = (x, y, w, h)
-    if let Some(f) = formats.get_mut(active): f.render(gl, fh, x, y, w, h)
+new(domain):
+    participant = DomainParticipant::new(domain)?      // config read from CYCLONEDDS_URI
+    return Node { participant }
 
-mouse_button(x, y, button, pressed):
-    if button != 0 || !pressed: return          // left press only
-    if contains(region, x, y) && !formats.is_empty():
-        active = advance(active, formats.len())
+writer<T>(topic, qos):
+    t = participant.create_topic::<T>(topic)?
+    publisher = participant.create_publisher()?
+    return publisher.create_writer_with_qos::<T>(&t, qos)
 
-contains((rx, ry, rw, rh), x, y) = x >= rx && x < rx + rw && y >= ry && y < ry + rh
-advance(active, len) = (active + 1) % len
+reader<T>(topic, qos):
+    t = participant.create_topic::<T>(topic)?
+    subscriber = participant.create_subscriber()?
+    return subscriber.create_reader_with_qos::<T>(&t, qos)
 ```
 
-### `formats::registry`
+### `qos`
 
 ```
-registry(gl, assets_root):
-    vec![ Box::new(HelloWorld::new(gl, assets_root)?),
-          Box::new(Default::new(gl)?) ]
+match name:
+    "default"          => Qos::builder().build()
+    "reliable"         => Qos::builder().reliable().build()
+    "best_effort"      => Qos::builder().best_effort().build()
+    "transient_local"  => Qos::builder().transient_local().build()
+    _                  => None
+```
+
+### `TopicRegistry::validate`
+
+```
+names = {}
+for t in topics:
+    if names.contains(t.name): return Err(Duplicate(t.name))
+    names.insert(t.name)
+    if not known_types().contains(t.type): return Err(UnknownType(t.type))
+    if qos(t.qos).is_none(): return Err(UnknownQos(t.qos))
+Ok(())
+```
+
+### `ServiceContract::validate`
+
+```
+for ref in publish + subscribe:
+    if not registry.topics.iter().any(|t| t.name == ref.topic):
+        return Err(UnknownTopic(ref.topic))
+Ok(())
+```
+
+### `dds-contracts` main
+
+```
+parse args
+registry = TopicRegistry::load(dir/topics.toml)?
+registry.validate()?
+services = for f in dir/services/*.toml: ServiceContract::load(f)?.validate(&registry)?
+if --topics app: print services[app].render(); return
+if --check: return
+write summary (registry table + each service's render) to --summary
 ```
 
 ## Tests
 
-No GL context:
-
-* `format_manager::contains`: inside, outside (all four sides), and the boundaries (`x == rx`, `x == rx + rw`).
-* `format_manager::advance`: increments and wraps at `len`.
-* `format_manager` with fake `Format`s via `with_region`: a left press inside advances `active`; a left press outside does not; a right press does not; a release does not.
-* `formats/default.rs` existing tests unchanged (x geometry).
-* No GL test for `registry` (it constructs GL objects).
+* `contract.rs`: parse a valid registry and service; reject an unknown type, unknown QoS, a service-name mismatch, and a duplicate topic; `render()` contains the expected lines.
+* `dds-contracts`/`stations-dds`: the `hello-service` `--topics` render appears in the generated `build/topics.md`.
+* `round_trip.rs`: the typed publish/subscribe round-trip (requires the `StationsDDS` adapter).
+* Existing `stations-dds` `type_names_match_scopes` test unchanged.
 
 ## Minimal test
 
 ```
-.\scripts\build.ps1
-.\scripts\launch-rust.ps1
+.\scripts\build.ps1 -Test
+build\rust\release\dds-contracts.exe --contracts contracts --topics hello-service
 ```
 
-Clicking in the delegated region switches between the hello-world format (earth and greeting) and the default format (amber background, green x); the power button still toggles the region; `.\scripts\cleanup.ps1` stops it.
-
-Negative check: an old `display_lib.dll` (ABI 1) against the new `lil-d` fails at load with the ABI-version mismatch message.
+`build.ps1 -Test` builds, runs the round-trip and contract tests, and regenerates `build/topics.md`; the `--topics` output matches the `hello-service` section of `build/topics.md`.
 
 ## Risks and follow-ups
 
-* **egui event consumption.** The click must reach the library only when egui did not consume it; verify clicks in the empty central region report `consumed == false` and console clicks report `true`.
-* **Coordinate space.** `CursorMoved` is physical pixels, matching the physical `layout.format` region; no scale conversion is needed. A `MouseInput` with no prior `CursorMoved` is ignored.
-* **Stale region.** The region is only updated by `render`; forwarding is gated on `format_on`, so a hidden region never changes the format.
-* **ABI growth.** The C++ display library and application (later stories) must implement and consume `display_lib_mouse_button` and match ABI 2.
-* **Format count.** Cycling assumes at least one format; guarded.
-* **Module boundary.** `mesh` stays deferred (the default's `ColoredMesh` and the earth's sphere share no code).
+* **Environment.** The round-trip needs the `StationsDDS` adapter and `CYCLONEDDS_URI` (an existing prerequisite); a missing adapter fails the test with the CycloneDDS interface error.
+* **`known_types()`** is a hand-kept list; a test asserts each entry equals a generated `type_name()`. Emitting it from codegen is a later option.
+* **Runtime service loading and startup validation** become real when `hello-service`/`hello-view-service` arrive; deploying contracts to `build/deploy/config/` is a follow-up.
+* **`dds-echo`** (the next story) consumes the `Node` layer.
+* **`serde`/`toml`** are new workspace dependencies (recorded in `docs/versions.md` if the convention is followed).
 
 ## Module layout
 
 Post-2018 layout (`foo.rs` plus a `foo/` directory; no `mod.rs`):
 
 ```
-src/lib.rs                    ABI, Display, DisplayError, assets_root
-src/shader.rs                 shared shader compile/link
-src/text.rs                   text rendering
-src/earth.rs                  earth rendering
-src/format_manager.rs         registry, active format, region hit-test
-src/formats.rs                the Format trait and the registry
-src/formats/default.rs        the default format (reactivated)
-src/formats/hello_world.rs    the hello-world format
+rust/lib/stations-dds/src/lib.rs        re-exports, type_name, generated types
+rust/lib/stations-dds/src/dds.rs        Node, typed writer/reader, qos
+rust/lib/stations-dds/src/contract.rs   schema, loader, validation, render
+rust/lib/stations-dds/tests/round_trip.rs
+rust/tool/dds-contracts/src/main.rs     the contract tool
 ```
-
-## Result
-
-Implemented. `display-lib` now has a `format_manager` module holding the format registry (`formats::registry`: hello-world then default) and the active format; `render` remembers the region and delegates to the active format, and `mouse_button` advances to the next format on a left-button press inside that region. The `Format` trait lives in `formats.rs`; the default format is reactivated and its local `compile`/`link` moved onto `crate::shader`. The ABI grew `display_lib_mouse_button` and bumped to version 2 across `include/display_lib.h`, `lib.rs`, and `lil-d`'s `display.rs`; `lil-d` tracks the cursor and forwards unconsumed (`EventResponse::consumed == false`) left-button events in the format region, then repaints. `scripts/build.ps1 -Test` passes (`display-lib` has 18 tests: 5 new format-manager tests plus the reactivated default-format tests), and the release deploy build succeeds with no warnings.
-
-Deviation from the plan: `forward_mouse` lives on `impl App` (a plain helper), and the manager's test-only helpers are `with_region`/`active` behind `#[cfg(test)]`. The visual minimal test (clicking in the region switches formats) remains for the user to confirm with `scripts/launch-rust.ps1`.
 
 ## Files
 
-* Authored: `rust/lib/display-lib/src/format_manager.rs`.
-* Changed: `include/display_lib.h`, `rust/lib/display-lib/src/{lib.rs,formats.rs}`, `rust/lib/display-lib/src/formats/{default.rs,hello_world.rs}`, `rust/ui/lil-d/src/{display.rs,app.rs}`, `planning/{architecture,backlog,current_story}.md`, optionally `README.md`.
+* Authored: `contracts/topics.toml`, `contracts/services/hello-service.toml`, `rust/lib/stations-dds/src/dds.rs`, `rust/lib/stations-dds/src/contract.rs`, `rust/lib/stations-dds/tests/round_trip.rs`, `rust/tool/dds-contracts/{Cargo.toml,src/main.rs}`.
+* Changed: `rust/lib/stations-dds/src/lib.rs`, `rust/lib/stations-dds/Cargo.toml`, `rust/Cargo.toml`, `scripts/build.ps1`, `planning/{architecture,backlog,current_story}.md`, optionally `docs/versions.md` and `README.md`.
