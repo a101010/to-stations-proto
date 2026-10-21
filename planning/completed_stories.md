@@ -123,3 +123,9 @@ Define the DDS layer and the service contracts in `stations-dds`: create the par
 - **Completed:** 2026-10-21 11:28:57.
 - **Depends on:** none.
 - **Minimal test:** a typed publish/subscribe round-trip; a sample contract loads, validates, prints with `--topics`, and matches `build/topics.md`.
+
+### dds-echo
+Create the `dds-echo` traffic inspector as a Slint GUI mockup driven by simulated traffic: Start/Stop capture, a stats view, a collapsible topics view, and a datagram list with a detail/hex pane. The simulated feed is replaced by real capture in `dds-echo-capture`.
+- **Completed:** 2026-10-21 14:45:17.
+- **Depends on:** none.
+- **Minimal test:** run the app; Start populates stats/topics/table from the simulated feed; Stop halts; selecting a row shows details and hex.

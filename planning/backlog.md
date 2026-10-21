@@ -37,17 +37,11 @@ Third-party libraries are built/installed to an external prefix (for example `C:
 
 **Done when.** `launch-rust.ps1` brings up the model service, the view service, and `lil-d` from `build/deploy`; `lil-d` shows the tilted, cube-mapped earth lit from the upper right with the greeting text rendered in the loaded font, its power button works, and the format manager switches between the default and hello-world formats. `dds-echo` observes every topic in the registry, `--topics` and `build/topics.md` match `contracts/`, and `cleanup.ps1` stops everything.
 
-### dds-echo
-Create the `dds-echo` traffic inspector as a Slint GUI mockup driven by simulated traffic: Start/Stop capture, a high-level stats view, a collapsible known-topics tree, and a datagram list with a detail/hex pane. No real capture yet; the known topics are hardcoded for the mockup.
-- **Depends on:** none.
-- **Minimal test:** the window opens; Start populates the stats, known-topics tree, and datagram list from the simulated feed; Stop halts it; selecting a row shows details and hex.
-- **Status:** todo.
-
 ### dds-echo-capture
 Replace the mockup's simulated feed with the real UDP capture backend: a multicast/broadcast/unicast listener with `--interface`/`--group`/`--port` (and `--domain`) filters, RTPS detection, and a live hex listing. Uses `socket2` and `if-addrs`; the known-topics tree then reads `contracts/topics.toml`.
 - **Depends on:** dds-echo.
 - **Minimal test:** with a publisher running, capture shows RTPS datagrams (flagged) with their hex.
-- **Status:** todo.
+- **Status:** in progress.
 
 ### dds-echo-frame
 Parse the RTPS header and submessages (writer GUID, sequence number, sizes) and surface them in the UI.
