@@ -1,19 +1,20 @@
-//! The `dds-echo` data model: records, statistics, and the simulated feed.
+//! The `dds-echo` data model: records, statistics, and the topic counts.
 //!
-//! UI-agnostic (no Slint types) so it is unit-testable and the real capture
-//! backend can plug in unchanged.
+//! UI-agnostic (no Slint types) so it is unit-testable.
 
 use std::collections::BTreeMap;
 
 /// The datagram table cap.
 pub const MAX_RECORDS: usize = 1000;
-/// Bytes shown in the detail pane's hex view.
-pub const HEX_PREVIEW: usize = 512;
-/// Known topics, hardcoded for the mockup; the capture/SEDP stories read
-/// `contracts/topics.toml`.
+/// Bytes shown in the detail pane's hex view before truncating.
+pub const HEX_PREVIEW: usize = 4096;
+/// Bytes per line in the pre-wrapped hex view.
+pub const HEX_BYTES_PER_LINE: usize = 16;
+/// Known topics; the capture/SEDP stories read `contracts/topics.toml`.
 pub const KNOWN_TOPICS: &[&str] = &["HelloWorldTopic"];
 
 /// How much is understood about a message.
+#[allow(dead_code)] // Unregistered/Known are produced by later stories
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Class {
     /// Not RTPS (no `RTPS` magic).
@@ -58,23 +59,33 @@ pub struct Record {
 }
 
 impl Record {
-    /// `MM:SS.mmm` since the feed started.
+    /// `MM:SS.mmm` since capture started.
     pub fn time_label(&self) -> String {
         let ms = self.elapsed_ms;
         format!("{:02}:{:02}.{:03}", ms / 60_000, (ms / 1000) % 60, ms % 1000)
     }
 
-    /// Lowercase hex pairs, first [`HEX_PREVIEW`] bytes.
+    /// Lowercase hex pairs, first [`HEX_PREVIEW`] bytes, pre-wrapped at
+    /// [`HEX_BYTES_PER_LINE`] bytes per line, with a note when truncated.
     pub fn hex_string(&self) -> String {
         let n = self.hex.len().min(HEX_PREVIEW);
-        let mut out = String::with_capacity(n * 3 + 1);
-        for byte in &self.hex[..n] {
-            out.push_str(&format!("{byte:02x} "));
+        let mut out = String::with_capacity(n * 3 + n / HEX_BYTES_PER_LINE + 16);
+        for (i, chunk) in self.hex[..n].chunks(HEX_BYTES_PER_LINE).enumerate() {
+            if i > 0 {
+                out.push('\n');
+            }
+            for (j, byte) in chunk.iter().enumerate() {
+                if j > 0 {
+                    out.push(' ');
+                }
+                out.push_str(&format!("{byte:02x}"));
+            }
         }
         if self.hex.len() > n {
-            out.push('…');
-        } else {
-            out.pop();
+            if !out.is_empty() {
+                out.push('\n');
+            }
+            out.push_str(&format!("… (+{} bytes)", self.hex.len() - n));
         }
         out
     }
@@ -116,20 +127,24 @@ pub struct TopicRow {
     pub packets: usize,
 }
 
-/// Per-topic packet counts (known and unregistered topics).
+/// Per-topic packet counts (known and unregistered topics) plus a count of
+/// datagrams with no identified topic.
 #[derive(Clone, Debug, Default)]
 pub struct TopicCounts {
     counts: BTreeMap<String, usize>,
+    unidentified: usize,
 }
 
 impl TopicCounts {
     pub fn observe(&mut self, r: &Record) {
-        if let Some(topic) = &r.topic {
-            *self.counts.entry(topic.clone()).or_insert(0) += 1;
+        match &r.topic {
+            Some(topic) => *self.counts.entry(topic.clone()).or_insert(0) += 1,
+            None => self.unidentified += 1,
         }
     }
 
-    /// Known topics (0 if unseen) then unregistered topics seen, sorted.
+    /// Known topics (0 if unseen), then unregistered topics seen and an
+    /// `unidentified` row when there are unattributed datagrams, sorted.
     pub fn rows(&self) -> Vec<TopicRow> {
         let mut rows = Vec::new();
         for name in KNOWN_TOPICS {
@@ -148,12 +163,20 @@ impl TopicCounts {
                 });
             }
         }
+        if self.unidentified > 0 {
+            rows.push(TopicRow {
+                name: "unidentified".to_string(),
+                known: false,
+                packets: self.unidentified,
+            });
+        }
         rows.sort_by(|a, b| b.known.cmp(&a.known).then_with(|| a.name.cmp(&b.name)));
         rows
     }
 
     pub fn reset(&mut self) {
         self.counts.clear();
+        self.unidentified = 0;
     }
 }
 
@@ -193,207 +216,6 @@ impl RateTracker {
     }
 }
 
-/// Deterministic xorshift64* PRNG, so the feed needs no dependency.
-#[derive(Clone, Debug)]
-pub struct Rng(u64);
-
-impl Rng {
-    pub fn new(seed: u64) -> Self {
-        Rng(seed | 1)
-    }
-
-    pub fn next_u64(&mut self) -> u64 {
-        let mut x = self.0;
-        x ^= x << 13;
-        x ^= x >> 7;
-        x ^= x << 17;
-        self.0 = x;
-        x.wrapping_mul(0x2545_F491_4F6C_DD1D)
-    }
-
-    pub fn below(&mut self, n: u64) -> u64 {
-        if n == 0 {
-            0
-        } else {
-            self.next_u64() % n
-        }
-    }
-
-    pub fn range(&mut self, lo: u64, hi: u64) -> u64 {
-        if hi <= lo {
-            lo
-        } else {
-            lo + self.below(hi - lo + 1)
-        }
-    }
-}
-
-/// Lowercase hex, no separators.
-fn hex_str(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        out.push_str(&format!("{byte:02x}"));
-    }
-    out
-}
-
-const UNREGISTERED_TOPICS: &[&str] = &["WeatherTopic", "LogTopic", "NavTopic"];
-
-/// Emits a mix of unknown UDP, unknown RTPS, unregistered RTPS, and known-topic
-/// messages.
-#[derive(Clone, Debug)]
-pub struct SimFeed {
-    rng: Rng,
-    seq: u64,
-}
-
-impl SimFeed {
-    pub fn new(seed: u64) -> Self {
-        SimFeed {
-            rng: Rng::new(seed),
-            seq: 0,
-        }
-    }
-
-    /// Records for one tick: 1..=4.
-    pub fn burst(&mut self) -> usize {
-        (1 + self.rng.below(4)) as usize
-    }
-
-    pub fn next(&mut self, now_ms: u64) -> Record {
-        self.seq += 1;
-        match self.rng.below(100) {
-            0..=14 => self.udp(now_ms),
-            15..=39 => self.rtps(now_ms),
-            40..=59 => self.unregistered(now_ms),
-            _ => self.known(now_ms),
-        }
-    }
-
-    fn src_addr(&mut self) -> String {
-        format!("[::1]:{}", 7400 + self.rng.below(4))
-    }
-
-    fn guid_prefix(&mut self) -> [u8; 12] {
-        let mut guid = [0u8; 12];
-        for byte in &mut guid {
-            *byte = self.rng.below(256) as u8;
-        }
-        guid
-    }
-
-    fn entity_id(&mut self) -> [u8; 4] {
-        let mut id = [0u8; 4];
-        for byte in &mut id {
-            *byte = self.rng.below(256) as u8;
-        }
-        id
-    }
-
-    fn rtps_header(&mut self, guid: &[u8; 12]) -> Vec<u8> {
-        let mut header = Vec::with_capacity(20);
-        header.extend_from_slice(b"RTPS");
-        header.extend_from_slice(&[2, 4, 0x01, 0x0f]);
-        header.extend_from_slice(guid);
-        header
-    }
-
-    fn udp(&mut self, now_ms: u64) -> Record {
-        let len = self.rng.range(8, 200) as usize;
-        let mut hex = Vec::with_capacity(len);
-        hex.push(0x00); // never the RTPS magic
-        while hex.len() < len {
-            hex.push(self.rng.below(256) as u8);
-        }
-        let src_addr = self.src_addr();
-        Record {
-            elapsed_ms: now_ms,
-            class: Class::Udp,
-            src_addr,
-            guid_prefix: None,
-            entity_id: None,
-            dest_port: 7400,
-            size: hex.len(),
-            topic: None,
-            summary: "UDP".to_string(),
-            hex,
-            decoded: String::new(),
-        }
-    }
-
-    fn rtps(&mut self, now_ms: u64) -> Record {
-        let guid = self.guid_prefix();
-        let len = self.rng.range(30, 300) as usize;
-        let mut hex = self.rtps_header(&guid);
-        while hex.len() < len {
-            hex.push(self.rng.below(256) as u8);
-        }
-        let src_addr = self.src_addr();
-        Record {
-            elapsed_ms: now_ms,
-            class: Class::Rtps,
-            src_addr,
-            guid_prefix: Some(hex_str(&guid)),
-            entity_id: None,
-            dest_port: 7400,
-            size: hex.len(),
-            topic: None,
-            summary: "RTPS".to_string(),
-            hex,
-            decoded: String::new(),
-        }
-    }
-
-    fn unregistered(&mut self, now_ms: u64) -> Record {
-        let guid = self.guid_prefix();
-        let entity = self.entity_id();
-        let topic = UNREGISTERED_TOPICS[self.rng.below(UNREGISTERED_TOPICS.len() as u64) as usize];
-        let mut hex = self.rtps_header(&guid);
-        hex.extend_from_slice(&[0x00, 0x01, 0x00, 0x00]);
-        for _ in 0..self.rng.range(8, 40) {
-            hex.push(self.rng.below(256) as u8);
-        }
-        let src_addr = self.src_addr();
-        Record {
-            elapsed_ms: now_ms,
-            class: Class::Unregistered,
-            src_addr,
-            guid_prefix: Some(hex_str(&guid)),
-            entity_id: Some(hex_str(&entity)),
-            dest_port: 7401,
-            size: hex.len(),
-            topic: Some(topic.to_string()),
-            summary: "RTPS DATA".to_string(),
-            hex,
-            decoded: String::new(),
-        }
-    }
-
-    fn known(&mut self, now_ms: u64) -> Record {
-        let guid = self.guid_prefix();
-        let entity = self.entity_id();
-        let mut hex = self.rtps_header(&guid);
-        hex.extend_from_slice(&[0x00, 0x01, 0x00, 0x00]);
-        for _ in 0..24 {
-            hex.push(self.rng.below(256) as u8);
-        }
-        let src_addr = self.src_addr();
-        Record {
-            elapsed_ms: now_ms,
-            class: Class::Known,
-            src_addr,
-            guid_prefix: Some(hex_str(&guid)),
-            entity_id: Some(hex_str(&entity)),
-            dest_port: 7401,
-            size: hex.len(),
-            topic: Some("HelloWorldTopic".to_string()),
-            summary: "Hello, world!".to_string(),
-            hex,
-            decoded: "greeting: \"Hello, world!\"\nattitude: (0.0, 0.0, 0.0, 1.0)".to_string(),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -415,33 +237,6 @@ mod tests {
     }
 
     #[test]
-    fn feed_yields_all_classes() {
-        let mut feed = SimFeed::new(1);
-        let mut seen = std::collections::HashSet::new();
-        for i in 0..200 {
-            let r = feed.next(i);
-            assert!(!r.hex.is_empty());
-            if r.class == Class::Udp {
-                assert!(!r.hex.starts_with(b"RTPS"));
-                assert!(r.topic.is_none());
-            } else {
-                assert!(r.hex.starts_with(b"RTPS"), "{:?}", r.class);
-            }
-            if r.class == Class::Known {
-                assert_eq!(r.topic.as_deref(), Some("HelloWorldTopic"));
-                assert!(!r.decoded.is_empty());
-            }
-            if r.class == Class::Unregistered {
-                let topic = r.topic.as_deref().unwrap();
-                assert!(!KNOWN_TOPICS.contains(&topic));
-                assert!(r.entity_id.is_some());
-            }
-            seen.insert(r.class.label());
-        }
-        assert_eq!(seen.len(), 4, "classes seen: {seen:?}");
-    }
-
-    #[test]
     fn stats_accumulate_rtps_only() {
         let mut s = Stats::default();
         s.observe(&record(Class::Udp, 10, None));
@@ -452,7 +247,7 @@ mod tests {
     }
 
     #[test]
-    fn topic_counts_include_known_and_unregistered() {
+    fn topic_counts_include_known_unregistered_and_unidentified() {
         let mut c = TopicCounts::default();
         assert!(c
             .rows()
@@ -460,6 +255,8 @@ mod tests {
             .any(|r| r.name == "HelloWorldTopic" && r.known && r.packets == 0));
         c.observe(&record(Class::Known, 1, Some("HelloWorldTopic")));
         c.observe(&record(Class::Unregistered, 1, Some("WeatherTopic")));
+        c.observe(&record(Class::Udp, 1, None));
+        c.observe(&record(Class::Rtps, 1, None));
         let rows = c.rows();
         assert!(rows
             .iter()
@@ -467,6 +264,9 @@ mod tests {
         assert!(rows
             .iter()
             .any(|r| r.name == "WeatherTopic" && !r.known && r.packets == 1));
+        assert!(rows
+            .iter()
+            .any(|r| r.name == "unidentified" && !r.known && r.packets == 2));
     }
 
     #[test]
@@ -489,11 +289,20 @@ mod tests {
     }
 
     #[test]
-    fn rng_is_deterministic() {
-        let mut a = Rng::new(42);
-        let mut b = Rng::new(42);
-        for _ in 0..10 {
-            assert_eq!(a.next_u64(), b.next_u64());
-        }
+    fn hex_string_notes_truncation() {
+        let mut r = record(Class::Udp, HEX_PREVIEW + 1, None);
+        r.hex = vec![0xaa; HEX_PREVIEW + 1];
+        assert!(r.hex_string().ends_with("(+1 bytes)"));
+    }
+
+    #[test]
+    fn hex_string_wraps_lines() {
+        let mut r = record(Class::Udp, 0, None);
+        r.hex = (0..17u8).collect();
+        let s = r.hex_string();
+        let lines: Vec<&str> = s.lines().collect();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].split(' ').count(), HEX_BYTES_PER_LINE);
+        assert_eq!(lines[1].split(' ').count(), 1);
     }
 }

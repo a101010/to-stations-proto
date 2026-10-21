@@ -10,6 +10,14 @@
       <Transport>udp6</Transport>
       <AllowMulticast>true</AllowMulticast>
       <EnableMulticastLoopback>true</EnableMulticastLoopback>
+      <!-- Prefer multicast for all traffic: with CycloneDDS's default costs
+           (mc=3, uc=2) a lone reader is reached by unicast; these values make
+           the multicast group cheaper so user data goes over multicast too,
+           matching "all topics over IPv6 multicast". -->
+      <AddrsetCosts>
+        <mc>1</mc>
+        <uc>4</uc>
+      </AddrsetCosts>
     </General>
   </Domain>
 </CycloneDDS>

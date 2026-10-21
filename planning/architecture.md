@@ -26,7 +26,7 @@ It also launches a window that can start and stop the applications for that conf
 All the applications communicate using Distributed Data Services configured to use IPv6 multicast on a Microsoft loopback adapter named StationsDDS.
 
 ## Stack
-* DDS: Eclipse Cyclone DDS for all configurations - C core with `cyclonedds-cxx` (C++) and the `cyclonedds` Rust crate; shared IDL in `DDS/`; all topics over IPv6 multicast on the `StationsDDS` loopback adapter.
+* DDS: Eclipse Cyclone DDS for all configurations - C core with `cyclonedds-cxx` (C++) and the `cyclonedds` Rust crate; shared IDL in `DDS/`; all topics over IPv6 multicast on the `StationsDDS` loopback adapter. The shared configuration (`DDS/cyclonedds-config.xml`) tunes CycloneDDS's address-set cost model (`AddrsetCosts`) to prefer multicast for user data as well as discovery, since its defaults send a lone reader's data by unicast.
 * Rendering: the display apps (Rust) use winit + glutin/glow + egui and the display library renders through their GL context; the tool, launcher, and controller GUIs (`dds-echo`, `tentacles`, `paws`) use Slint. C++ = SDL3 + glad + Dear ImGui. Slint has both Rust and C++ APIs, so a future C++ mirror of those GUIs can share the same `.slint` files.
 * Text: HarfBuzz (`libharfbuzz` and the experimental `libharfbuzz-gpu`) for format text; the console uses egui's own text.
 * Build: `scripts/build.ps1` orchestrator; all artifacts under `build/`, where only `build/deploy/` is durable and everything else is temporary. The repository must be placed at a short path on Windows (see "Path length").

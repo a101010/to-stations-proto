@@ -18,3 +18,5 @@ egui-winit = "0.36.2"
 egui_glow = { version = "0.36.2", features = ["winit"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 clap = { version = "4", features = ["derive"] }
+socket2 = "0.5"
+if-addrs = "0.13"

@@ -98,8 +98,8 @@ component TopicGroup inherits Rectangle {
 
 export component MainWindow inherits Window {
     title: "dds-echo";
-    preferred-width: 1180px;
-    preferred-height: 760px;
+    preferred-width: 1900px;
+    preferred-height: 1040px;
     background: #1a1a1a;
 
     in-out property <bool> running: false;
@@ -141,12 +141,14 @@ export component MainWindow inherits Window {
         known: false,
     };
     in-out property <int> selected-index: -1;
+    in-out property <string> error-message: "";
 
     callback start();
     callback stop();
     callback clear();
     callback select(int);
     callback list-scrolled();
+    callback dismiss-error();
 
     VerticalLayout {
         padding: 10px;
@@ -268,8 +270,8 @@ export component MainWindow inherits Window {
 
             // detail
             Rectangle {
-                min-width: 340px;
-                max-width: 340px;
+                min-width: 361px;
+                max-width: 361px;
                 background: #202020;
                 border-radius: 6px;
                 VerticalLayout {
@@ -286,13 +288,46 @@ export component MainWindow inherits Window {
                     Text { text: root.selected.known ? "decoded" : "hex"; color: #9a9a9a; }
                     ScrollView {
                         vertical-stretch: 1;
-                        Text {
-                            text: root.selected.known ? root.selected.decoded : root.selected.hex;
-                            color: #c0c0c0;
-                            font-family: "Courier New";
-                            wrap: word-wrap;
+                        HorizontalLayout {
+                            Text {
+                                text: root.selected.known ? root.selected.decoded : root.selected.hex;
+                                color: #c0c0c0;
+                                font-family: "Courier New";
+                                font-size: 12px;
+                                wrap: no-wrap;
+                                horizontal-alignment: left;
+                                vertical-alignment: top;
+                            }
+                            Rectangle { horizontal-stretch: 1; }
                         }
                     }
+                }
+            }
+        }
+    }
+
+    if (root.error-message != "") : Rectangle {
+        background: #000000b0;
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 360px;
+            height: 150px;
+            background: #2a2a2a;
+            border-radius: 8px;
+            VerticalLayout {
+                padding: 12px;
+                spacing: 8px;
+                Text { text: "Capture error"; color: #ff8080; font-weight: 700; }
+                Text {
+                    text: root.error-message;
+                    color: #e0e0e0;
+                    wrap: word-wrap;
+                    vertical-stretch: 1;
+                }
+                HorizontalLayout {
+                    Rectangle { horizontal-stretch: 1; }
+                    Button { text: "OK"; clicked => { root.dismiss-error(); } }
                 }
             }
         }

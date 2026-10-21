@@ -24,6 +24,7 @@ Replace the `dds-echo` mockup's simulated feed with the real UDP capture backend
 - **Classification now:** `Class::Udp` (no `RTPS` magic) or `Class::Rtps` (RTPS, topic not yet identified). `unregistered`/`known` arrive with `dds-echo-sedp`/`-decode`; the topics view lists the registry's known topics at 0 packets.
 - **Remove `SimFeed` and `Rng` entirely** from the model.
 - **Start failure → error dialog.** `MainWindow` gains `error-message: string` and a modal overlay with an OK button; `on_start` sets it when the config or `Capture::start` fails.
+- **Traffic-generator scripts.** Commit three dev scripts under `scripts/` so the capture can be stimulated: `traffic-roundtrip.ps1` (runs the `stations-dds` round_trip test), `traffic-throughput.ps1` (runs the CycloneDDS `ThroughputSubscriber` + `ThroughputPublisher` examples), and `traffic-listtopics.ps1` (runs the `listtopics` example). Each resolves the repo root from `$PSScriptRoot` and the external prefix, points the example at `DDS/cyclonedds-config.xml` via `CYCLONEDDS_URI`, and makes `ddsc.dll` available.
 
 ## Interfaces
 
@@ -140,7 +141,15 @@ struct State {
 
 ### `rust/tool/dds-echo/Cargo.toml` and `rust/Cargo.toml` (changed)
 
-Add `socket2`, `if-addrs`, `clap = { workspace = true }`.
+Add `socket2`, `if-addrs`, `clap = { workspace = true }`; the crate also has a `windows-sys` dependency (for interface resolution).
+
+### `scripts/traffic-{roundtrip,throughput,listtopics}.ps1` (new)
+
+Dev scripts that generate traffic for the capture. Each resolves the repo root from `$PSScriptRoot`, sets `CYCLONEDDS_URI` to `DDS/cyclonedds-config.xml`, and (for the example binaries) prepends the CycloneDDS example bin dir (`$EXT_PATH_PREFIX\src\cyclonedds\build\bin\Release`, default `C:\Libraries`) to `PATH`.
+
+- `traffic-roundtrip.ps1 [-Repeat N]` — runs `cargo test -p stations-dds --test round_trip` from the repo root.
+- `traffic-throughput.ps1 [-Seconds 30] [-Payload 1024] [-IntervalMs 100] [-Burst 10]` — starts `ThroughputSubscriber.exe` in the background and runs `ThroughputPublisher.exe <payload> <interval> <burst> <seconds>` (the publisher waits for a matched reader).
+- `traffic-listtopics.ps1` — runs `listtopics.exe` (a ~10 s discovery participant).
 
 ## Pseudocode
 
@@ -227,7 +236,27 @@ rust/tool/dds-echo/src/capture.rs    sockets, config, classification, Capture
 rust/tool/dds-echo/src/model.rs      Class/Record/Stats/TopicCounts/RateTracker + tests
 ```
 
+## Result
+
+Implemented. The simulated feed is gone; `dds-echo` captures real UDP. `src/capture.rs` (sockets, config, classification) binds `socket2` sockets (SO_REUSEADDR, `IPV6_V6ONLY`), joins multicast groups on the resolved interfaces, and runs one receive thread per socket feeding an `mpsc` channel; the Slint `Timer` drains it on the UI thread. Toolbar fields (fed from `clap` `--interface`/`--group`/`--port`/`--domain`) drive capture on **Start**; **Stop** joins the threads; a start failure shows an in-window error dialog. `model.rs` lost `SimFeed`/`Rng`.
+
+Interface resolution note: neither `if-addrs` (it filters to `IpDadStatePreferred`, dropping the KM-TEST adapter) nor `if_nametoindex` (it rejects Windows friendly names) resolves `StationsDDS`, so the IPv6 scope id comes from `GetAdaptersAddresses` with `GAA_FLAG_INCLUDE_ALL_INTERFACES` (via `windows-sys`), with `if-addrs` still supplying IPv4 addresses.
+
+Verified: `scripts/build.ps1 -Test` passes — 10 `dds-echo` tests, including an adapter-free loopback unicast receive and an adapter multicast receive on `ff02::ffff:239.255.0.1:7400`; the release build and deploy succeed; the deployed `dds-echo.exe` launches and joins the group with no error. The visual minimal test (Start shows live RTPS datagrams with hex; Stop halts; the Live/Stopped badge tracks state) remains for the user.
+
+Deviations: dropped the `ConfigError::Io` variant; `Capture::start` returns `io::Result` and `local_ports()`/the `sockets` field are `#[allow(dead_code)]` (used only by tests); the `Class::Unregistered`/`Known` variants carry `#[allow(dead_code)]` until `dds-echo-sedp`/`-decode`.
+
+Traffic generators: `scripts/traffic-{roundtrip,throughput,listtopics}.ps1` were added and verified — `traffic-throughput.ps1 -Seconds 5` generated traffic (the publisher wrote samples) and `dds-echo` captured its RTPS datagrams on `StationsDDS`.
+
+Capture UI fixes after review: the detail pane's hex `Text` is now bounded to the viewport and top/left-aligned, so it wraps and shows the whole (capped) packet instead of a clipped single line (`content-width: hexscroll.visible-width` in `ui/dds_echo.slint`); `HEX_PREVIEW` was raised to 4096 with a `… (+N bytes)` truncation note; and `model::TopicCounts` counts datagrams with no identified topic so the topics view's **Unknown** group header matches the stats' packet total (an `unidentified` row is shown). All four `dds-echo` classes remain, but DDS traffic is all `RTPS` until `dds-echo-sedp` identifies topics.
+
+Further fixes: `hex_string()` now **pre-wraps** at 16 bytes per line (`HEX_BYTES_PER_LINE`), rendered with `wrap: no-wrap; horizontal-alignment: left; vertical-alignment: top; font-size: 12px` — deterministic and stable across window resizes because the detail pane is fixed-width. `dds-echo` sets `#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]` so the release build has no console window (debug keeps it). And `DDS/cyclonedds-config.xml` gains `<AddrsetCosts><mc>1</mc><uc>4</uc></AddrsetCosts>` so CycloneDDS's locator cost model **prefers multicast for user data** (its defaults `mc=3`/`uc=2` send a lone reader's data by unicast). Verified: with `traffic-throughput.ps1 -Seconds 6`, `dds-echo` captured 138 datagrams — 132 on the multicast user-data port (7401) plus 6 discovery — versus discovery-only before.
+
+Hex review, take two: the pre-wrapped hex was still clipped at both ends because Slint **centers** an implicit-size element that is outside a layout (the `Text` was a direct `ScrollView` child wider than the pane), so the fix is (a) put the `Text` in a `HorizontalLayout` with a trailing stretch spacer to left-align it, and (b) widen the detail pane so a 16-byte line (~338px at 12px) fits. The pane first went `340px → 420px`, which left ~3 byte-pairs of slack on the right, then was tightened to **356px** (`min/max-width`) to remove that slack; 356px clipped the last digit, so it was nudged to **361px** (+5px) to fit. The window default grew to `1900x1040` (just under 1080p) to keep the records pane wide; `HEX_BYTES_PER_LINE` stays 16.
+
+Throughput count is **not** data loss: with `ThroughputPublisher 1024 100 10 6` the publisher wrote 560 samples and the subscriber received 560 samples / 577,920 B (0 out of order), while `dds-echo` captured 120 datagrams / 609,420 B — *more* bytes than the subscriber, because CycloneDDS coalesces ~5 samples per datagram. `dds-echo` counts **datagrams**, not samples, so its total is expected to be lower; documented in `README.md`. No `SO_RCVBUF` change was needed. Sample-level counting belongs to `dds-echo-sedp`.
+
 ## Files
 
-- Authored: `rust/tool/dds-echo/src/capture.rs`.
-- Changed: `rust/tool/dds-echo/{Cargo.toml,src/main.rs,src/model.rs,ui/dds_echo.slint}`, `rust/Cargo.toml`, `planning/{backlog,current_story}.md`, `docs/versions.md` (`socket2`, `if-addrs`).
+- Authored: `rust/tool/dds-echo/src/capture.rs`, `scripts/traffic-roundtrip.ps1`, `scripts/traffic-throughput.ps1`, `scripts/traffic-listtopics.ps1`.
+- Changed: `rust/tool/dds-echo/{Cargo.toml,src/main.rs,src/model.rs,ui/dds_echo.slint}`, `rust/Cargo.toml`, `planning/{backlog,current_story}.md`, `docs/versions.md` (`socket2`, `if-addrs`, `windows-sys`).

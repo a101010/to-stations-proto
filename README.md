@@ -154,3 +154,17 @@ Point CycloneDDS at the configuration (use `file://` with two slashes, or a plai
 ```
 $env:CYCLONEDDS_URI = 'file://T:/DDS/cyclonedds-config.xml'
 ```
+
+### dds-echo traffic generators
+
+`dds-echo` captures DDSI-RTPS multicast so traffic can be inspected. To generate traffic while it is capturing, use the committed wrappers under `scripts/` (each points the source at `DDS/cyclonedds-config.xml` and makes `ddsc.dll` available):
+
+```
+.\scripts\traffic-throughput.ps1 -Seconds 30     # throughput example (subscriber + publisher)
+.\scripts\traffic-listtopics.ps1                 # ~10 s of discovery
+.\scripts\traffic-roundtrip.ps1                  # stations-dds round_trip test
+```
+
+The throughput and listtopics wrappers use the CycloneDDS example binaries built into the source build tree under `$EXT_PATH_PREFIX\src\cyclonedds\build\bin\Release` (build CycloneDDS with `-DBUILD_EXAMPLES=ON`).
+
+`dds-echo`'s counts are per **datagram**, not per sample: CycloneDDS coalesces several samples into one RTPS datagram (a `ThroughputPublisher` burst arrives as far fewer, larger datagrams), so the captured datagram count is lower than the publisher's sample count even when nothing is dropped. Sample-level counting needs the RTPS submessage parsing done in the `dds-echo-sedp` story.

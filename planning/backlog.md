@@ -61,6 +61,12 @@ Decode known-type samples from the wire (`CdrDeserializer`), with drill-down fro
 - **Minimal test:** a known-topic sample is shown decoded (fields) and an unknown sample as hex.
 - **Status:** todo.
 
+### dds-echo-send
+Add a send screen to `dds-echo`: the window becomes two tabs, **Capture** (the current UI) and **Send**. In the Send tab, choose a registered topic from `contracts/topics.toml`, fill in its fields, and publish the sample **once or periodically** at a chosen rate. Publishing uses `stations-dds` (a `Node` typed writer), so `dds-echo` gains a `stations-dds` dependency; per-type field forms are added per topic, starting with the registered topic.
+- **Depends on:** dds-echo-capture.
+- **Minimal test:** in the Send tab, fill the hello-world fields and press Send; the sample appears on the Capture tab.
+- **Status:** todo.
+
 ### hello-view-service
 Create the hello_world view service (`hello-view-service`): add the trivial `HelloWorldViewTopic` to `DDS/hello_world.idl` (an exact copy of `HelloWorldTopic`; rotation is added later) and publish it; extend the display library to subscribe to `HelloWorldViewTopic` and render the hello-world format from the received greeting and attitude instead of the hardcoded values. The model data moves out of the display library to this service; later `hello-service` becomes its source.
 - **Depends on:** none.

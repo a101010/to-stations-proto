@@ -1,8 +1,13 @@
-//! The `dds-echo` traffic inspector (Slint mockup).
+//! The `dds-echo` traffic inspector (Slint).
 //!
-//! The UI is driven by a simulated feed for now; the capture/SEDP/decode
-//! stories replace it with the real backend.
+//! A real UDP capture backend (see [`capture`]) feeds the UI through a channel
+//! drained on the event loop, so Slint models are only touched on the UI thread.
 
+// Release builds are a GUI application (no console window); debug builds keep
+// the console for diagnostics.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+mod capture;
 mod model;
 
 mod ui {
@@ -11,19 +16,43 @@ mod ui {
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::time::{Duration, Instant};
 
+use clap::Parser;
 use slint::{ComponentHandle as _, Model as _, ModelRc, Timer, TimerMode, VecModel};
 
-use crate::model::{RateTracker, SimFeed, Stats, TopicCounts, MAX_RECORDS};
+use crate::capture::{Capture, CaptureConfig};
+use crate::model::{RateTracker, Stats, TopicCounts, MAX_RECORDS};
 use crate::ui::MainWindow;
 
-/// The simulated feed's tick.
+/// The UI refresh / capture-drain tick.
 const TICK: Duration = Duration::from_millis(100);
+
+#[derive(Parser, Debug)]
+#[command(name = "dds-echo", about = "DDSI-RTPS multicast/UDP traffic inspector")]
+struct Args {
+    /// Interface name(s), comma-separated; a number is an interface index.
+    #[arg(long, default_value = "StationsDDS")]
+    interface: String,
+
+    /// Multicast group(s), comma-separated. Empty uses the DDS group for --domain.
+    #[arg(long, default_value = "")]
+    group: String,
+
+    /// Port(s), comma-separated. Empty uses 7400 + 250*domain and +1.
+    #[arg(long, default_value = "")]
+    ports: String,
+
+    /// DDS domain id (sets the default group/ports).
+    #[arg(long, default_value_t = 0)]
+    domain: u32,
+}
 
 /// Shared state behind the UI.
 struct State {
-    feed: RefCell<SimFeed>,
+    capture: RefCell<Option<Capture>>,
+    rx: RefCell<Option<Receiver<model::Record>>>,
     stats: RefCell<Stats>,
     counts: RefCell<TopicCounts>,
     rates: RefCell<RateTracker>,
@@ -85,14 +114,23 @@ fn tick(
 ) {
     let now_ms = state.start.get().elapsed().as_millis() as u64;
 
-    let burst = state.feed.borrow_mut().burst();
-    for _ in 0..burst {
-        let record = state.feed.borrow_mut().next(now_ms);
-        state.stats.borrow_mut().observe(&record);
-        state.counts.borrow_mut().observe(&record);
-        records.push(to_ui(&record));
-        while records.row_count() > MAX_RECORDS {
-            records.remove(0);
+    // Drain the capture channel.
+    {
+        let rx = state.rx.borrow();
+        if let Some(rx) = rx.as_ref() {
+            loop {
+                match rx.try_recv() {
+                    Ok(record) => {
+                        state.stats.borrow_mut().observe(&record);
+                        state.counts.borrow_mut().observe(&record);
+                        records.push(to_ui(&record));
+                        while records.row_count() > MAX_RECORDS {
+                            records.remove(0);
+                        }
+                    }
+                    Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
+                }
+            }
         }
     }
 
@@ -115,10 +153,38 @@ fn tick(
 }
 
 fn main() -> Result<(), slint::PlatformError> {
+    let args = Args::parse();
     let app = MainWindow::new()?;
 
+    // Seed the toolbar fields from the CLI (group/ports default from --domain).
+    let defaults = CaptureConfig::for_domain(args.domain);
+    let group = if args.group.trim().is_empty() {
+        defaults
+            .groups
+            .iter()
+            .map(|g| g.to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    } else {
+        args.group.clone()
+    };
+    let ports = if args.ports.trim().is_empty() {
+        defaults
+            .ports
+            .iter()
+            .map(|p| p.to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    } else {
+        args.ports.clone()
+    };
+    app.set_iface(args.interface.clone().into());
+    app.set_group(group.into());
+    app.set_ports(ports.into());
+
     let state = Rc::new(State {
-        feed: RefCell::new(SimFeed::new(0x5eed)),
+        capture: RefCell::new(None),
+        rx: RefCell::new(None),
         stats: RefCell::new(Stats::default()),
         counts: RefCell::new(TopicCounts::default()),
         rates: RefCell::new(RateTracker::default()),
@@ -145,21 +211,42 @@ fn main() -> Result<(), slint::PlatformError> {
         let unknown = unknown.clone();
         let timer = timer.clone();
         app.on_start(move || {
-            if let Some(app) = app_weak.upgrade() {
-                app.set_running(true);
-                state.start.set(Instant::now());
-                *state.rates.borrow_mut() = RateTracker::default();
-                state.following.set(true);
-                let app_weak = app.as_weak();
-                let state = state.clone();
-                let records = records.clone();
-                let known = known.clone();
-                let unknown = unknown.clone();
-                timer.start(TimerMode::Repeated, TICK, move || {
-                    if let Some(app) = app_weak.upgrade() {
-                        tick(&app, &state, &records, &known, &unknown);
-                    }
-                });
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            let iface = app.get_iface().to_string();
+            let group = app.get_group().to_string();
+            let ports = app.get_ports().to_string();
+            let config = match CaptureConfig::from_fields(&iface, &group, &ports) {
+                Ok(config) => config,
+                Err(e) => {
+                    app.set_error_message(format!("Invalid capture settings: {e}").into());
+                    return;
+                }
+            };
+
+            let (tx, rx) = mpsc::channel();
+            match Capture::start(&config, tx) {
+                Ok(capture) => {
+                    *state.capture.borrow_mut() = Some(capture);
+                    *state.rx.borrow_mut() = Some(rx);
+                    app.set_running(true);
+                    state.start.set(Instant::now());
+                    *state.rates.borrow_mut() = RateTracker::default();
+                    state.following.set(true);
+
+                    let app_weak = app.as_weak();
+                    let state = state.clone();
+                    let records = records.clone();
+                    let known = known.clone();
+                    let unknown = unknown.clone();
+                    timer.start(TimerMode::Repeated, TICK, move || {
+                        if let Some(app) = app_weak.upgrade() {
+                            tick(&app, &state, &records, &known, &unknown);
+                        }
+                    });
+                }
+                Err(e) => app.set_error_message(format!("Capture failed: {e}").into()),
             }
         });
     }
@@ -167,12 +254,17 @@ fn main() -> Result<(), slint::PlatformError> {
     // Stop.
     {
         let app_weak = app.as_weak();
+        let state = state.clone();
         let timer = timer.clone();
         app.on_stop(move || {
             if let Some(app) = app_weak.upgrade() {
                 app.set_running(false);
             }
             timer.stop();
+            if let Some(capture) = state.capture.borrow_mut().take() {
+                capture.stop();
+            }
+            *state.rx.borrow_mut() = None;
         });
     }
 
@@ -216,8 +308,7 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
-    // Follow-the-tail: the ScrollView's `scrolled` fires only on user scroll
-    // (not on our programmatic scroll), so it cleanly toggles following.
+    // Follow-the-tail: the ScrollView's `scrolled` fires only on user scroll.
     {
         let app_weak = app.as_weak();
         let state = state.clone();
@@ -227,6 +318,16 @@ fn main() -> Result<(), slint::PlatformError> {
                 let ch = app.get_list_content_height();
                 let vh = app.get_list_visible_height();
                 state.following.set(cy <= -(ch - vh) + 1.0);
+            }
+        });
+    }
+
+    // Dismiss the error dialog.
+    {
+        let app_weak = app.as_weak();
+        app.on_dismiss_error(move || {
+            if let Some(app) = app_weak.upgrade() {
+                app.set_error_message("".into());
             }
         });
     }
