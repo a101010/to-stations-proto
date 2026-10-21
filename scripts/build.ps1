@@ -64,14 +64,34 @@ Push-Location $repoRoot
 try {
     if ($Test) {
         & cargo test --manifest-path 'rust\Cargo.toml'
+        if ($LASTEXITCODE -ne 0) { throw "cargo test failed ($LASTEXITCODE)" }
+        # cargo test does not always emit the tool binary; build it for the scan.
+        & cargo build --manifest-path 'rust\Cargo.toml' --bin dds-contracts
+        if ($LASTEXITCODE -ne 0) { throw "cargo build dds-contracts failed ($LASTEXITCODE)" }
+        $toolDir = 'build\rust\debug'
     } else {
         & cargo build --release --manifest-path 'rust\Cargo.toml'
+        if ($LASTEXITCODE -ne 0) { throw "cargo build failed ($LASTEXITCODE)" }
+        $toolDir = 'build\rust\release'
     }
-    if ($LASTEXITCODE -ne 0) { throw "cargo build/test failed ($LASTEXITCODE)" }
 }
 finally {
     Pop-Location
 }
+
+# Validate the service contracts, scan the application crates for raw DDS
+# topic-API bypasses, and regenerate the readable summary. The scan scope is
+# the crates being built (here the application/tool crates), never the shared
+# libraries, so the Node implementation is out of scope. No application crate
+# uses DDS yet, so the scan currently passes vacuously.
+$ddsContracts = Join-Path $repoRoot "$toolDir\dds-contracts.exe"
+$scanArgs = @()
+foreach ($src in @('rust\ui\lil-d\src', 'rust\tool\equirect-to-cubemap\src')) {
+    $scanArgs += @('--scan', (Join-Path $repoRoot $src))
+}
+& $ddsContracts '--contracts' (Join-Path $repoRoot 'contracts') @scanArgs '--summary' (Join-Path $repoRoot 'build\topics.md')
+if ($LASTEXITCODE -ne 0) { throw "dds-contracts failed ($LASTEXITCODE)" }
+Write-Host "Validated contracts and wrote build\topics.md"
 
 # Assemble the deployable layout. Only build/deploy is durable; everything else
 # under build/ is temporary. Each story that adds an executable or library
@@ -80,7 +100,8 @@ finally {
 if (-not $Test) {
     $deployRoot = Join-Path $repoRoot 'build\deploy'
     $deployBin = Join-Path $deployRoot 'bin'
-    New-Item -ItemType Directory -Force -Path $deployBin | Out-Null
+    $deployConfig = Join-Path $deployRoot 'config'
+    New-Item -ItemType Directory -Force -Path $deployBin, $deployConfig | Out-Null
     Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\lil-d.exe') -Destination $deployBin -Force
     Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\display_lib.dll') -Destination $deployBin -Force
 
@@ -89,5 +110,8 @@ if (-not $Test) {
     Copy-Item -Path (Join-Path $repoRoot 'assets') -Destination $deployRoot -Recurse -Force
     Copy-Item -Path (Join-Path $extPathPrefix 'harfbuzz\bin\harfbuzz.dll') -Destination $deployBin -Force
     Copy-Item -Path (Join-Path $extPathPrefix 'harfbuzz\bin\harfbuzz-gpu.dll') -Destination $deployBin -Force
-    Write-Host "Deployed lil-d.exe, display_lib.dll, assets, and the HarfBuzz runtime"
+
+    # The shared DDS configuration for the StationsDDS loopback adapter.
+    Copy-Item -Path (Join-Path $repoRoot 'DDS\cyclonedds-config.xml') -Destination $deployConfig -Force
+    Write-Host "Deployed lil-d.exe, display_lib.dll, assets, the HarfBuzz runtime, and the DDS config"
 }

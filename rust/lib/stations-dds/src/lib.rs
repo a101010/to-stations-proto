@@ -3,6 +3,9 @@
 //! Provides DDS participant creation, typed readers and writers, and contract
 //! validation for the to-stations prototype.
 
+pub mod contract;
+pub mod dds;
+
 pub use cyclonedds;
 
 /// The DDS type name that `cyclonedds` registers for `T`.

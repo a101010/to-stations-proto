@@ -1,0 +1,8 @@
+# The topic registry. `name` is the short wire/registry name; `type` is the
+# scoped IDL/DDS type name (it must match a generated DdsType::type_name()).
+
+[[topics]]
+name = "HelloWorldTopic"
+type = "hello_world::HelloWorldTopic"
+qos = "default"
+key = []

@@ -360,6 +360,14 @@ rust/tool/dds-contracts/tests/scan.rs   scanner tests
 rust/tool/dds-contracts/tests/fixtures/scan/   committed scan fixtures
 ```
 
+## Result
+
+Implemented. `stations-dds` gained `contract` (schema, loader, validation, `render`, `coverage`, `summary`) and `dds` (`Node`, `Error`, `check`, `qos`); `contracts/topics.toml` and `contracts/services/hello-service.toml` are authored; the `dds-contracts` tool (lib + bin) validates the contracts, writes `build/topics.md`, prints a service with `--topics`, and scans caller-supplied roots for raw CycloneDDS topic-API calls. `build.ps1` runs the tool (contracts + scan + summary) after the build and now deploys `DDS/cyclonedds-config.xml` to `build/deploy/config/`.
+
+Verified: `scripts/build.ps1 -Test` passes — 13 `stations-dds` unit tests (9 contract, 3 `check`, plus `type_names_match_scopes`), 2 scanner tests, 1 completeness test, 1 `node_contract` end-to-end test, and 1 publish/subscribe round-trip (the `StationsDDS` adapter is present). `scripts/build.ps1` release build and deploy succeed. `dds-contracts --topics hello-service` matches the `hello-service` section of `build/topics.md`; the scanner exits non-zero on a raw `create_topic` call (confirmed against the fixtures).
+
+Deviations from the plan: `TopicDef` uses `#[serde(rename = "type")] idl_type` (not `r#type`); an empty `[[subscribe]]` table is omitted rather than written (serde would reject a `TopicRef` without `topic`); the summary is produced by `contract::summary` (a testable helper) rather than built inline in the tool; and `Node::check` carries an explicit lifetime. The write-side bypass scan passes vacuously (no application crate uses DDS yet), as planned.
+
 ## Files
 
 * Authored: `contracts/topics.toml`, `contracts/services/hello-service.toml`, `rust/lib/stations-dds/src/dds.rs`, `rust/lib/stations-dds/src/contract.rs`, `rust/lib/stations-dds/tests/{round_trip.rs,node_contract.rs,registry.rs}`, `rust/tool/dds-contracts/{Cargo.toml,src/main.rs,src/scan.rs}`, `rust/tool/dds-contracts/tests/scan.rs`, `rust/tool/dds-contracts/tests/fixtures/scan/{bypass.rs,ok.rs,allowed/bypass.rs}`.

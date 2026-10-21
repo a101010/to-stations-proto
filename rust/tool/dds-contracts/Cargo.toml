@@ -1,0 +1,17 @@
+[package]
+name = "dds-contracts"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "dds_contracts"
+path = "src/lib.rs"
+
+[[bin]]
+name = "dds-contracts"
+path = "src/main.rs"
+
+[dependencies]
+stations-dds = { workspace = true }
+clap = { workspace = true }
