@@ -129,3 +129,9 @@ Create the `dds-echo` traffic inspector as a Slint GUI mockup driven by simulate
 - **Completed:** 2026-10-21 14:45:17.
 - **Depends on:** none.
 - **Minimal test:** run the app; Start populates stats/topics/table from the simulated feed; Stop halts; selecting a row shows details and hex.
+
+### dds-echo-capture
+Replace the mockup's simulated feed with the real UDP capture backend: a multicast/broadcast/unicast listener with `--interface`/`--group`/`--port` (and `--domain`) filters, RTPS detection, and a live hex listing. Uses `socket2` and `if-addrs`; the known-topics tree then reads `contracts/topics.toml`.
+- **Completed:** 2026-10-21 16:36:38.
+- **Depends on:** dds-echo.
+- **Minimal test:** with a publisher running, capture shows RTPS datagrams (flagged) with their hex.
