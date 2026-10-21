@@ -37,12 +37,6 @@ Third-party libraries are built/installed to an external prefix (for example `C:
 
 **Done when.** `launch-rust.ps1` brings up the model service, the view service, and `lil-d` from `build/deploy`; `lil-d` shows the tilted, cube-mapped earth lit from the upper right with the greeting text rendered in the loaded font, its power button works, and the format manager switches between the default and hello-world formats. `dds-echo` observes every topic in the registry, `--topics` and `build/topics.md` match `contracts/`, and `cleanup.ps1` stops everything.
 
-### dds-echo-frame
-Parse the RTPS header and submessages (writer GUID, sequence number, sizes) and surface them in the UI.
-- **Depends on:** dds-echo-capture.
-- **Minimal test:** a datagram's detail shows submessage ids, writer GUID, and sequence numbers.
-- **Status:** in progress.
-
 ### dds-echo-sedp
 Parse SEDP so the inspector lists participants, endpoints, and topics (topic/type names), matching the known-topics tree against the registry.
 - **Depends on:** dds-echo-frame.

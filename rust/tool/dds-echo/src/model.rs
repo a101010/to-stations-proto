@@ -38,6 +38,23 @@ impl Class {
     }
 }
 
+/// One decoded RTPS submessage, formatted for display.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Frame {
+    /// The submessage id (`0x15` DATA, `0x07` HEARTBEAT, ...).
+    pub id: u8,
+    /// The submessage name, or `"0xNN"` for an id we do not name.
+    pub kind: String,
+    /// The writer entity id (hex) when present.
+    pub writer: String,
+    /// The reader entity id (hex) when present.
+    pub reader: String,
+    /// The sequence number, `"a..b"` for a range, else `""`.
+    pub seq: String,
+    /// The submessage length in bytes.
+    pub len: usize,
+}
+
 /// One captured datagram (or a decoded sample).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Record {
@@ -56,6 +73,8 @@ pub struct Record {
     pub hex: Vec<u8>,
     /// Rendered fields for a decoded [`Class::Known`] message; empty otherwise.
     pub decoded: String,
+    /// The decoded RTPS submessages (empty for non-RTPS datagrams).
+    pub frames: Vec<Frame>,
 }
 
 impl Record {
@@ -94,6 +113,24 @@ impl Record {
         self.topic
             .as_deref()
             .is_some_and(|t| KNOWN_TOPICS.contains(&t))
+    }
+
+    /// A one-line summary of the decoded submessages, e.g.
+    /// `"DATA(sn=42); HEARTBEAT(1..5); INFO_TS"` (empty when there are none).
+    pub fn frame_summary(&self) -> String {
+        self.frames
+            .iter()
+            .map(|f| {
+                if f.seq.is_empty() {
+                    f.kind.clone()
+                } else if f.kind == "HEARTBEAT" {
+                    format!("{}({})", f.kind, f.seq)
+                } else {
+                    format!("{}(sn={})", f.kind, f.seq)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("; ")
     }
 }
 
@@ -233,6 +270,7 @@ mod tests {
             summary: String::new(),
             hex: vec![0],
             decoded: String::new(),
+            frames: Vec::new(),
         }
     }
 
@@ -304,5 +342,41 @@ mod tests {
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[0].split(' ').count(), HEX_BYTES_PER_LINE);
         assert_eq!(lines[1].split(' ').count(), 1);
+    }
+
+    #[test]
+    fn frame_summary_lists_submessages() {
+        let mut r = record(Class::Rtps, 0, None);
+        assert_eq!(r.frame_summary(), "");
+        r.frames = vec![
+            Frame {
+                id: 0x15,
+                kind: "DATA".into(),
+                writer: "000003c2".into(),
+                reader: "00000000".into(),
+                seq: "42".into(),
+                len: 20,
+            },
+            Frame {
+                id: 0x07,
+                kind: "HEARTBEAT".into(),
+                writer: "000003c2".into(),
+                reader: "00000000".into(),
+                seq: "1..5".into(),
+                len: 28,
+            },
+            Frame {
+                id: 0x09,
+                kind: "INFO_TS".into(),
+                writer: String::new(),
+                reader: String::new(),
+                seq: String::new(),
+                len: 8,
+            },
+        ];
+        assert_eq!(
+            r.frame_summary(),
+            "DATA(sn=42); HEARTBEAT(1..5); INFO_TS"
+        );
     }
 }

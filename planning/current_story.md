@@ -209,4 +209,10 @@ rust/tool/dds-echo/src/model.rs      Class/Record/Frame/Stats/TopicCounts/RateTr
 
 ## Result
 
-Pending implementation.
+Implemented. `src/rtps.rs` parses the 20-byte RTPS header and walks the submessages (bounds-checked, never panics), decoding ids, entity ids, sequence numbers, counts, and lengths; `model::Frame` + `Record::frames`/`frame_summary()` carry it, `capture::record_from` fills `guid_prefix`/`entity_id`/`summary`/`frames` for RTPS, and the detail pane gained a `submessages (n)` list (id | kind | writer | seq | len). Files: authored `rust/tool/dds-echo/src/rtps.rs`; changed `rust/tool/dds-echo/src/{model.rs,capture.rs,main.rs}` and `ui/dds_echo.slint`.
+
+Key finding from real traffic: `DATA`/`DATA_FRAG` begin with **both** `extraFlags` (2 B, nominally present only when `Q` is set) and `octetsToInlineQos` (2 B), before the reader/writer/SN. CycloneDDS always emits `extraFlags` even when `Q` is clear (its struct includes both; `extraFlags = 0`), so the parser locates `octetsToInlineQos` (always `16` = reader+writer+SN) rather than trusting the `Q` flag. This handles both CycloneDDS and spec-style senders.
+
+Verified: `scripts/build.ps1 -Test` passes with 24 `dds-echo` tests (12 new: 10 `rtps` unit tests, `model::frame_summary_lists_submessages`, `capture::record_from_parses_frames`; the loopback socket test now carries a real RTPS DATA datagram end to end). Against `traffic-throughput.ps1 -Seconds 6`, the parsed summaries read `INFO_TS; DATA(sn=531); HEARTBEAT(522..531)` and `DATA(sn=532..540)`, matching the publisher's sample counts. Release build and deploy succeed.
+
+Deviations: `ui::Frame.id` is the preformatted hex string (`"15"`) since Slint has no hex formatting, rather than the planned `int`; `rtps::Frame.kind` is a `&'static str` that is `"UNKNOWN"` for unnamed ids, which `capture` maps to `"0xNN"` for display. `capture::is_rtps` now delegates to `rtps::is_rtps`. The visual check (see the submessages list in the pane) remains for the user.

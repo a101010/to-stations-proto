@@ -13,7 +13,8 @@ use std::time::{Duration, Instant};
 
 use socket2::{Domain, Protocol, Socket, Type};
 
-use crate::model::{Class, Record};
+use crate::model::{self, Class, Record};
+use crate::rtps;
 
 const READ_TIMEOUT: Duration = Duration::from_millis(200);
 const BUF_SIZE: usize = 65_535;
@@ -91,7 +92,7 @@ impl std::fmt::Display for ConfigError {
 impl std::error::Error for ConfigError {}
 
 pub fn is_rtps(data: &[u8]) -> bool {
-    data.starts_with(b"RTPS")
+    rtps::is_rtps(data)
 }
 
 pub fn classify(data: &[u8]) -> Class {
@@ -105,7 +106,7 @@ pub fn classify(data: &[u8]) -> Class {
 /// Build a record from a received datagram.
 pub fn record_from(data: &[u8], src: SocketAddr, local_port: u16, elapsed_ms: u64) -> Record {
     let class = classify(data);
-    Record {
+    let mut record = Record {
         elapsed_ms,
         class,
         src_addr: src.to_string(),
@@ -117,6 +118,43 @@ pub fn record_from(data: &[u8], src: SocketAddr, local_port: u16, elapsed_ms: u6
         summary: if class == Class::Rtps { "RTPS" } else { "UDP" }.to_string(),
         hex: data.to_vec(),
         decoded: String::new(),
+        frames: Vec::new(),
+    };
+    if class == Class::Rtps {
+        let parsed = rtps::parse(data);
+        record.guid_prefix = parsed.src_guid_prefix.map(|p| rtps::hex(&p));
+        record.frames = parsed.frames.iter().map(frame_from).collect();
+        record.entity_id = parsed
+            .frames
+            .iter()
+            .rev()
+            .find_map(|f| f.writer)
+            .map(|e| rtps::hex(&e));
+        if !record.frames.is_empty() {
+            record.summary = record.frame_summary();
+        }
+    }
+    record
+}
+
+/// Map a parsed RTPS [`rtps::Frame`] to the display [`model::Frame`].
+fn frame_from(f: &rtps::Frame) -> model::Frame {
+    let seq = match (f.sn, f.sn_last) {
+        (Some(a), Some(b)) => format!("{a}..{b}"),
+        (Some(a), None) => format!("{a}"),
+        _ => String::new(),
+    };
+    model::Frame {
+        id: f.id,
+        kind: if f.kind == "UNKNOWN" {
+            format!("0x{:02x}", f.id)
+        } else {
+            f.kind.to_string()
+        },
+        writer: f.writer.map(|e| rtps::hex(&e)).unwrap_or_default(),
+        reader: f.reader.map(|e| rtps::hex(&e)).unwrap_or_default(),
+        seq,
+        len: f.len,
     }
 }
 
@@ -476,8 +514,36 @@ mod tests {
         assert_eq!(r.size, 12);
         assert_eq!(r.hex, b"RTPS\x02\x04abcdef");
         assert_eq!(r.summary, "RTPS");
+        assert!(r.frames.is_empty());
+        assert!(r.guid_prefix.is_none());
         assert_eq!(r.src_addr, "127.0.0.1:1234");
         assert_eq!(record_from(b"junk", src, 7400, 0).class, Class::Udp);
+    }
+
+    #[test]
+    fn record_from_parses_frames() {
+        let src: SocketAddr = "127.0.0.1:1234".parse().unwrap();
+        let mut d = Vec::new();
+        d.extend_from_slice(b"RTPS");
+        d.extend_from_slice(&[2, 4]);
+        d.extend_from_slice(&[0x01, 0x0f]);
+        d.extend_from_slice(&[0x11; 12]); // guid prefix
+        d.extend_from_slice(&[0x15, 0x05]); // DATA, E|D
+        d.extend_from_slice(&20u16.to_le_bytes());
+        d.extend_from_slice(&0u16.to_le_bytes()); // extraFlags
+        d.extend_from_slice(&16u16.to_le_bytes()); // octetsToInlineQos
+        d.extend_from_slice(&[0, 0, 0, 0]); // reader
+        d.extend_from_slice(&[0, 0, 0x03, 0xc2]); // writer
+        d.extend_from_slice(&0u32.to_le_bytes());
+        d.extend_from_slice(&7u32.to_le_bytes()); // sn = 7
+        let r = record_from(&d, src, 7400, 5);
+        assert_eq!(r.class, Class::Rtps);
+        assert_eq!(r.guid_prefix.as_deref(), Some("111111111111111111111111"));
+        assert_eq!(r.entity_id.as_deref(), Some("000003c2"));
+        assert_eq!(r.frames.len(), 1);
+        assert_eq!(r.frames[0].kind, "DATA");
+        assert_eq!(r.frames[0].seq, "7");
+        assert_eq!(r.summary, "DATA(sn=7)");
     }
 
     #[test]
@@ -494,14 +560,30 @@ mod tests {
         let port = capture.local_ports()[0];
 
         let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
-        sender.send_to(b"RTPS\x02\x04hello", ("127.0.0.1", port)).unwrap();
+        let mut d = Vec::new();
+        d.extend_from_slice(b"RTPS\x02\x04\x01\x0f");
+        d.extend_from_slice(&[0x22; 12]); // guid prefix
+        d.extend_from_slice(&[0x15, 0x05]); // DATA, E|D
+        d.extend_from_slice(&20u16.to_le_bytes());
+        d.extend_from_slice(&0u16.to_le_bytes()); // extraFlags
+        d.extend_from_slice(&16u16.to_le_bytes()); // octetsToInlineQos
+        d.extend_from_slice(&[0, 0, 0, 0]); // reader
+        d.extend_from_slice(&[0, 0, 0x03, 0xc2]); // writer
+        d.extend_from_slice(&0u32.to_le_bytes());
+        d.extend_from_slice(&9u32.to_le_bytes()); // sn = 9
+        sender.send_to(&d, ("127.0.0.1", port)).unwrap();
 
         let received = rx
             .recv_timeout(Duration::from_secs(3))
             .expect("a record arrives");
         assert_eq!(received.class, Class::Rtps);
-        assert_eq!(received.size, 11);
-        assert_eq!(received.hex, b"RTPS\x02\x04hello");
+        assert_eq!(received.size, d.len());
+        assert_eq!(received.hex, d);
+        assert_eq!(received.guid_prefix.as_deref(), Some("222222222222222222222222"));
+        assert_eq!(received.entity_id.as_deref(), Some("000003c2"));
+        assert_eq!(received.frames.len(), 1);
+        assert_eq!(received.frames[0].kind, "DATA");
+        assert_eq!(received.frames[0].seq, "9");
 
         capture.stop();
     }

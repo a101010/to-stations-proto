@@ -135,3 +135,9 @@ Replace the mockup's simulated feed with the real UDP capture backend: a multica
 - **Completed:** 2026-10-21 16:36:38.
 - **Depends on:** dds-echo.
 - **Minimal test:** with a publisher running, capture shows RTPS datagrams (flagged) with their hex.
+
+### dds-echo-frame
+Parse the RTPS header and submessages (writer GUID, sequence number, sizes) and surface them in the UI.
+- **Completed:** 2026-10-21 17:02:33.
+- **Depends on:** dds-echo-capture.
+- **Minimal test:** a datagram's detail shows submessage ids, writer GUID, and sequence numbers.

@@ -1,5 +1,14 @@
 import { Button, LineEdit, ListView, ScrollView } from "std-widgets.slint";
 
+export struct Frame {
+    id: string,
+    kind: string,
+    writer: string,
+    reader: string,
+    seq: string,
+    len: int,
+}
+
 export struct Record {
     time: string,
     class: string,
@@ -12,6 +21,7 @@ export struct Record {
     guid: string,
     entity: string,
     known: bool,
+    frames: [Frame],
 }
 
 export struct TopicRow {
@@ -139,6 +149,7 @@ export component MainWindow inherits Window {
         guid: "",
         entity: "",
         known: false,
+        frames: [],
     };
     in-out property <int> selected-index: -1;
     in-out property <string> error-message: "";
@@ -285,6 +296,32 @@ export component MainWindow inherits Window {
                     Text { text: "size: " + root.selected.size; color: #d0d0d0; }
                     Text { text: "topic: " + root.selected.topic; color: #d0d0d0; }
                     Text { text: "summary: " + root.selected.summary; color: #d0d0d0; }
+                    Text { text: "submessages (" + root.selected.frames.length + ")"; color: #9a9a9a; }
+                    ScrollView {
+                        height: 150px;
+                        VerticalLayout {
+                            spacing: 1px;
+                            HorizontalLayout {
+                                spacing: 6px;
+                                Text { text: "id"; color: #9a9a9a; min-width: 24px; }
+                                Text { text: "kind"; color: #9a9a9a; min-width: 62px; }
+                                Text { text: "writer"; color: #9a9a9a; min-width: 72px; }
+                                Text { text: "seq"; color: #9a9a9a; min-width: 62px; }
+                                Text { text: "len"; color: #9a9a9a; horizontal-stretch: 1; }
+                            }
+                            for f in root.selected.frames : Rectangle {
+                                height: 16px;
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    Text { text: f.id; color: #9aa0b0; min-width: 24px; vertical-alignment: center; font-family: "Courier New"; font-size: 12px; }
+                                    Text { text: f.kind; color: #d0d0d0; min-width: 62px; vertical-alignment: center; }
+                                    Text { text: f.writer; color: #9aa0b0; min-width: 72px; vertical-alignment: center; font-family: "Courier New"; font-size: 12px; }
+                                    Text { text: f.seq; color: #d0d0d0; min-width: 62px; vertical-alignment: center; }
+                                    Text { text: "" + f.len; color: #9a9a9a; horizontal-stretch: 1; vertical-alignment: center; }
+                                }
+                            }
+                        }
+                    }
                     Text { text: root.selected.known ? "decoded" : "hex"; color: #9a9a9a; }
                     ScrollView {
                         vertical-stretch: 1;

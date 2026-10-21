@@ -9,6 +9,7 @@
 
 mod capture;
 mod model;
+mod rtps;
 
 mod ui {
     slint::include_modules!();
@@ -73,6 +74,21 @@ fn to_ui(r: &model::Record) -> ui::Record {
         guid: r.guid_prefix.clone().unwrap_or_default().into(),
         entity: r.entity_id.clone().unwrap_or_default().into(),
         known: r.is_known(),
+        frames: {
+            let frames: Vec<ui::Frame> = r
+                .frames
+                .iter()
+                .map(|f| ui::Frame {
+                    id: format!("{:02x}", f.id).into(),
+                    kind: f.kind.clone().into(),
+                    writer: f.writer.clone().into(),
+                    reader: f.reader.clone().into(),
+                    seq: f.seq.clone().into(),
+                    len: f.len as i32,
+                })
+                .collect();
+            ModelRc::from(frames.as_slice())
+        },
     }
 }
 
