@@ -86,7 +86,7 @@ finally {
 # uses DDS yet, so the scan currently passes vacuously.
 $ddsContracts = Join-Path $repoRoot "$toolDir\dds-contracts.exe"
 $scanArgs = @()
-foreach ($src in @('rust\ui\lil-d\src', 'rust\tool\equirect-to-cubemap\src')) {
+foreach ($src in @('rust\ui\lil-d\src', 'rust\tool\equirect-to-cubemap\src', 'rust\tool\dds-echo\src')) {
     $scanArgs += @('--scan', (Join-Path $repoRoot $src))
 }
 & $ddsContracts '--contracts' (Join-Path $repoRoot 'contracts') @scanArgs '--summary' (Join-Path $repoRoot 'build\topics.md')
@@ -104,6 +104,7 @@ if (-not $Test) {
     New-Item -ItemType Directory -Force -Path $deployBin, $deployConfig | Out-Null
     Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\lil-d.exe') -Destination $deployBin -Force
     Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\display_lib.dll') -Destination $deployBin -Force
+    Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\dds-echo.exe') -Destination $deployBin -Force
 
     # The display library loads its font and (later) the earth cube map from
     # <deploy>/assets, and links the HarfBuzz runtime from next to the exe.
@@ -113,5 +114,5 @@ if (-not $Test) {
 
     # The shared DDS configuration for the StationsDDS loopback adapter.
     Copy-Item -Path (Join-Path $repoRoot 'DDS\cyclonedds-config.xml') -Destination $deployConfig -Force
-    Write-Host "Deployed lil-d.exe, display_lib.dll, assets, the HarfBuzz runtime, and the DDS config"
+    Write-Host "Deployed lil-d.exe, dds-echo.exe, display_lib.dll, assets, the HarfBuzz runtime, and the DDS config"
 }

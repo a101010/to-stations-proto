@@ -1,0 +1,300 @@
+import { Button, LineEdit, ListView, ScrollView } from "std-widgets.slint";
+
+export struct Record {
+    time: string,
+    class: string,
+    source: string,
+    size: int,
+    topic: string,
+    summary: string,
+    hex: string,
+    decoded: string,
+    guid: string,
+    entity: string,
+    known: bool,
+}
+
+export struct TopicRow {
+    name: string,
+    known: bool,
+    packets: int,
+}
+
+component StatChip inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+
+    height: 38px;
+    min-width: 96px;
+    background: #242424;
+    border-radius: 6px;
+
+    HorizontalLayout {
+        padding: 8px;
+        spacing: 6px;
+        Text {
+            text: root.value;
+            color: #f0f0f0;
+            font-weight: 700;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.label;
+            color: #9a9a9a;
+            vertical-alignment: center;
+        }
+    }
+}
+
+component TopicGroup inherits Rectangle {
+    in property <string> title;
+    in property <[TopicRow]> rows;
+    in property <int> packets;
+    in-out property <bool> expanded: true;
+    callback toggle();
+
+    background: transparent;
+
+    VerticalLayout {
+        spacing: 2px;
+        Rectangle {
+            height: 26px;
+            background: transparent;
+            Text {
+                x: 4px;
+                vertical-alignment: center;
+                text: root.expanded ? "v " + root.title + " (" + root.packets + ")" : "> " + root.title + " (" + root.packets + ")";
+                color: #d0d0d0;
+                font-weight: 600;
+            }
+            TouchArea {
+                clicked => { root.toggle(); }
+            }
+        }
+        if root.expanded : VerticalLayout {
+            spacing: 1px;
+            for row in root.rows : Rectangle {
+                height: 20px;
+                background: transparent;
+                HorizontalLayout {
+                    padding-left: 14px;
+                    padding-right: 4px;
+                    Text {
+                        text: row.name;
+                        color: row.known ? #8fd18f : #c9a26a;
+                        vertical-alignment: center;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    Text {
+                        text: "" + row.packets;
+                        color: #9a9a9a;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component MainWindow inherits Window {
+    title: "dds-echo";
+    preferred-width: 1180px;
+    preferred-height: 760px;
+    background: #1a1a1a;
+
+    in-out property <bool> running: false;
+
+    in-out property <int> packets: 0;
+    in-out property <int> bytes: 0;
+    in-out property <int> rtps: 0;
+    in-out property <int> pps: 0;
+    in-out property <int> bps: 0;
+    in-out property <int> participants: 0;
+    in-out property <int> endpoints: 0;
+
+    in-out property <string> iface: "StationsDDS";
+    in-out property <string> group: "ff02::ffff:239.255.0.1";
+    in-out property <string> ports: "7400, 7401";
+
+    in-out property <[Record]> records: [];
+    in-out property <[TopicRow]> known-topics: [];
+    in-out property <[TopicRow]> unknown-topics: [];
+    in-out property <int> known-total: 0;
+    in-out property <int> unknown-total: 0;
+
+    // The records list's scroll position, for follow-the-tail.
+    in-out property <length> list-content-y: 0px;
+    out property <length> list-content-height: list.content-height;
+    out property <length> list-visible-height: list.visible-height;
+
+    in-out property <Record> selected: {
+        time: "",
+        class: "",
+        source: "",
+        size: 0,
+        topic: "",
+        summary: "",
+        hex: "",
+        decoded: "",
+        guid: "",
+        entity: "",
+        known: false,
+    };
+    in-out property <int> selected-index: -1;
+
+    callback start();
+    callback stop();
+    callback clear();
+    callback select(int);
+    callback list-scrolled();
+
+    VerticalLayout {
+        padding: 10px;
+        spacing: 10px;
+
+        // ---- toolbar ----
+        HorizontalLayout {
+            spacing: 8px;
+            Button { text: "Start"; enabled: !root.running; clicked => { root.start(); } }
+            Button { text: "Stop"; enabled: root.running; clicked => { root.stop(); } }
+            Button { text: "Clear"; clicked => { root.clear(); } }
+            Rectangle { width: 12px; }
+            Text { text: "iface"; color: #9a9a9a; vertical-alignment: center; }
+            LineEdit { text: root.iface; read-only: root.running; min-width: 110px; }
+            Text { text: "group"; color: #9a9a9a; vertical-alignment: center; }
+            LineEdit { text: root.group; read-only: root.running; min-width: 210px; }
+            Text { text: "ports"; color: #9a9a9a; vertical-alignment: center; }
+            LineEdit { text: root.ports; read-only: root.running; min-width: 110px; }
+            Rectangle { horizontal-stretch: 1; }
+            Rectangle {
+                background: root.running ? #1b4d24 : #333333;
+                border-radius: 4px;
+                min-width: 84px;
+                Text {
+                    text: root.running ? "Live" : "Stopped";
+                    color: root.running ? #9ae6a0 : #b0b0b0;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                }
+            }
+        }
+
+        // ---- stats ----
+        HorizontalLayout {
+            spacing: 8px;
+            StatChip { label: "packets"; value: "" + root.packets; }
+            StatChip { label: "bytes"; value: "" + root.bytes; }
+            StatChip { label: "rtps"; value: "" + root.rtps; }
+            StatChip { label: "pps"; value: "" + root.pps; }
+            StatChip { label: "bps"; value: "" + root.bps; }
+            StatChip { label: "participants"; value: "" + root.participants; }
+            StatChip { label: "endpoints"; value: "" + root.endpoints; }
+        }
+
+        // ---- main ----
+        HorizontalLayout {
+            spacing: 10px;
+            vertical-stretch: 1;
+
+            // topics
+            Rectangle {
+                min-width: 240px;
+                max-width: 240px;
+                background: #202020;
+                border-radius: 6px;
+                VerticalLayout {
+                    padding: 8px;
+                    spacing: 6px;
+                    Text { text: "Topics (packets)"; color: #ffffff; font-weight: 700; }
+                    ScrollView {
+                        vertical-stretch: 1;
+                        VerticalLayout {
+                            spacing: 6px;
+                            TopicGroup { title: "Known"; rows: root.known-topics; packets: root.known-total; expanded: true; }
+                            TopicGroup { title: "Unknown"; rows: root.unknown-topics; packets: root.unknown-total; expanded: false; }
+                        }
+                    }
+                }
+            }
+
+            // records
+            Rectangle {
+                horizontal-stretch: 1;
+                background: #202020;
+                border-radius: 6px;
+                VerticalLayout {
+                    padding: 8px;
+                    spacing: 4px;
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Text { text: "Time"; color: #9a9a9a; min-width: 70px; }
+                        Text { text: "Class"; color: #9a9a9a; min-width: 80px; }
+                        Text { text: "Source"; color: #9a9a9a; min-width: 100px; }
+                        Text { text: "Topic"; color: #9a9a9a; min-width: 130px; }
+                        Text { text: "Size"; color: #9a9a9a; min-width: 50px; }
+                        Text { text: "Summary"; color: #9a9a9a; horizontal-stretch: 1; }
+                    }
+                    list := ScrollView {
+                        content-y <=> root.list-content-y;
+                        scrolled => { root.list-scrolled(); }
+                        vertical-stretch: 1;
+                        VerticalLayout {
+                            for r[i] in root.records : Rectangle {
+                                height: 22px;
+                                background: i == root.selected-index ? #333a44 : transparent;
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Text { text: r.time; color: #d0d0d0; min-width: 70px; vertical-alignment: center; }
+                                    Text {
+                                        text: r.class;
+                                        min-width: 80px;
+                                        vertical-alignment: center;
+                                        color: r.class == "known" ? #8fd18f : (r.class == "unregistered" ? #c9a26a : (r.class == "RTPS" ? #9aa0b0 : #7a7a7a));
+                                    }
+                                    Text { text: r.source; color: #d0d0d0; min-width: 100px; vertical-alignment: center; }
+                                    Text { text: r.topic; color: r.known ? #8fd18f : #c9a26a; min-width: 130px; vertical-alignment: center; }
+                                    Text { text: "" + r.size; color: #d0d0d0; min-width: 50px; vertical-alignment: center; }
+                                    Text { text: r.summary; color: #d0d0d0; horizontal-stretch: 1; vertical-alignment: center; }
+                                }
+                                TouchArea {
+                                    clicked => { root.select(i); }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // detail
+            Rectangle {
+                min-width: 340px;
+                max-width: 340px;
+                background: #202020;
+                border-radius: 6px;
+                VerticalLayout {
+                    padding: 8px;
+                    spacing: 4px;
+                    Text { text: "Detail"; color: #ffffff; font-weight: 700; }
+                    Text { text: "class: " + root.selected.class; color: #d0d0d0; }
+                    Text { text: "source: " + root.selected.source; color: #d0d0d0; }
+                    Text { text: "guid: " + root.selected.guid; color: #d0d0d0; }
+                    Text { text: "entity: " + root.selected.entity; color: #d0d0d0; }
+                    Text { text: "size: " + root.selected.size; color: #d0d0d0; }
+                    Text { text: "topic: " + root.selected.topic; color: #d0d0d0; }
+                    Text { text: "summary: " + root.selected.summary; color: #d0d0d0; }
+                    Text { text: root.selected.known ? "decoded" : "hex"; color: #9a9a9a; }
+                    ScrollView {
+                        vertical-stretch: 1;
+                        Text {
+                            text: root.selected.known ? root.selected.decoded : root.selected.hex;
+                            color: #c0c0c0;
+                            font-family: "Courier New";
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

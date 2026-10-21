@@ -396,6 +396,22 @@ rust/tool/dds-echo/src/main.rs       module ui, wiring, timer
 rust/tool/dds-echo/src/model.rs      Kind/Record/Stats/TopicCounts/RateTracker/Rng/SimFeed + tests
 ```
 
+## Result
+
+Implemented. `rust/tool/dds-echo` is a Slint GUI app (`build.rs` + `ui/dds_echo.slint` + `src/main.rs` + `src/model.rs`) driven by a simulated feed: toolbar (Start/Stop/Clear, inert config fields, `SIMULATED` badge), stats strip, a left Known/Unknown collapsible topics view, a virtualized records table, and a right detail/hex pane. `scripts/build.ps1` builds it, deploys `dds-echo.exe` to `build/deploy/bin`, and adds its `src` to the bypass-scan roots.
+
+Verified: `scripts/build.ps1 -Test` passes; `dds-echo`'s 6 `model.rs` tests pass (feed yields RTPS + samples, stats/topic-count/rate aggregation, hex formatting, RNG determinism); the release build and deploy succeed; the deployed `dds-echo.exe` launches and stays running. The visual minimal test (Start populates the UI, Stop/Clear/select behave) remains for the user to confirm.
+
+Deviations from the plan: pinned **Slint `1.18`** (the newest published; `1.19` is unreleased); imported the standard widgets (`Button`, `LineEdit`, `ListView`, `ScrollView` from `std-widgets.slint`) and used `LineEdit` (not `TextInput`); `RateTracker` carries an explicit `initialized` flag (so a first sample at `now_ms == 0` is handled); added `slint::ComponentHandle` to the imports.
+
+Changes after review:
+- **Classes** replace `kind`: `UDP` / `RTPS` / `unregistered` / `known` (`model::Class`), color-coded in the table. "Decode failed" is a detail-pane state, not a class. The feed emits all four.
+- **`source`** is the sender address (`host:port`) in the table; the GUID prefix and entity id are shown only in the Detail pane.
+- **Follow the tail**: the records `ListView` was replaced by a `ScrollView` + `VerticalLayout { for … }` (a `ListView`'s runtime-managed `content-y` made the binding unreliable). A `following` flag (starting true) is toggled by the ScrollView's `scrolled` callback — which fires only on user scroll, not on programmatic scroll — and each tick scrolls to `-(content-height − visible-height)` while following. So it follows from start, pauses when scrolled up, and resumes at the end.
+- **Topics list**: the group headers show the group's **packet total** in the parentheses; each row shows its per-topic packet count (known and unregistered).
+- **Config fields** (`iface`/`group`/`ports`) are editable only while stopped (`read-only: root.running`).
+- **Status badge**: the `SIMULATED` badge became a capture-status indicator — **Live** (green) while running, **Stopped** (gray) otherwise.
+
 ## Files
 
 - Authored: `rust/tool/dds-echo/{Cargo.toml,build.rs,ui/dds_echo.slint,src/main.rs,src/model.rs}`.
