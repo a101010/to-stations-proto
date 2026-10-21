@@ -27,7 +27,7 @@ All the applications communicate using Distributed Data Services configured to u
 
 ## Stack
 * DDS: Eclipse Cyclone DDS for all configurations - C core with `cyclonedds-cxx` (C++) and the `cyclonedds` Rust crate; shared IDL in `DDS/`; all topics over IPv6 multicast on the `StationsDDS` loopback adapter.
-* Rendering: Rust = winit + glutin/glow + egui. C++ = SDL3 + glad + Dear ImGui.
+* Rendering: the display apps (Rust) use winit + glutin/glow + egui and the display library renders through their GL context; the tool, launcher, and controller GUIs (`dds-echo`, `tentacles`, `paws`) use Slint. C++ = SDL3 + glad + Dear ImGui. Slint has both Rust and C++ APIs, so a future C++ mirror of those GUIs can share the same `.slint` files.
 * Text: HarfBuzz (`libharfbuzz` and the experimental `libharfbuzz-gpu`) for format text; the console uses egui's own text.
 * Build: `scripts/build.ps1` orchestrator; all artifacts under `build/`, where only `build/deploy/` is durable and everything else is temporary. The repository must be placed at a short path on Windows (see "Path length").
 
@@ -126,7 +126,7 @@ to-stations-proto/
     ui/                big-d, lil-d, tentacles, paws
     service/           hello-service, hello-view-service, hello-ctl-service
     lib/               stations-dds, display-lib, and other shared libraries
-    tool/              dds-echo, dds-contracts, equirect-to-cubemap
+    tool/              dds-echo (Slint GUI), dds-contracts, equirect-to-cubemap
     test/              (deferred)
   cpp/                 authored: CMake project
     libs/              stations-dds, display-lib
@@ -147,6 +147,7 @@ to-stations-proto/
 ### Rust crates
 * A crate defines a single main library and/or executable; any additional executables are tests.
 * `ui/` holds GUI applications, `service/` holds headless services, `lib/` holds shared libraries, `tool/` holds developer tools; `test/` is deferred.
+* The display applications use egui; GUI tools and launchers (`dds-echo`, `tentacles`, `paws`) use Slint. A tool GUI may live under `tool/` (for example `dds-echo`).
 * A `-service` crate holds a format's model (non-display business logic); `-view-service` and `-ctl-service` crates are services tied to the display library.
 * Common DDS support lives in `stations-dds`; other common support lives in one or more `lib/` crates.
 * `harfbuzz` (at `rust/lib/harfbuzz`) is an FFI binding to the installed HarfBuzz, including the experimental `libharfbuzz-gpu`; the display library uses it for format text.

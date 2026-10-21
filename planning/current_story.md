@@ -1,374 +1,184 @@
-# Current story: dds-and-service-contracts
+# Current story: dds-echo
 
 This file is the detailed, living plan for the one active story. It is rewritten for each story. The backlog in `backlog.md` holds all work and the per-story status.
 
 ## Story
 
-Define the DDS layer and the service contracts in `stations-dds`: create the participant from `DDS/cyclonedds-config.xml` and typed readers/writers; define the topic-contract schema and loader for `contracts/topics.toml` and `contracts/services/<app>.toml`; validate each service's declared topics at startup; support a `--topics` flag that prints a service's contract; and write a readable summary to `build/topics.md`.
+Create the `dds-echo` traffic inspector as a Slint GUI mockup driven by simulated traffic: Start/Stop capture, a high-level stats view, a collapsible known-topics tree, and a datagram list with a detail/hex pane. No real capture yet; the known topics are hardcoded for the mockup.
 
 - **Depends on:** none.
-- **Minimal test:** a typed publish/subscribe round-trip; a sample contract loads, validates, prints with `--topics`, and matches `build/topics.md`.
+- **Minimal test:** the window opens; Start populates the stats, known-topics tree, and datagram list from the simulated feed; Stop halts it; selecting a row shows details and hex.
 
 ## Context
 
-* `stations-dds` currently only re-exports `cyclonedds`, exposes `type_name::<T>()`, and `include!`s the generated IDL (`lib.rs:16`). The generated types `hello_world::HelloWorldTopic` and `math::Quaternion` exist.
-* The pinned `cyclonedds` fork exposes `DomainParticipant::new/with_qos`, `create_topic::<T>(name)`, `create_publisher/subscriber`, `create_writer[_with_qos]::<T>`, `create_reader[_with_qos]::<T>`, `DataWriter::write`, `DataReader::read/take/read_next/take_next`, `Qos::builder()` (`reliable`/`best_effort`/`transient_local`/`keep_last`), and `WaitSet`/`ReadCondition`.
-* CycloneDDS applies `DDS/cyclonedds-config.xml` through the `CYCLONEDDS_URI` environment variable (`docs/loopback-adapter.md`); participant creation itself takes no config argument.
-* `contracts/` holds only `.gitkeep`; `build.ps1` does not yet generate `build/topics.md` or deploy the config.
-* Architecture (`architecture.md:74`) fixes the contract shape: `contracts/topics.toml` (topic name, IDL type, QoS, key fields) and `contracts/services/<app>.toml` (publish/subscribe); validated at startup; `--topics`; `build/topics.md`. `rust/tool/dds-contracts` is already named in the folder structure.
+* Gui stack decision: the display apps keep `winit + glutin/glow + egui`; the tool/launcher/controller GUIs use **Slint**. `dds-echo` is the first Slint app.
+* Slint `1.19.0`: a `.slint` UI compiled by `slint-build` in `build.rs`, pulled in with `slint::include_modules!()`. Default backend is winit + FemtoVG (Slint owns the window and context); Slint exposes Rust and C++ APIs. License: GPL-3.0-only / Slint Royalty-free 2.0 / Commercial (accepted).
+* `dds-echo` stays a `tool/` crate (a developer tool with a GUI).
+* The mockup is deliberately backend-free: a simulated feed exercises the layout, models, and stats. Later stories add the real UDP capture, RTPS/SEDP parsing, and known-type decode.
 
 ## Decisions
 
-* **Contract-aware `Node`** (`stations-dds::dds`) over `DomainParticipant`. It holds a validated `TopicRegistry`; `writer`/`reader` take only the topic name and enforce that it is registered and that `T::type_name()` equals the entry's `type`, then use the entry's QoS. A temporary `Publisher`/`Subscriber` per endpoint is fine: the binding's guards keep them alive for the writer/reader's lifetime. This makes an unregistered or mis-typed use of DDS fail at creation rather than silently at runtime.
-* **Config via `CYCLONEDDS_URI`.** The layer creates the participant and documents that CycloneDDS reads the shared config from `CYCLONEDDS_URI`; the round-trip test sets it to `<REPO_ROOT>/DDS/cyclonedds-config.xml`, and the launch scripts will point at the deployed `build/deploy/config/`. `build.ps1` begins copying the config to `build/deploy/config/`.
-* **Topic names are short** (`HelloWorldTopic`) for the registry and the wire; the scoped IDL/DDS type (`hello_world::HelloWorldTopic`) is recorded separately in the registry as `type`. Validation requires `type` to equal a known `DdsType::type_name()`.
-* **Contracts** live in `stations-dds::contract` (schema, loader, validation, `render`), using `serde` + `toml`.
-* **`dds-contracts` tool** (`rust/tool/dds-contracts`) loads the repo contracts, validates them, writes `build/topics.md`, and prints a service with `--topics <app>`. It is a developer tool, not deployed (like `equirect-to-cubemap`).
-* **`--topics` and startup validation are helpers.** `ServiceContract::render()` is exposed by the tool now and called by real services later; deploying contracts to `build/deploy/config/` for runtime service loading is a follow-up.
-* **Registry-completeness test.** A `stations-dds` test scans `DDS/*.idl` for `struct <Name>Topic` (scoped by the file's `module`) and asserts that set equals `known_types()` and that every entry is registered. This catches a new topic added to the IDL but not registered, and keeps the hand-kept `known_types()` honest.
-* **Coverage listing.** `build/topics.md` records, for each registry topic, the services that publish and subscribe it. Informational only (a topic no service references yet just shows empty); it never fails.
-* **Bypass scan.** The raw CycloneDDS topic-naming API must be reachable only through the Node implementation; `dds-contracts --scan` fails the build when it finds a raw call in the scanned source. The scanner is **repo-agnostic**: it takes the roots (and optional allowed paths) from the caller and has no knowledge of this repository's layout. The build supplies the scope: **the specific crate(s) being built** — an explicit list of application/service/tool `src` directories (option a), not all of `rust/`. Libraries, including the Node implementation, are simply never in scope, so there is no hardcoded skip. This guards the one thing the Node API cannot: reaching around it. (The Node API already enforces registration and type at endpoint creation, so Node call literals are not checked statically.)
-* **The round-trip is a committed integration test** that runs in `cargo test` (and `build.ps1 -Test`); it requires the `StationsDDS` adapter, an existing environment prerequisite.
-* **Node enforcement is also tested end-to-end.** `tests/node_contract.rs` builds a `Node` from the committed registry and asserts that `writer`/`reader` return `UnregisteredTopic` and `TypeMismatch`. Because `check` runs before topic creation, it needs a participant but no discovery; it shares the `round_trip` adapter precondition.
+* **Crate at `rust/tool/dds-echo`**, a Slint app: `build.rs` compiles `ui/dds_echo.slint`; `src/main.rs` wires it; `src/model.rs` holds the data model.
+* **Simulated feed via a Slint `Timer`.** No threads; Start/Stop starts and stops the timer. The capture story replaces the timer with a background thread marshalled through `slint::invoke_from_event_loop`.
+* **Plain-Rust data model** (`records`, `stats`, `SimFeed`, `KNOWN_TOPICS`) separate from the UI, so it is unit-testable and the later backend plugs in unchanged.
+* **Known topics hardcoded** for the mockup; the capture/SEDP stories read `contracts/topics.toml`.
+* **One window**: toolbar (Start/Stop, inert interface/group/port fields, a `SIMULATED` badge), a stats strip, a left collapsible **Known topics** tree, a center datagram table (virtualized), and a detail pane (fields + hex).
 
 ## Interfaces
 
-### `rust/lib/stations-dds/src/dds.rs` (new)
-
-```rust
-pub enum Error {
-    Dds(cyclonedds::DdsError),
-    Contract(crate::contract::ContractError),
-    UnregisteredTopic(String),
-    TypeMismatch { topic: String, expected: String, found: String },
-}
-
-pub struct Node {
-    participant: cyclonedds::DomainParticipant,
-    registry: crate::contract::TopicRegistry,
-}
-impl Node {
-    /// Create the participant and validate the registry.
-    pub fn new(domain: u32, registry: crate::contract::TopicRegistry) -> Result<Self, Error>;
-    pub fn participant(&self) -> &cyclonedds::DomainParticipant;
-    pub fn registry(&self) -> &crate::contract::TopicRegistry;
-
-    /// Writer for `topic`: it must be registered, `T::type_name()` must equal the
-    /// entry's `type`, and the entry's QoS is used.
-    pub fn writer<T: cyclonedds::DdsType>(&self, topic: &str)
-        -> Result<cyclonedds::DataWriter<T>, Error>;
-    /// Reader for `topic`; the same checks as `writer`.
-    pub fn reader<T: cyclonedds::DdsType>(&self, topic: &str)
-        -> Result<cyclonedds::DataReader<T>, Error>;
-}
-
-/// The registry/type check, factored out so it is testable without a participant.
-fn check<T: cyclonedds::DdsType>(registry: &crate::contract::TopicRegistry, topic: &str)
-    -> Result<&crate::contract::TopicDef, Error>;
-
-/// The QoS named by a contract ("default" | "reliable" | "best_effort" | "transient_local").
-pub fn qos(name: &str) -> Option<cyclonedds::Qos>;
-```
-
-### `rust/lib/stations-dds/src/contract.rs` (new)
-
-```rust
-#[derive(serde::Deserialize)] pub struct TopicRegistry { pub topics: Vec<TopicDef> }
-#[derive(serde::Deserialize)] pub struct TopicDef {
-    pub name: String,    // short wire/registry name, e.g. "HelloWorldTopic"
-    pub r#type: String,  // scoped IDL/DDS type, e.g. "hello_world::HelloWorldTopic"
-    pub qos: String,
-    #[serde(default)] pub key: Vec<String>,
-}
-#[derive(serde::Deserialize)] pub struct ServiceContract {
-    pub service: ServiceMeta,
-    #[serde(default)] pub publish: Vec<TopicRef>,
-    #[serde(default)] pub subscribe: Vec<TopicRef>,
-}
-#[derive(serde::Deserialize)] pub struct ServiceMeta { pub name: String }
-#[derive(serde::Deserialize)] pub struct TopicRef { pub topic: String }
-
-impl TopicRegistry {
-    pub fn load(path: &std::path::Path) -> Result<Self, ContractError>;
-    pub fn from_toml(text: &str) -> Result<Self, ContractError>;
-    pub fn validate(&self) -> Result<(), ContractError>;   // known types + known QoS + unique names
-    pub fn get(&self, name: &str) -> Option<&TopicDef>;
-}
-impl ServiceContract {
-    pub fn load(path: &std::path::Path) -> Result<Self, ContractError>;   // checks name == file stem
-    pub fn validate(&self, registry: &TopicRegistry) -> Result<(), ContractError>;
-    pub fn render(&self) -> String;                                       // the `--topics` text
-}
-
-/// Scoped DDS type names of the generated topic types.
-pub fn known_types() -> &'static [&'static str];
-
-/// Per-topic usage for the summary: which services publish and subscribe each
-/// registered topic. Informational only.
-pub struct TopicUsage { pub topic: String, pub publishers: Vec<String>, pub subscribers: Vec<String> }
-pub fn coverage(registry: &TopicRegistry, services: &[ServiceContract]) -> Vec<TopicUsage>;
-
-pub enum ContractError {
-    Io(String), Toml(String), UnknownTopic(String), UnknownType(String),
-    UnknownQos(String), NameMismatch { expected: String, found: String }, Duplicate(String),
-}
-```
-
-### `rust/lib/stations-dds/src/lib.rs` (changed)
-
-```rust
-pub mod contract;
-pub mod dds;
-
-pub use cyclonedds;
-pub fn type_name<T: cyclonedds::DdsType>() -> &'static str;
-
-include!(concat!(env!("REPO_ROOT"), "/build/gen/rust/hello_world.rs"));
-```
-
-### `rust/lib/stations-dds/Cargo.toml` (changed)
-
-Add `serde = { workspace = true }` and `toml = { workspace = true }`.
-
-### `contracts/topics.toml` (new, authored)
+### `rust/tool/dds-echo/Cargo.toml` (new)
 
 ```toml
-# The topic registry. `name` is the short wire/registry name; `type` is the
-# scoped IDL/DDS type name (it must match a generated DdsType::type_name()).
+[package]
+name = "dds-echo"
+version = "0.0.0"
+edition = "2021"
+publish = false
+build = "build.rs"
 
-[[topics]]
-name = "HelloWorldTopic"
-type = "hello_world::HelloWorldTopic"
-qos = "default"
-key = []
+[dependencies]
+slint = "1.19"
+
+[build-dependencies]
+slint-build = "1.19"
 ```
 
-### `contracts/services/hello-service.toml` (new, authored)
-
-```toml
-[service]
-name = "hello-service"
-
-[[publish]]
-topic = "HelloWorldTopic"
-
-[[subscribe]]
-```
-
-### `rust/tool/dds-contracts/{Cargo.toml,src/main.rs,src/scan.rs}` (new)
-
-```
-dds-contracts --contracts <dir> [--scan <dir> …] [--allow <path> …] [--summary <path>] [--topics <app>] [--check]
-```
-
-Default: load and validate the registry and every `services/*.toml`, then write `--summary` (default `build/topics.md`) with the registry table, a Usage section (per topic, its publishers and subscribers), and each service's rendered section. `--topics <app>` prints that service's `render()` and exits. `--check` validates only. `--scan <dir>` (repeatable) scans that root for raw CycloneDDS topic-API calls; `--allow <path>` (repeatable) skips a subtree. There are no default scan roots: the caller supplies the scope.
-
-### `rust/tool/dds-contracts/src/scan.rs` (new)
+### `rust/tool/dds-echo/build.rs` (new)
 
 ```rust
-/// A raw CycloneDDS topic-naming call found in the scanned roots.
-pub struct Bypass { pub file: std::path::PathBuf, pub line: usize, pub name: String }
-
-/// The curated raw names, matched textually (name followed by `(` or `::<`).
-pub const RAW_TOPIC_APIS: &[&str] = &[
-    "create_topic", "create_topic_with_qos",
-    "create_topic_from_descriptor", "create_topic_from_descriptor_with_qos",
-    "create_topic_from_type_info", "create_topic_from_type_info_with_qos",
-    "create_topic_from_sertype", "create_topic_from_sertype_with_qos",
-    "find_topic", "dynamic_publish", "dynamic_subscribe",
-];
-
-/// Scan `roots` for raw topic-API calls, skipping any path under `allow`. No
-/// repository knowledge: the caller supplies the scope. Skips only generic
-/// paths (`target/`) and non-`.rs` files.
-pub fn scan(roots: &[std::path::PathBuf], allow: &[std::path::PathBuf])
-    -> Result<Vec<Bypass>, std::io::Error>;
+fn main() {
+    slint_build::compile("ui/dds_echo.slint").expect("compile dds_echo.slint");
+}
 ```
 
-### `rust/lib/stations-dds/tests/round_trip.rs` (new)
+### `rust/tool/dds-echo/ui/dds_echo.slint` (new)
 
-```rust
-// set CYCLONEDDS_URI = "file://<REPO_ROOT>/DDS/cyclonedds-config.xml"
-// registry = TopicRegistry::load(<REPO_ROOT>/contracts/topics.toml)?; registry.validate()?;
-// node = Node::new(0, registry)?;
-// writer = node.writer::<HelloWorldTopic>("HelloWorldTopic")?;
-// reader = node.reader::<HelloWorldTopic>("HelloWorldTopic")?;
-// loop up to ~5 s: writer.write(&sample)?; sleep 50 ms;
-//     if let Some(s) = reader.take()?.into_iter().next() { assert_eq!(s, sample); return }
-// panic!("no sample received")
+```slint
+export struct Record { time: string, kind: string, source: string, size: int, rtps: bool, topic: string, summary: string, hex: string }
+export struct TopicStat { name: string, known: bool, count: int }
+
+export component MainWindow inherits Window {
+    in-out property <bool> running: false;
+    in-out property <int> packets: 0;
+    in-out property <int> bytes: 0;
+    in-out property <int> pps: 0;
+    in-out property <int> bps: 0;
+    in-out property <int> participants: 0;
+    in-out property <int> endpoints: 0;
+    in-out property <[Record]> records: [];
+    in-out property <[TopicStat]> topics: [];
+    in-out property <Record> selected: { ... };
+    callback start();
+    callback stop();
+    callback clear();
+    callback select(int);
+    // toolbar, stats strip, Known-topics tree (collapsible), records table, detail/hex pane
+}
 ```
 
-### `rust/lib/stations-dds/tests/node_contract.rs` (new)
+### `rust/tool/dds-echo/src/main.rs` (new)
 
 ```rust
-// set CYCLONEDDS_URI once; registry = TopicRegistry::load(<REPO_ROOT>/contracts/topics.toml)
-// node = Node::new(0, registry)?
-// writer::<HelloWorldTopic>("NotRegistered")    -> Err(UnregisteredTopic)
-// writer::<math::Quaternion>("HelloWorldTopic") -> Err(TypeMismatch)
-// writer::<HelloWorldTopic>("HelloWorldTopic")  -> Ok
-// one test function (no parallel participants); adapter precondition, as round_trip
+slint::include_modules!();
+
+fn main() -> Result<(), slint::PlatformError> {
+    let ui = MainWindow::new()?;
+    // wire start/stop/clear/select to model.rs; drive a slint::Timer that appends
+    // simulated Records to a VecModel and updates the stats properties
+    ui.run()
+}
+```
+
+### `rust/tool/dds-echo/src/model.rs` (new)
+
+```rust
+pub struct Record { pub time: String, pub kind: String, pub source: String, pub size: usize,
+                    pub rtps: bool, pub topic: String, pub summary: String, pub hex: String }
+pub struct TopicStat { pub name: String, pub known: bool, pub count: usize }
+
+#[derive(Default)]
+pub struct Stats { pub packets: usize, pub bytes: usize, pub rtps: usize }
+impl Stats { pub fn observe(&mut self, r: &Record); }
+
+/// Emits RTPS-looking datagrams plus a few HelloWorldTopic samples.
+pub struct SimFeed { /* ... */ }
+impl SimFeed { pub fn new() -> Self; pub fn next(&mut self) -> Record; }
+
+/// Hardcoded for the mockup; the capture story reads contracts/topics.toml.
+pub const KNOWN_TOPICS: &[&str] = &["HelloWorldTopic"];
 ```
 
 ### `rust/Cargo.toml` and `scripts/build.ps1` (changed)
 
-```toml
-# rust/Cargo.toml
-members = [..., "tool/dds-contracts"]
-[workspace.dependencies]
-serde = { version = "1", features = ["derive"] }
-toml = "0.8"
-```
-
-`build.ps1` runs `dds-contracts --contracts <repoRoot>\contracts --scan <src> … --summary <repoRoot>\build\topics.md` after the build (both `-Test` and normal), where each `--scan <src>` is an application/service/tool crate source directory (currently `rust\ui\lil-d\src` and `rust\tool\equirect-to-cubemap\src`; it grows with the `service/*` crates). Libraries are not scanned, so the Node implementation is out of scope. No application crate uses DDS yet, so the scan currently passes vacuously; it becomes meaningful with the first DDS-using service. In the deploy step, `build.ps1` copies `DDS/cyclonedds-config.xml` to `build/deploy/config/`.
+Add member `"tool/dds-echo"`. `build.ps1` deploys `dds-echo.exe` to `build/deploy/bin` and adds `rust\tool\dds-echo\src` to the bypass-scan roots (the tool calls no DDS API).
 
 ## Pseudocode
 
-### `Node::new` / `writer` / `reader` / `check`
+### Start/Stop and the simulated feed
 
 ```
-new(domain, registry):
-    registry.validate()?
-    participant = DomainParticipant::new(domain)?      // config read from CYCLONEDDS_URI
-    return Node { participant, registry }
+start():
+    if running: return
+    running = true
+    timer.start(repeat 100ms, tick)
 
-writer<T>(topic):
-    entry = check::<T>(&registry, topic)?
-    q = qos(&entry.qos).ok_or(UnknownQos(entry.qos))?   // already validated
-    t = participant.create_topic::<T>(topic)?
-    publisher = participant.create_publisher()?
-    return publisher.create_writer_with_qos::<T>(&t, &q)
+tick():
+    for i in 0..random(0..4):
+        r = feed.next()
+        stats.observe(r)
+        records_model.push(r)                 // keep the last N
+        bump the matching TopicStat count
+    update stats properties (packets, bytes, pps, bps)
 
-reader<T>(topic):
-    entry = check::<T>(&registry, topic)?
-    q = qos(&entry.qos).ok_or(UnknownQos(entry.qos))?
-    t = participant.create_topic::<T>(topic)?
-    subscriber = participant.create_subscriber()?
-    return subscriber.create_reader_with_qos::<T>(&t, &q)
-
-check<T>(registry, topic):
-    entry = registry.get(topic).ok_or(UnregisteredTopic(topic))?
-    if entry.type != T::type_name():
-        return Err(TypeMismatch { topic, expected: entry.type, found: T::type_name() })
-    Ok(entry)
+stop(): running = false; timer.stop()
+clear(): records_model.clear(); stats = default; topic counts = 0
+select(i): selected = records[i]
 ```
 
-### `qos`
+### `SimFeed::next`
 
 ```
-match name:
-    "default"          => Qos::builder().build()
-    "reliable"         => Qos::builder().reliable().build()
-    "best_effort"      => Qos::builder().best_effort().build()
-    "transient_local"  => Qos::builder().transient_local().build()
-    _                  => None
-```
-
-### `TopicRegistry::validate`
-
-```
-names = {}
-for t in topics:
-    if names.contains(t.name): return Err(Duplicate(t.name))
-    names.insert(t.name)
-    if not known_types().contains(t.type): return Err(UnknownType(t.type))
-    if qos(t.qos).is_none(): return Err(UnknownQos(t.qos))
-Ok(())
-```
-
-### `ServiceContract::validate`
-
-```
-for ref in publish + subscribe:
-    if not registry.topics.iter().any(|t| t.name == ref.topic):
-        return Err(UnknownTopic(ref.topic))
-Ok(())
-```
-
-### `dds-contracts` main
-
-```
-parse args
-if --scan roots:
-    for b in scan(roots, allow): eprintln!("{b.file}:{b.line}: raw topic API `{b.name}` (use the Node API)")
-    return non-zero if any
-registry = TopicRegistry::load(dir/topics.toml)?
-registry.validate()?
-services = for f in dir/services/*.toml: ServiceContract::load(f)?.validate(&registry)?
-if --topics app: print services[app].render(); return
-if --check: return
-write summary (registry table + coverage(&registry, &services) + each service's render) to --summary
-```
-
-### `scan`
-
-```
-for root in roots:
-    for file in walk(root) where file ends in ".rs" and not under any allow path and not under "target":
-        text = read(file)
-        for name in RAW_TOPIC_APIS:
-            for each occurrence of name immediately followed by "(" or "::<":
-                push Bypass { file, line, name }
-return bypasses
+if random() < 0.25:
+    a HelloWorldTopic record (kind "sample", topic "HelloWorldTopic",
+        summary "greeting=…", hex = a plausible CDR blob)
+else:
+    a raw datagram record (kind "packet", rtps = true, hex = random bytes
+        prefixed with the "RTPS" magic for most)
 ```
 
 ## Tests
 
-All tests use committed inputs (contracts, IDL, fixtures); none writes files at runtime.
+No UI automation; the model is tested directly.
 
-* `contract.rs`: parse a valid registry and service; reject an unknown type, unknown QoS, a service-name mismatch, and a duplicate topic; `render()` contains the expected lines; `coverage` lists `hello-service` as a publisher of `HelloWorldTopic` and no subscriber, and shows empty lists for an unreferenced topic.
-* `dds.rs`: `check` with `HelloWorldTopic` → Ok; an unregistered name → `UnregisteredTopic`; a registry entry with a mismatched `type` → `TypeMismatch`.
-* `stations-dds` completeness: scanning `DDS/*.idl`, the topic set equals `known_types()` and every entry is registered.
-* `scan.rs` (dds-contracts): against the committed fixtures `tests/fixtures/scan/` — `bypass.rs` (a raw `create_topic("X")` call) is flagged with the expected line and name, `ok.rs` (a `Node::writer("X")` call) is not, and `allowed/bypass.rs` is skipped when passed through `--allow`.
-* `node_contract.rs` (end-to-end): `writer`/`reader` on an unregistered name → `UnregisteredTopic`, a registered name with a mismatched `T` → `TypeMismatch`, and a registered name with the matching `T` → `Ok`; requires the `StationsDDS` adapter (shared with `round_trip`).
-* `dds-contracts`/`stations-dds`: the `hello-service` `--topics` render appears in the generated `build/topics.md`.
-* `round_trip.rs`: the typed publish/subscribe round-trip (requires the `StationsDDS` adapter).
-* Existing `stations-dds` `type_names_match_scopes` test unchanged.
+* `model.rs`: `SimFeed::next` yields records with non-empty `hex`; the "RTPS" magic is present on RTPS records; `Stats::observe` accumulates `packets`/`bytes`/`rtps`; a `HelloWorldTopic` record has topic `HelloWorldTopic`.
 
 ## Minimal test
 
 ```
-.\scripts\build.ps1 -Test
-build\rust\release\dds-contracts.exe --contracts contracts --topics hello-service
+.\scripts\build.ps1
+build\deploy\bin\dds-echo.exe
 ```
 
-`build.ps1 -Test` builds, runs the round-trip and contract tests, and regenerates `build/topics.md`; the `--topics` output matches the `hello-service` section of `build/topics.md`.
+The window opens; **Start** fills the stats, the known-topics tree, and the datagram list from the simulated feed; **Stop** halts it; selecting a row shows its fields and hex; **Clear** resets.
 
 ## Risks and follow-ups
 
-* **Environment.** The round-trip needs the `StationsDDS` adapter and `CYCLONEDDS_URI` (an existing prerequisite); a missing adapter fails the test with the CycloneDDS interface error.
-* **`known_types()`** is a hand-kept list; the completeness test asserts it equals the IDL's topic set and that each entry equals a generated `type_name()`. Emitting it from codegen is a later option.
-* **`key` is recorded but not validated.** `TopicDef::key` is parsed and printed but not checked against the IDL `@key` members; key validation is deferred until a format introduces a keyed topic (it is redundant with the IDL and needs a name→type dispatch plus nested-key handling).
-* **The bypass scan is a lint, not a proof.** It matches the raw names textually (so it can miss an aliased call or false-positive inside a comment/string), and it only covers the roots the build passes (the application/service/tool crates); the Node library is deliberately out of scope. Until a DDS-using service exists, the build-time scan passes vacuously — the scanner logic itself is exercised by the committed-fixture tests. Option 1 remains the runtime backstop for anything that goes through the Node API.
-* **Runtime service loading and startup validation** become real when `hello-service`/`hello-view-service` arrive; deploying contracts to `build/deploy/config/` is a follow-up.
-* **`dds-echo`** (the next story) consumes the `Node` layer.
-* **`serde`/`toml`** are new workspace dependencies (recorded in `docs/versions.md` if the convention is followed).
+* **Toolchain.** Slint 1.19 requires rustc >= 1.95; verify the pinned `stable-x86_64-pc-windows-msvc` is current.
+* **Renderer.** Slint defaults to winit + FemtoVG (OpenGL), but Slint owns the window and context — no manual GL plumbing.
+* **Event loop.** Slint's loop is main-thread; the capture story must update models from its background thread via `slint::invoke_from_event_loop`.
+* **Build weight.** Slint pulls a sizable dependency tree; the first build is slow.
+* **Mockup data.** `KNOWN_TOPICS` and the simulated samples are placeholders; the capture/SEDP stories replace them with the registry and real traffic.
 
 ## Module layout
 
-Post-2018 layout (`foo.rs` plus a `foo/` directory; no `mod.rs`):
-
 ```
-rust/lib/stations-dds/src/lib.rs        re-exports, type_name, generated types
-rust/lib/stations-dds/src/dds.rs        Node, check, typed writer/reader, qos
-rust/lib/stations-dds/src/contract.rs   schema, loader, validation, render, coverage
-rust/lib/stations-dds/tests/round_trip.rs
-rust/lib/stations-dds/tests/node_contract.rs   end-to-end contract errors
-rust/lib/stations-dds/tests/registry.rs IDL/registry completeness
-rust/tool/dds-contracts/src/main.rs     the contract tool
-rust/tool/dds-contracts/src/scan.rs     the repo-agnostic bypass scan
-rust/tool/dds-contracts/tests/scan.rs   scanner tests
-rust/tool/dds-contracts/tests/fixtures/scan/   committed scan fixtures
+rust/tool/dds-echo/build.rs          Slint compile
+rust/tool/dds-echo/ui/dds_echo.slint the UI
+rust/tool/dds-echo/src/main.rs       window wiring + timer
+rust/tool/dds-echo/src/model.rs      Record/TopicStat/Stats/SimFeed/KNOWN_TOPICS
 ```
-
-## Result
-
-Implemented. `stations-dds` gained `contract` (schema, loader, validation, `render`, `coverage`, `summary`) and `dds` (`Node`, `Error`, `check`, `qos`); `contracts/topics.toml` and `contracts/services/hello-service.toml` are authored; the `dds-contracts` tool (lib + bin) validates the contracts, writes `build/topics.md`, prints a service with `--topics`, and scans caller-supplied roots for raw CycloneDDS topic-API calls. `build.ps1` runs the tool (contracts + scan + summary) after the build and now deploys `DDS/cyclonedds-config.xml` to `build/deploy/config/`.
-
-Verified: `scripts/build.ps1 -Test` passes — 13 `stations-dds` unit tests (9 contract, 3 `check`, plus `type_names_match_scopes`), 2 scanner tests, 1 completeness test, 1 `node_contract` end-to-end test, and 1 publish/subscribe round-trip (the `StationsDDS` adapter is present). `scripts/build.ps1` release build and deploy succeed. `dds-contracts --topics hello-service` matches the `hello-service` section of `build/topics.md`; the scanner exits non-zero on a raw `create_topic` call (confirmed against the fixtures).
-
-Deviations from the plan: `TopicDef` uses `#[serde(rename = "type")] idl_type` (not `r#type`); an empty `[[subscribe]]` table is omitted rather than written (serde would reject a `TopicRef` without `topic`); the summary is produced by `contract::summary` (a testable helper) rather than built inline in the tool; and `Node::check` carries an explicit lifetime. The write-side bypass scan passes vacuously (no application crate uses DDS yet), as planned.
 
 ## Files
 
-* Authored: `contracts/topics.toml`, `contracts/services/hello-service.toml`, `rust/lib/stations-dds/src/dds.rs`, `rust/lib/stations-dds/src/contract.rs`, `rust/lib/stations-dds/tests/{round_trip.rs,node_contract.rs,registry.rs}`, `rust/tool/dds-contracts/{Cargo.toml,src/main.rs,src/scan.rs}`, `rust/tool/dds-contracts/tests/scan.rs`, `rust/tool/dds-contracts/tests/fixtures/scan/{bypass.rs,ok.rs,allowed/bypass.rs}`.
-* Changed: `rust/lib/stations-dds/src/lib.rs`, `rust/lib/stations-dds/Cargo.toml`, `rust/Cargo.toml`, `scripts/build.ps1`, `planning/{architecture,backlog,current_story}.md`, optionally `docs/versions.md` and `README.md`.
+* Authored: `rust/tool/dds-echo/{Cargo.toml,build.rs,ui/dds_echo.slint,src/main.rs,src/model.rs}`.
+* Changed: `rust/Cargo.toml`, `scripts/build.ps1`, `planning/{architecture,backlog,current_story}.md`, optionally `README.md`.
