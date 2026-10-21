@@ -109,7 +109,8 @@ There is deliberately no scope field in a contract: wiring is expressed by the I
 ## Folder structure
 ```
 to-stations-proto/
-  planning/            authored: architecture.md, backlog.md, current_story.md
+  planning/            authored: architecture.md, backlog.md, completed_stories.md,
+                       current_story.md, cyclonedds-build-plan.md
   docs/                authored: reference documentation
   DDS/                 authored: math.idl, hello_world.idl,
                        input.idl, control.idl, format_manager.idl,

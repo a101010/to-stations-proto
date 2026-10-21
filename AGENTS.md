@@ -14,8 +14,9 @@
 
 ## Planning
 
-- Planning lives in `planning/`: `architecture.md` (design), `backlog.md` (all work, prioritized), and `current_story.md` (the detailed plan for the one active story). Read them before writing code.
+- Planning lives in `planning/`: `architecture.md` (design), `backlog.md` (remaining work, prioritized), `completed_stories.md` (done stories), and `current_story.md` (the detailed plan for the one active story). Read them before writing code.
 - `backlog.md` is continually groomed; story order reflects the current best understanding of priority, and the active story's status is tracked there.
+- When a story is done, move its entry from `backlog.md` to `completed_stories.md`, recording its completion timestamp; entries stay grouped by increment and ordered by completion time.
 - A story's title is a short, unique name; do not restate it as a longer name. The body is a description followed by `Depends on`, `Minimal test`, and `Status`.
 - IDs, topic names, and file paths are specified in `planning/backlog.md` and `planning/architecture.md`; use them rather than inventing your own.
 - When planning a new story, do not list already-completed stories as prerequisites; list only the not-yet-done stories it depends on.
