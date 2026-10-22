@@ -1,145 +1,153 @@
-# Current story: dds-echo-decode
+# Current story: hello-view-service
 
 This file is the detailed, living plan for the one active story. It is rewritten for each story. The backlog in `backlog.md` holds all work and the per-story status.
 
 ## Story
 
-Decode known-type DATA samples from the wire and show the fields in the detail pane (raw hex otherwise), and drive the **Known** topics from the registry (`contracts/topics.toml`) instead of the hardcoded list. Field-level display is interim (a formatted dump); a proper field model is deferred to `topic-field-metadata`.
+Add `HelloWorldViewTopic`, create the hello_world view service (`hello-view-service`) that publishes it, and make the display library render the greeting/attitude it receives (moving the model data out of the library). The display library renders black until it receives a sample.
 
 - **Depends on:** none.
-- **Minimal test:** with the crafted stimulus running, a `HelloWorldTopic` sample shows the decoded fields in the detail pane and its row sits under **Known**; an unregistered topic still shows hex.
+- **Minimal test:** `launch-rust.ps1` starts the view service and `lil-d`; `dds-echo` shows `HelloWorldViewTopic` samples and the display renders the published view.
 
 ## Context
 
-- The UI already renders the decoded/hex choice: `main::to_ui` sets `known: r.is_known()` and `decoded: r.decoded`, and `ui/dds_echo.slint` shows `decoded` vs `hex`. `decoded` is never filled, and `model::KNOWN_TOPICS` is a hardcoded `["HelloWorldTopic"]`.
-- `record.topic` is attributed in `main::tick` from SEDP (`Discovery::observe_and_attr`); `model::Frame` does not carry the DATA payload (only `rtps::Frame::payload` does).
-- `CdrDeserializer::<T>::deserialize(data, encoding)` (fork `cyclonedds/src/serialization.rs`, re-exported by `stations-dds`) expects the CDR sample **without** the 4-byte encapsulation header, in **native endianness** (`dds_stream_normalize` starts at offset 0; `bswap=false`); `CdrEncoding` selects XCDR1/XCDR2 only. It validates and returns `Err` on malformed input (no panic).
-- The generated `hello_world::HelloWorldTopic` derives `Debug`, so `format!("{sample:#?}")` is a usable interim dump.
-- No real publisher of `HelloWorldTopic` exists yet (`hello-service` is later; `traffic-roundtrip.ps1` uses a single participant, so no SEDP is emitted and nothing is attributed). Verification uses the crafted stimulus.
+- The hello-world format (`display-lib/src/formats/hello_world.rs`) hardcodes `GREETING` and computes a fixed `view_attitude()` (faces North America, north up); `lil-d` renders only on window events, and the library has no DDS.
+- `stations-dds` provides `Node::new(domain, registry)`, `writer::<T>(topic)`, `reader::<T>(topic)`, and `contract::{TopicRegistry, ServiceContract, known_types}`; the registry is validated against `known_types()` and the IDL (`stations-dds/tests/registry.rs`).
+- `include/display_lib.h` is version 2; the display library is a `cdylib` loaded by `lil-d` and resolves assets from `<exe_dir>/../assets`. No ABI change is needed (the library subscribes itself).
+- The display application sets `CYCLONEDDS_URI`? No - the launch script must; CycloneDDS otherwise uses defaults (not the `StationsDDS` adapter).
 
 ## Decisions
 
-- **Registry-driven known set.** Load `contracts/topics.toml` at startup via `stations-dds::contract::TopicRegistry` (default path from `REPO_ROOT`, `--registry` override) and convert it to a UI-agnostic `model::KnownTopics` (name -> idl_type), so `model.rs` stays independent of `stations-dds`.
-- **Add a `stations-dds` dependency** to `dds-echo` (registry, generated types, and `cyclonedds::{CdrDeserializer, CdrEncoding}`). The bypass scan is unaffected (only serialization/contract APIs are used).
-- **Decode is a compile-time dispatch** topic/type -> `CdrDeserializer::<T>`; only `hello_world::HelloWorldTopic` for now.
-- **Interim rendering** is `format!("{sample:#?}")`; a field-level model (display and editing) is deferred to `topic-field-metadata`.
-- Decode runs in `tick` after attribution, only for known topics; unknown topics, a failed decode, or a non-native-endian payload fall back to hex.
-- If the registry fails to load, log to stderr and use an empty known set (everything shows as Unknown/hex).
+- **`HelloWorldViewTopic`** is an exact copy of `HelloWorldTopic` (`greeting: string`, `attitude: math::Quaternion`); the rotation is carried by the attitude, not a new field.
+- **Topic/registry/QoS:** registered `qos = "best_effort"` (100 Hz view stream); added to `known_types()` so validation and the completeness test pass.
+- **Initial attitude (permanent axial tilt):** the earth's polar axis (+Y) is tilted **23.5 deg** from view-up toward `d = normalize([-1, 0, 1])` (equally toward the viewer +Z and to the left -X); the roll is chosen so the initial sub-camera longitude is ~100 deg W (the Americas face the camera; the centered latitude falls out at ~16 deg N). The earth then spins **about that tilted polar axis** (local +Y) in the direction of Earth's real rotation (eastward), one revolution per **12 minutes**.
+- **View service** publishes `HelloWorldViewTopic` at **100 Hz, best-effort**; its data is hardcoded here for now (`TODO: from hello-service`, a later story).
+- **Display library** subscribes to `HelloWorldViewTopic` on **domain 0** using the registry; it stores the latest `View { greeting, attitude }` in shared state and renders black until one arrives. No hardcoded greeting/attitude remains.
+- **Config** is deployed under `<exe_dir>/../config` (`topics.toml`, `services/*.toml`, `cyclonedds-config.xml`); the service and library locate it there (falling back to `REPO_ROOT/contracts` for `cargo run`).
+- **`lil-d` renders continuously** so the library polls DDS each frame.
+- **`dds-echo` decodes `HelloWorldViewTopic`** too.
 
 ## Interfaces
 
-### `rust/tool/dds-echo/Cargo.toml` (changed)
+### `DDS/hello_world.idl` (changed)
+```idl
+module hello_world {
+  struct HelloWorldTopic { string greeting; math::Quaternion attitude; };
+  struct HelloWorldViewTopic { string greeting; math::Quaternion attitude; };
+};
+```
 
+### `contracts/topics.toml` (changed)
 ```toml
-stations-dds = { workspace = true }
+[[topics]]
+name = "HelloWorldViewTopic"
+type = "hello_world::HelloWorldViewTopic"
+qos = "best_effort"
+key = []
 ```
 
-### `rust/tool/dds-echo/src/model.rs` (changed)
+### `stations-dds/src/contract.rs` (changed)
+- `known_types()` -> add `"hello_world::HelloWorldViewTopic"`.
 
-```rust
-/// The registry's topics: name -> scoped IDL/DDS type name.
-#[derive(Clone, Debug, Default)]
-pub struct KnownTopics {
-    by_name: BTreeMap<String, String>,
-}
-impl KnownTopics {
-    pub fn insert(&mut self, name: &str, idl_type: &str);
-    pub fn contains(&self, name: &str) -> bool;
-    pub fn idl_type(&self, name: &str) -> Option<&str>;
-    pub fn names(&self) -> impl Iterator<Item = &str>;
-}
+### `contracts/services/hello-view-service.toml` (new)
+```toml
+[service]
+name = "hello-view-service"
+[[publish]]
+topic = "HelloWorldViewTopic"
 ```
 
-- Remove the `KNOWN_TOPICS` const.
-- `Record::is_known(&self, known: &KnownTopics) -> bool`.
-- `TopicCounts::rows(&self, known: &KnownTopics) -> Vec<TopicRow>` (seeds the Known group from `known.names()`).
-- `Frame` gains `pub payload: Option<std::ops::Range<usize>>` (the DATA serialized payload, into `record.hex`).
+### `rust/service/hello-view-service/` (new crate; workspace member)
+- `src/main.rs`:
+  - `Args`: `--domain` (0), `--rate-ms` (10), `--config <dir>` (default `<exe_dir>/../config`, falling back to `REPO_ROOT/contracts`), `--topics`.
+  - Load `topics.toml` + `services/hello-view-service.toml`; `registry.validate()`, `contract.validate(&registry)`; `Node::new(domain, registry)`; `writer::<HelloWorldViewTopic>("HelloWorldViewTopic")`.
+  - `--topics`: print `contract.render()` and exit.
+  - Loop: every `rate_ms`, `writer.write(&HelloWorldViewTopic { greeting, attitude: view::attitude_at(now) })`.
+- `src/view.rs`:
+  - Quaternion helpers (`from_axis_angle`, `mul`) over `math::Quaternion` (f64).
+  - `initial_attitude() -> math::Quaternion` (R0) and `attitude_at(elapsed: Duration) -> math::Quaternion` = `R0 * spin(theta)`, `theta = 2*pi * elapsed / 720s`.
 
-### `rust/tool/dds-echo/src/capture.rs` (changed)
+### `rust/lib/display-lib/src/` (changed)
+- `Cargo.toml`: add `stations-dds = { workspace = true }`.
+- `src/view.rs` (new):
+  ```rust
+  pub(crate) struct View { pub greeting: String, pub attitude: [f32; 4] }
+  pub(crate) type ViewState = std::rc::Rc<std::cell::RefCell<Option<View>>>;
+  pub(crate) struct ViewSource { _node: Node, reader: DataReader<HelloWorldViewTopic> }
+  impl ViewSource {
+      pub(crate) fn new(domain: u32, config_dir: &Path) -> Result<Self, String>;
+      pub(crate) fn poll(&self, state: &RefCell<Option<View>>); // take() -> update state
+  }
+  ```
+  - Registry from `<config_dir>/topics.toml`; on failure, `Display::new` keeps `view = None`.
+- `src/lib.rs`: `Display` gains `view: Option<ViewSource>` and `state: ViewState`; `Display::new` builds the format manager with `state.clone()` and best-effort `ViewSource::new`; `Display::render` polls before rendering.
+- `src/formats.rs`: `registry(gl, assets_root, state)` passes the state to `HelloWorld`.
+- `src/formats/hello_world.rs`: drop `GREETING`, `view_attitude()`, and the `attitude` field; hold `state: ViewState`; on render, if `state` is `None`, clear black and return; else use `view.greeting`/`view.attitude`. Light stays hardcoded.
 
-- `frame_from` copies `f.payload` into `model::Frame.payload`.
+### `rust/ui/lil-d/src/app.rs` (changed)
+- Request a redraw every frame (`about_to_wait`), so the display library polls DDS continuously.
 
-### `rust/tool/dds-echo/src/decode.rs` (new)
+### Scripts (changed)
+- `scripts/build.ps1`: deploy `build/rust/release/hello-view-service.exe`; copy `contracts/topics.toml` -> `build/deploy/config/topics.toml` and `contracts/services/` -> `build/deploy/config/services/`; add `rust\service\hello-view-service\src` to the bypass-scan roots.
+- `scripts/launch-rust.ps1`: set `$env:CYCLONEDDS_URI` to the deployed `config/cyclonedds-config.xml`; start `hello-view-service.exe`; then start `lil-d.exe --station N`.
+- `scripts/cleanup.ps1`: add `hello-view-service` to the stopped images.
 
-```rust
-/// Decode a known-type DATA payload (encapsulation header + CDR) into a
-/// human-readable dump; `None` for an unknown type, a non-native-endian
-/// encapsulation, or malformed data.
-pub fn decode(idl_type: &str, payload: &[u8]) -> Option<String>;
-```
+### `rust/tool/dds-echo/src/decode.rs` (changed)
+- Add a `"hello_world::HelloWorldViewTopic"` arm (same deserialization as `HelloWorldTopic`).
 
-- Match `"hello_world::HelloWorldTopic"` -> `HelloWorldTopic`.
-- Check bytes `[0..2]` are `CDR_LE` (`0x0001`); strip the 4-byte encapsulation; `CdrDeserializer::<HelloWorldTopic>::deserialize(&payload[4..], CdrEncoding::Xcdr1).ok()`; `format!("{sample:#?}")`.
-
-### `rust/tool/dds-echo/src/main.rs` (changed)
-
-- `mod decode;`.
-- `Args` gains `--registry <path>` (default `concat!(env!("REPO_ROOT"), "/contracts/topics.toml")`).
-- `State` gains `known: KnownTopics`.
-- Thread `&KnownTopics` through `to_ui`, `refresh_topics`, and `tick`.
-- In `tick`, after `observe_and_attr`: if the record's topic is known, find the DATA frame whose `writer == record.entity_id` with a payload, and set `record.decoded = decode(idl_type, &record.hex[range]).unwrap_or_default()`.
-
-### `rust/tool/dds-echo/ui/dds_echo.slint` (changed)
-
-- The decoded/hex area keys off `root.selected.decoded != ""` (label and text), so a known topic that fails to decode falls back to hex instead of showing an empty pane.
+### `rust/Cargo.toml` (changed)
+- `members` += `service/hello-view-service`.
 
 ## Pseudocode
 
 ```
-// main: load the registry once
-let registry = TopicRegistry::load(&registry_path);   // errors logged, empty known set on failure
-let known: KnownTopics = <name, idl_type from registry.topics>;
+// service loop (100 Hz)
+t = start.elapsed()
+attitude = initial_attitude() * quat_from_axis_angle([0,1,0], 2*pi * t/720s)
+writer.write(&HelloWorldViewTopic { greeting: "Hello, world!", attitude })
+```
 
-// tick, per captured record, after Discovery::observe_and_attr:
-if let Some(topic) = &record.topic {
-    if let Some(idl_type) = known.idl_type(topic) {
-        if let Some(f) = record.frames.iter().rev()
-            .find(|f| f.kind == "DATA" && f.payload.is_some()) {
-            record.decoded = decode(idl_type, &record.hex[f.payload.clone().unwrap()])
-                .unwrap_or_default();
-        }
-    }
-}
+```
+// display-lib render
+if let Some(view) = &self.view { view.poll(&self.state) }   // reader.take() -> *state = Some(View{..})
+self.format_manager.render(...)                            // hello-world: black when state is None
 ```
 
 ## Tests
 
-- `decode.rs`: `CdrSerializer::serialize(&HelloWorldTopic { .. }, CdrEncoding::Xcdr1)` + a `CDR_LE` header -> `decode` returns a dump containing `greeting`, the greeting text, and the quaternion fields; unknown idl_type -> `None`; truncated payload -> `None`; `CDR_BE` encapsulation -> `None`; empty payload -> `None`.
-- `model.rs`: `KnownTopics` `insert`/`contains`/`idl_type`/`names`; `TopicCounts::rows` seeds Known from `KnownTopics`; `Record::is_known`.
-- Update existing `model`/`capture`/`main` tests for the new signatures and the `Frame.payload` field (the `record(..)`/`frame(..)` helpers gain the field).
+- `hello-view-service/src/view.rs`: the polar axis is 23.5 deg from +Y toward `d`; the initial sub-camera longitude is ~-100 deg; `attitude_at(6 min)` differs from `attitude_at(0)` by a 180 deg rotation about the polar axis.
+- `display-lib`: `ViewState` defaults to `None`; the pure asset/format tests are unchanged (no DDS in tests). `registry.rs` completeness passes with the new type.
+- `dds-echo`: `decode` of a `CdrSerializer`-serialized `HelloWorldViewTopic` returns the fields.
 
 ## Minimal test
 
 ```
 .\scripts\build.ps1 -Test
 .\scripts\build.ps1
-# build\deploy\bin\dds-echo.exe, Start, then:
-.\scripts\traffic-fake-topic.ps1 -Repeat 2
+.\scripts\launch-rust.ps1
+# then: run build\deploy\bin\dds-echo.exe and observe HelloWorldViewTopic samples;
+# the lil-d region shows the tilted, slowly spinning earth with the greeting.
+.\scripts\cleanup.ps1
 ```
-
-Select the `HelloWorldTopic` data datagram: the detail pane shows the decoded fields, and its row is under **Known**. An unregistered topic's datagram still shows hex.
 
 ## Risks and follow-ups
 
-- **Endianness:** only native (little-endian) samples decode; `CDR_BE` falls back to hex.
-- **Dependency weight:** `stations-dds` links the CycloneDDS binding into `dds-echo` (static; no runtime DLL), and building `dds-echo` now requires the generated IDL (produced by `scripts/build.ps1`).
-- **Registry path:** the default is the compile-time `REPO_ROOT` (fine for a dev tool run from the repo); `--registry` overrides.
-- **Field display** is pretty-printed until `topic-field-metadata` provides a field model.
+- The display library now links CycloneDDS (static) and needs `config/`; run it from `build/deploy` (via the launch script) or the format stays black.
+- 100 Hz best-effort is a high-rate stream; the display polls at frame rate and renders the latest received sample.
+- The tilt axis/order and the initial roll are visual tuning; the tests pin the pole angle, the spin rate, and the initial longitude.
+- Continuous rendering in `lil-d` costs CPU/GPU; acceptable for a display.
+- Per-station views and the model row (`hello-service`) come later; `hello-view-service` holds the data until then.
 
 ## Module layout
 
 ```
-rust/tool/dds-echo/src/model.rs    + KnownTopics; Frame.payload; is_known/rows take &KnownTopics
-rust/tool/dds-echo/src/capture.rs  frame_from copies payload
-rust/tool/dds-echo/src/decode.rs   CdrDeserializer dispatch (HelloWorldTopic)
-rust/tool/dds-echo/src/main.rs     registry load, KnownTopics state, tick decode
-rust/tool/dds-echo/ui/dds_echo.slint  decoded/hex keyed on decoded != ""
+DDS/hello_world.idl                      + HelloWorldViewTopic
+contracts/topics.toml                    + HelloWorldViewTopic (best_effort)
+contracts/services/hello-view-service.toml  publish HelloWorldViewTopic
+stations-dds/src/contract.rs             known_types() += the new type
+rust/service/hello-view-service/         main.rs, view.rs (attitude math)
+rust/lib/display-lib/src/{view.rs,lib.rs,formats.rs,formats/hello_world.rs}
+rust/ui/lil-d/src/app.rs                 continuous render
+rust/tool/dds-echo/src/decode.rs         + HelloWorldViewTopic arm
+scripts/{build,launch-rust,cleanup}.ps1
 ```
-
-## Result
-
-Implemented. `model::KnownTopics` (name -> IDL type) replaces the hardcoded `KNOWN_TOPICS`, built in `main` from `contracts/topics.toml` via `stations_dds::contract::TopicRegistry` (default path `REPO_ROOT/contracts/topics.toml`, `--registry` override); `Record::is_known` and `TopicCounts::rows` take it, so the Known group is registry-driven. `model::Frame` gained `payload: Option<Range<usize>>` (copied by `capture::frame_from`), and `main::decode_record` finds the DATA submessage's payload and, for a registered topic, fills `record.decoded` via the new `src/decode.rs` (`CdrDeserializer::<HelloWorldTopic>`; strips the encapsulation, requires little-endian; pretty-printed). The detail pane now keys decoded vs hex on `decoded != ""`, so a known topic that fails to decode falls back to hex. `dds-echo` gained a `stations-dds` dependency. Files: authored `rust/tool/dds-echo/src/decode.rs`; changed `rust/tool/dds-echo/{Cargo.toml,src/{model.rs,capture.rs,main.rs},ui/dds_echo.slint}` and `scripts/traffic-fake-topic.ps1`.
-
-Registry load failure logs to stderr and yields an empty known set (everything shows as Unknown/hex); only little-endian samples decode (BE falls back to hex).
-
-Verified: `scripts/build.ps1 -Test` passes with 49 `dds-echo` tests (7 new: `decode::{decodes_hello_world_fields, decodes_stimulus_style_payload, unknown_type_is_none, non_native_encapsulation_is_none, truncated_body_is_none}`, `model::{known_topics_insert_and_lookup, record_is_known_uses_the_registry}`). Release build and deploy succeed. The stimulus now emits a `HelloWorldTopic` SEDP announcement and a CDR-encoded sample (confirmed on the adapter: the 60-byte payload is a `CDR_LE` encapsulation + the expected CDR body). The interactive check (select the `HelloWorldTopic` record → decoded fields; an unregistered topic → hex) remains for the user.
