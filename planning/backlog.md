@@ -124,6 +124,18 @@ Create the `cpp/` CMake project with one compiling target.
 - **Minimal test:** configure and build one runnable target.
 - **Status:** todo.
 
+### dds-override-layer
+A communication layer in the DDS stack (`stations-dds`) through which a controller can override individual fields of the messages a service is about to publish. A writer consults the active override set (keyed by topic and, when applicable, key) before serializing, so the real message flow is preserved and only the chosen fields change. The mechanism (a DDS control topic consumed by each service, an in-process hook in `stations-dds`, or shared state) is not yet decided.
+- **Depends on:** none.
+- **Minimal test:** an override set for a topic field causes an otherwise-unmodified published sample to carry the overridden value.
+- **Status:** todo.
+
+### tentacles-injector
+Add a known-message inspector/injector as a bottom panel of the `tentacles` launcher GUI. Unlike `dds-echo`, which originates stand-alone samples, it does not send messages of its own: it intercepts the messages a service is about to publish and overrides individual fields of them, leaving the rest of the real flow intact. The panel reuses the per-topic field knowledge from `dds-echo-decode` and drives the `dds-override-layer`.
+- **Depends on:** tentacles; dds-echo-decode; dds-override-layer.
+- **Minimal test:** in the tentacles panel, select a known topic, override one field, and observe the published sample carrying the overridden value while every other field is unchanged.
+- **Status:** todo.
+
 Not yet broken into stories:
 * C++ mirror of the Rust libraries, tools, and apps and the `c++` configuration.
 * Hybrid configuration and `launch-hybrid.ps1`; `launch-cpp.ps1`.

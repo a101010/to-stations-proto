@@ -1,218 +1,211 @@
-# Current story: dds-echo-frame
+# Current story: dds-echo-sedp
 
 This file is the detailed, living plan for the one active story. It is rewritten for each story. The backlog in `backlog.md` holds all work and the per-story status.
 
 ## Story
 
-Parse the RTPS header and submessages (writer GUID, sequence number, sizes) and surface them in the UI.
+Parse SEDP/SPDP so `dds-echo` learns the participants and endpoints it hears, the topic/type each endpoint uses, and how to attribute data traffic to those topics. Accumulate per-topic packet stats in the topics panel (grouped by topic, as now); datagrams whose topic cannot be determined keep accumulating under the existing `unknown` row.
 
-- **Depends on:** dds-echo-capture.
-- **Minimal test:** with traffic generating, a datagram's detail lists its submessages (ids), the participant GUID, writer entity ids, and sequence numbers; unit tests cover the submessage layouts and malformed input.
+- **Depends on:** dds-echo-frame.
+- **Minimal test:** with traffic generating, the inspector lists the participants/endpoints/topics it observes; per-topic counts accumulate in the Topics panel; unattributable datagrams stay under `unknown`. Unit tests cover the parameter-list layouts and malformed input.
 
 ## Context
 
-- `capture.rs::record_from` fills `class`/`src_addr`/`size`/`hex`/`summary` (`"RTPS"`/`"UDP"`) and leaves `guid_prefix`/`entity_id` as `None`.
-- The detail pane already shows `guid`/`entity`/`summary` lines, but nothing fills `guid`/`entity`, and the table's **Summary** column shows only `RTPS`.
-- Wire-level only: no IDL, contract, or dependency changes.
+- `rtps.rs` already walks submessages, locates the reader/writer/SN inside DATA, and exposes `sub`/`base`; it does not expose the DATA payload.
+- `model.rs::TopicCounts` already counts packets per `record.topic` and an `unidentified` bucket, and `rows()` seeds the `Known` group from `KNOWN_TOPICS` (currently the hardcoded `["HelloWorldTopic"]` placeholder). `record.topic` is never set today, so the tree is effectively static.
+- `dds_echo.slint` already declares `participants` and `endpoints` stat chips (lines 122-123, 204-205) that nothing populates.
+- Wire facts confirmed from the CycloneDDS source (`vendor/cyclonedds`): SEDP/SPDP payloads are a **PL_CDR** encapsulation header + parameter list; `PID_TOPIC_NAME 0x0005`, `PID_TYPE_NAME 0x0007`, `PID_PARTICIPANT_GUID 0x0050`, `PID_ENDPOINT_GUID 0x005a`, `PID_SENTINEL 0x0001`; parameter `length` is pre-padded to a multiple of 4; GUIDs are 16 B (prefix 12 + entity id 4); entity kind byte is `entity[3] & 0x3f` (`0x02/0x03` writer, `0x04/0x07` reader). The DATA serialized payload starts at `base + 16`.
 
 ## Decisions
 
-- **New `rtps` module** (`src/rtps.rs`); it depends on `model`, and `capture` depends on both (no cycles).
-- **Parse eagerly in `record_from`** so every row has a real Summary and the detail is always complete. The cost is trivial at observed rates (~100 datagrams/s; discovery-only otherwise).
-- **The parser is bounds-safe:** every read is length-checked against the remaining bytes, so malformed or truncated datagrams never panic.
-- **GUID display.** The RTPS header carries the sender participant GUID prefix (12 B = 24 hex); writer/reader fields are 4-byte entity ids. "Writer GUID" = prefix + entity; the detail pane shows the prefix as `guid`, and each frame row shows the writer entity id (a full 32-hex GUID won't fit the 361 px pane).
-- **`summary`** becomes e.g. `DATA(sn=42); HEARTBEAT(1..5); INFO_TS`.
+- **New `sedp` module** (`src/sedp.rs`): a bounds-safe wire parser for the PL_CDR parameter list. `capture` depends on `rtps` and `sedp`; `rtps` stays transport-only (no discovery knowledge).
+- **Payload via a range, not a copy.** `rtps::Frame` gains `payload: Option<Range<usize>>` (absolute offsets into the datagram) for DATA submessages only; `capture::record_from` slices it and calls `sedp::parse`. Avoids copying user-data payloads at capture rates.
+- **Detect discovery by payload content**, not entity id: any DATA whose payload carries `PID_ENDPOINT_GUID` is an endpoint announcement, `PID_PARTICIPANT_GUID` a participant. This is vendor-agnostic and needs no builtin-endpoint-id table.
+- **Registry/known matching is deferred** (next story). This story does not classify observed topics as known: every topic learned from SEDP is shown under **Unknown**. The `KNOWN_TOPICS` placeholder and the `Known` group are left untouched. (Open point: if the placeholder should be dropped so the `Known` group is empty until the next story, say so - otherwise a name match to `HelloWorldTopic` can still surface as known.)
+- **Left panel stays grouped by topic.** No participants/endpoints groups. Participants/endpoints surface as the two existing **stat chips** (counts) and in the **detail pane** for the selected datagram.
+- **Attribute data by writer GUID.** `Discovery` maps full GUID (prefix+entity, 32 hex) -> topic from SEDP; `record.topic` is filled from that map before counting, so attributed data lands on its topic row. Unattributed datagrams (discovery, or data before its announcement) land on the existing `unknown`/`unidentified` row. This satisfies "accumulate stats under the topics we hear".
+- **Dedup by GUID; no dispose/lease teardown** in this story (noted as a risk).
 
 ## Interfaces
 
-### `rust/tool/dds-echo/src/rtps.rs` (new)
+### `rust/tool/dds-echo/src/rtps.rs` (changed)
 
 ```rust
-/// The 20-byte RTPS header.
-pub struct Header {
-    pub version: (u8, u8),      // major, minor
-    pub vendor: [u8; 2],        // vendor id
-    pub guid_prefix: [u8; 12],  // sender participant GUID prefix
-}
-
-/// One submessage, decoded far enough to describe it.
 pub struct Frame {
-    pub id: u8,                       // submessage id (0x15 DATA, 0x07 HEARTBEAT, …)
-    pub kind: &'static str,           // "DATA" | "HEARTBEAT" | "ACKNACK" | "GAP"
-                                      // | "INFO_TS" | "INFO_SRC" | "INFO_DST"
-                                      // | "DATA_FRAG" | "PAD" | "0xNN"
-    pub writer: Option<[u8; 4]>,      // writer EntityId
-    pub reader: Option<[u8; 4]>,      // reader EntityId
-    pub sn: Option<u64>,              // writerSN, or heartbeat firstSN
-    pub sn_last: Option<u64>,         // heartbeat lastSN
-    pub count: Option<u32>,           // heartbeat/acknack count
-    pub len: usize,                   // octetsToNextHeader (resolved when 0)
+    // ...existing fields...
+    /// Absolute range, in the datagram, of a DATA submessage's serialized
+    /// payload (4-byte encapsulation header onward); None for non-DATA or empty.
+    pub payload: Option<std::ops::Range<usize>>,
 }
-
-pub struct Parsed {
-    pub header: Option<Header>,               // None when not RTPS
-    pub frames: Vec<Frame>,
-    pub src_guid_prefix: Option<[u8; 12]>,    // header prefix, updated by INFO_SRC
-}
-
-/// Parse a datagram. Non-RTPS input returns an empty `Parsed` (`header: None`).
-pub fn parse(data: &[u8]) -> Parsed;
 ```
 
-Wire layout to implement (all multi-byte fields honour the submessage `E` flag; `E` is
-bit 0 of the flags byte: `1` = little-endian, `0` = big-endian; submessage `length == 0`
-means "extends to end of message"):
+- For `id == 0x15` (DATA): `start = body + base + 16`. If the `Q` flag (`flags & 0x02`) is set, walk the inline-QoS parameter list (u16 pid, u16 len, value) from `start` until `PID_SENTINEL`, then the payload begins after it. `payload = Some(start..end)` when `start <= end`, else `None`.
+- DATA_FRAG (`0x16`) and other submessages: `payload = None`.
 
-- **Header (20 B):** `"RTPS"` (4), version major (1), minor (1), vendorId (2), guidPrefix (12).
-- **Submessage header (4 B):** submessageId (1), flags (1), octetsToNextHeader (2).
-- **DATA `0x15`:** (if `flags & 0x02` inline-QoS: extraFlags (2)), readerId (4), writerId (4),
-  writerSN (8 = `i32` high then `u32` low; value = `high·2^32 + low`).
-- **HEARTBEAT `0x07`:** readerId (4), writerId (4), firstSN (8), lastSN (8), count (4).
-- **ACKNACK `0x06`:** readerId (4), writerId (4), bitmapBase (8), numBits (4), bitmap, count (4).
-- **GAP `0x08`:** readerId (4), writerId (4), gapStart (8), numBits (4), bitmap.
-- **INFO_TS `0x09`:** if `flags & 0x02` no timestamp; else timestamp (8).
-- **INFO_SRC `0x0c`:** unused (4), version (2), vendorId (2), guidPrefix (12) → `src_guid_prefix`.
-- **INFO_DST `0x0e`:** guidPrefix (12).
-- **DATA_FRAG `0x16`:** readerId (4), writerId (4), writerSN (8), fragmentStartingNum (4),
-  fragmentsInSubmessage (2), fragmentSize (2), sampleSize (4).
-- **PAD `0x01`:** no payload. Unknown ids: skip by length (or stop if the length is unreadable).
+### `rust/tool/dds-echo/src/sedp.rs` (new)
+
+```rust
+/// Which an announced endpoint is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EndpointKind { Writer, Reader, Other }
+
+/// One discovery announcement decoded from a DATA payload.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Discovered {
+    Participant { guid_prefix: [u8; 12] },
+    Endpoint {
+        guid: [u8; 16],
+        kind: EndpointKind,
+        topic: Option<String>,
+        type_name: Option<String>,
+    },
+}
+
+/// Parse a PL_CDR serialized payload (encapsulation header + parameter list).
+/// Non-parameter-list payloads and malformed/truncated input yield None; never panics.
+pub fn parse(payload: &[u8]) -> Option<Discovered>;
+```
+
+- Read `representation_identifier` big-endian from bytes `[0..2]`: `0x0002/0x000a` -> BE, `0x0003/0x000b` -> LE; anything else (CDR/CDR2 or unknown) -> `None`.
+- Walk parameters from offset 4: `pid` (u16), `len` (u16), `value = &payload[off..off+len]`; stop on `PID_SENTINEL` or a short read. Extract `0x0050 -> participant guid prefix`, `0x005a -> guid`, `0x0005 -> topic`, `0x0007 -> type_name`; skip the rest.
+- `kind` from `guid[12..16][3] & 0x3f`.
+- Choose `Endpoint` when a GUID was found, else `Participant`, else `None`.
+- `read_string(value, le)`: u32 length (LE/BE) -> that many bytes -> strip one trailing NUL -> lossy UTF-8.
 
 ### `rust/tool/dds-echo/src/model.rs` (changed)
 
 ```rust
-/// One submessage, formatted for display.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Frame {
-    pub id: u8,
-    pub kind: String,    // "DATA", "HEARTBEAT", …
-    pub writer: String,  // entity id hex ("000003c2"); empty when absent
-    pub reader: String,
-    pub seq: String,     // "42", "1..5", or ""
-    pub len: usize,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EndpointKind { Writer, Reader, Other }
+impl EndpointKind { pub fn label(self) -> &'static str; }   // "writer" | "reader" | "other"
+
+/// A discovered endpoint, formatted for display.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Endpoint {
+    pub guid: String,      // 32 hex (prefix + entity)
+    pub prefix: String,    // 24 hex
+    pub kind: EndpointKind,
+    pub topic: String,     // "" when the endpoint carries no topic (builtin)
+    pub type_name: String, // "" when absent
 }
 ```
 
-- `Record` gains `pub frames: Vec<Frame>`.
-- Add `Record::frame_summary(&self) -> String` → `"DATA(sn=42); HEARTBEAT(1..5); INFO_TS"` (`""` when there are no frames).
+- `Record` gains `pub endpoints: Vec<Endpoint>` and `pub participant_guids: Vec<String>` (prefixes seen in a participant announcement).
+- `Record::writer_guid(&self) -> Option<String>` = `guid_prefix` + `entity_id` when both present.
+- New discovery state (UI-thread):
+
+```rust
+#[derive(Default)]
+pub struct Discovery {
+    participants: BTreeMap<String, usize>,   // prefix -> endpoint count
+    endpoints: BTreeMap<String, Endpoint>,   // guid -> endpoint
+}
+impl Discovery {
+    /// Learn this record's announcements, then set `r.topic` from its writer GUID
+    /// when the topic is still unknown and the writer is a known endpoint with a topic.
+    pub fn observe_and_attr(&mut self, r: &mut Record);
+    pub fn participants(&self) -> usize;
+    pub fn endpoints(&self) -> usize;
+    pub fn reset(&mut self);
+}
+```
+
+- `TopicCounts` is unchanged; attribution sets `record.topic` before `counts.observe`.
 
 ### `rust/tool/dds-echo/src/capture.rs` (changed)
 
-- `record_from`: for RTPS input, run `rtps::parse` and set:
-  - `guid_prefix` = `src_guid_prefix` as hex (24 chars);
-  - `entity_id` = the last DATA/HEARTBEAT `writer` entity id as hex (8 chars);
-  - `summary` = `frame_summary()` (fallback `"RTPS"` when there are no frames);
-  - `frames` = the parsed frames mapped to `model::Frame`.
-- Non-RTPS input is unchanged (`Class::Udp`, `summary: "UDP"`, no frames).
-- Update the `record_from_classifies` test (the RTPS summary is no longer the bare `"RTPS"`).
+- After `rtps::parse`, for each frame with `payload`, call `sedp::parse(&data[range])`; map `Discovered` -> `model::Endpoint` / `record.participant_guids`.
+- Add tests for a crafted SEDP datagram and a crafted SPDP datagram.
 
 ### `rust/tool/dds-echo/src/main.rs` (changed)
 
-- `to_ui`: map `model::Frame` → `ui::Frame` and set `ui::Record.frames`.
+- `State` gains `discovery: RefCell<Discovery>`.
+- `tick`, per drained record: `discovery.observe_and_attr(&mut record)`, then `stats.observe`, `counts.observe`, `records.push(to_ui(&record))`.
+- Set `app.set_participants(discovery.participants() as i32)` and `app.set_endpoints(...)`.
+- `to_ui` maps `record.endpoints` -> `ui::Endpoint`.
+- `on_clear` resets `discovery` and the two chips.
 
 ### `rust/tool/dds-echo/ui/dds_echo.slint` (changed)
 
 ```slint
-export struct Frame {
-    id: int,
+export struct Endpoint {
+    guid: string,
     kind: string,
-    writer: string,
-    reader: string,
-    seq: string,
-    len: int,
+    topic: string,
+    type-name: string,
 }
 ```
 
-- `Record` gains `frames: [Frame],`.
-- In the detail pane, after the metadata lines: a `"Submessages (" + root.selected.frames.length + ")"` header and a fixed-height (~160 px) `ScrollView` list with one ~18 px row per frame (columns: kind, writer, seq, len), above the existing hex/decoded `ScrollView`.
+- `Record` gains `endpoints: [Endpoint]`.
+- Detail pane: after the metadata lines, when `root.selected.endpoints.length > 0`, a `"discovery (" + ... + ")"` header and a short `ScrollView` list (columns: guid, kind, topic, type).
+- The `participants`/`endpoints` stat chips are unchanged in layout; they now receive data.
 
 ## Pseudocode
 
-### `rtps::parse`
+### `sedp::parse`
 
 ```
-if data.len() < 20 || !data.starts_with(b"RTPS"): return Parsed { header: None, ..empty }
-header = Header { version: (data[4], data[5]), vendor: data[6..8], guid_prefix: data[8..20] }
-src = header.guid_prefix
-frames = []
-off = 20
-while off + 4 <= data.len():
-    id = data[off]; flags = data[off+1]; e = flags & 1
-    len = read_u16(&data[off+2..off+4], e)
-    body = off + 4
-    end = if len == 0 { data.len() } else { min(body + len, data.len()) }
-    match id:
-        DATA | DATA_FRAG | HEARTBEAT | ACKNACK | GAP:
-            reader = read_entity(body); writer = read_entity(body+4)
-            sn = read_seq(...)         // DATA/DATA_FRAG; HEARTBEAT uses first/last
-            (bounds-checked; missing bytes -> None)
-        INFO_SRC: src = data[body+8..body+20]
-        INFO_TS | INFO_DST | PAD | other: no fields
-    frames.push(Frame { id, kind, writer, reader, sn, sn_last, count, len: end - body })
-    if len == 0 { break }
-    off = end
-Parsed { header: Some(header), frames, src_guid_prefix: Some(src) }
+if payload.len() < 4: return None
+id = be_u16(payload[0..2])
+le = match id { 0x0002|0x000a => false, 0x0003|0x000b => true, _ => return None }
+off = 4; (pguid, guid, topic, ty) = (None, None, None, None)
+while off + 4 <= payload.len():
+    pid = u16(payload, off, le); len = u16(payload, off+2, le)
+    off += 4
+    if pid == 0x0001: break
+    value = payload.get(off..off+len) else return None
+    match pid {
+        0x0050 => pguid = value[0..12]
+        0x005a => guid = value[0..16]
+        0x0005 => topic = read_string(value, le)
+        0x0007 => ty = read_string(value, le)
+    }
+    off += len
+if guid: Endpoint { guid, kind_of(guid[12..16]), topic, ty }
+elif pguid: Participant { pguid } else None
 ```
 
-Notes: `read_u16`/`read_u32`/`read_seq` select endianness from `e`; every read checks
-`body + n <= data.len()` and yields `None` (no panic) when short; a non-advancing or
-out-of-range `len` breaks the loop.
-
-### `frame_summary`
+### `Discovery::observe_and_attr`
 
 ```
-for each frame: "KIND" + ("(sn=" + sn + ")") + ("(first..last)" for heartbeat)
-join with "; "
+for p in r.participant_guids: participants.entry(p).or_insert(0)
+for e in r.endpoints: participants.entry(e.prefix).or_insert(0); endpoints[e.guid] = e
+if r.topic.is_none() and r.writer_guid():
+    if let Some(e) = endpoints.get(writer_guid) and !e.topic.is_empty(): r.topic = e.topic
 ```
 
 ## Tests
 
-- `rtps.rs` unit tests:
-  - header: version/vendor/guid prefix.
-  - DATA (little-endian): reader/writer entity ids, SN, length.
-  - HEARTBEAT: `firstSN`/`lastSN`/count.
-  - big-endian: lengths and SN read correctly.
-  - inline-QoS DATA (`flags & 0x02`) skips `extraFlags`.
-  - INFO_SRC updates `src_guid_prefix`.
-  - `length == 0` extends to end.
-  - truncated / unknown submessage: no panic, loop terminates.
-  - non-RTPS input: `header` is `None`, `frames` empty.
-- `capture.rs`: `record_from` on a crafted RTPS datagram sets `guid_prefix`/`entity_id`/`summary`/`frames`.
-- `model.rs`: update the `record(..)` test helper for the new `frames` field; add a `frame_summary` test.
+- `rtps.rs`: DATA payload range points at the encapsulation header (Q clear); a Q-set DATA skips the inline-QoS list; DATA with no payload.
+- `sedp.rs`: participant (LE) with `PID_PARTICIPANT_GUID`; endpoint (BE) with `PID_ENDPOINT_GUID` + topic/type; writer vs reader kind; 4-byte-padded string; CDR (non-PL) payload -> `None`; truncated parameter / missing sentinel -> `None`, no panic; unknown PIDs skipped.
+- `capture.rs`: `record_from` on a crafted SEDP DATA datagram yields the expected `endpoints`; on a crafted SPDP datagram yields the participant prefix.
+- `model.rs`: `Discovery::observe_and_attr` dedups by GUID, builds the writer->topic map, sets `record.topic` for a matching writer, leaves an unknown writer's topic unset, and reports participant/endpoint counts; `reset` clears.
+- `model.rs`: update the `record(..)` helper for the new `endpoints`/`participant_guids` fields.
 
 ## Minimal test
 
 ```
 .\scripts\build.ps1 -Test
-.\scripts\traffic-throughput.ps1 -Seconds 5     # then press Start in dds-echo
+.\scripts\traffic-roundtrip.ps1 -Repeat 3      # HelloWorldTopic endpoint announced
+.\scripts\traffic-throughput.ps1 -Seconds 6    # Throughput data to attribute
 ```
 
-Select a datagram: the detail pane lists its submessages (ids), the participant `guid`,
-writer entity ids, and sequence numbers; the Summary column shows the submessage mix.
-Release build and deploy via `scripts/build.ps1`.
+Start dds-echo first: the Topics panel lists the observed topics with packet counts (attributed data), unattributable datagrams stay under `unknown`, and the participants/endpoints chips show counts. Select an SEDP datagram to see its announcements in the detail pane. Release build and deploy via `scripts/build.ps1`.
 
 ## Risks and follow-ups
 
-- **Malformed input:** the parser must never panic on short/adversarial datagrams; all reads are length-checked and tested.
-- **Entity-id semantics** (which writer is SEDP vs user data, topic identification) belong to `dds-echo-sedp`; this story only decodes the frame envelope.
-- **Perf:** parsing runs on the capture thread; revisit (move to `to_ui` or parse on select) only if raw capture throughput becomes a concern.
+- **Ordering:** user data that arrives before its SEDP announcement is counted as `unknown`; acceptable and expected until re-announcement.
+- **Dispose/lease:** SEDP disposes are ignored, so stale endpoints accumulate; defer.
+- **Q-set inline QoS** is handled for DATA; **DATA_FRAG** fragments are not (SEDP is small and unfragmented).
+- **Known-topic matching** (the next story) will move observed topics from Unknown to Known and reconnect the placeholder list.
 
 ## Module layout
 
 ```
-rust/tool/dds-echo/build.rs          Slint compile
-rust/tool/dds-echo/ui/dds_echo.slint the UI (+ submessages list)
-rust/tool/dds-echo/src/main.rs       module rtps, wiring, tick, to_ui
-rust/tool/dds-echo/src/capture.rs    sockets, config, classification, Capture, record_from
-rust/tool/dds-echo/src/rtps.rs       RTPS header + submessage parser
-rust/tool/dds-echo/src/model.rs      Class/Record/Frame/Stats/TopicCounts/RateTracker + tests
+rust/tool/dds-echo/src/rtps.rs   RTPS header/submessage parser (+ DATA payload range)
+rust/tool/dds-echo/src/sedp.rs   PL_CDR parameter-list parser -> Discovered
+rust/tool/dds-echo/src/capture.rs sockets, classification, record_from (+ SEDP wiring)
+rust/tool/dds-echo/src/model.rs  Class/Record/Frame/Endpoint/Discovery/Stats/TopicCounts + tests
+rust/tool/dds-echo/src/main.rs   module decl, Discovery state, tick attribution, to_ui
+rust/tool/dds-echo/ui/dds_echo.slint  Endpoint struct, Record.endpoints, detail discovery list
 ```
-
-## Result
-
-Implemented. `src/rtps.rs` parses the 20-byte RTPS header and walks the submessages (bounds-checked, never panics), decoding ids, entity ids, sequence numbers, counts, and lengths; `model::Frame` + `Record::frames`/`frame_summary()` carry it, `capture::record_from` fills `guid_prefix`/`entity_id`/`summary`/`frames` for RTPS, and the detail pane gained a `submessages (n)` list (id | kind | writer | seq | len). Files: authored `rust/tool/dds-echo/src/rtps.rs`; changed `rust/tool/dds-echo/src/{model.rs,capture.rs,main.rs}` and `ui/dds_echo.slint`.
-
-Key finding from real traffic: `DATA`/`DATA_FRAG` begin with **both** `extraFlags` (2 B, nominally present only when `Q` is set) and `octetsToInlineQos` (2 B), before the reader/writer/SN. CycloneDDS always emits `extraFlags` even when `Q` is clear (its struct includes both; `extraFlags = 0`), so the parser locates `octetsToInlineQos` (always `16` = reader+writer+SN) rather than trusting the `Q` flag. This handles both CycloneDDS and spec-style senders.
-
-Verified: `scripts/build.ps1 -Test` passes with 24 `dds-echo` tests (12 new: 10 `rtps` unit tests, `model::frame_summary_lists_submessages`, `capture::record_from_parses_frames`; the loopback socket test now carries a real RTPS DATA datagram end to end). Against `traffic-throughput.ps1 -Seconds 6`, the parsed summaries read `INFO_TS; DATA(sn=531); HEARTBEAT(522..531)` and `DATA(sn=532..540)`, matching the publisher's sample counts. Release build and deploy succeed.
-
-Deviations: `ui::Frame.id` is the preformatted hex string (`"15"`) since Slint has no hex formatting, rather than the planned `int`; `rtps::Frame.kind` is a `&'static str` that is `"UNKNOWN"` for unnamed ids, which `capture` maps to `"0xNN"` for display. `capture::is_rtps` now delegates to `rtps::is_rtps`. The visual check (see the submessages list in the pane) remains for the user.
