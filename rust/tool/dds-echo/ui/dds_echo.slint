@@ -317,6 +317,7 @@ export component MainWindow inherits Window {
                 border-radius: 6px;
                 ScrollView {
                     VerticalLayout {
+                        alignment: LayoutAlignment.start;
                         padding: 8px;
                         spacing: 4px;
                         Text { text: "Detail"; color: #ffffff; font-weight: 700; }
@@ -344,7 +345,6 @@ export component MainWindow inherits Window {
                             wrap: no-wrap;
                             horizontal-alignment: left;
                         }
-                        Rectangle { vertical-stretch: 1; }
                     }
                 }
             }

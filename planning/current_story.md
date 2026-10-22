@@ -61,7 +61,7 @@ impl TopicSelection {
 - `TopicGroup` gains `callback toggle-row(string)` and `callback topic-menu(length, length)`; each row is a `TouchArea` with a selected background and a `pointer-event` handler (left = toggle, right = open the menu at `absolute-position + mouse`).
 - `MainWindow` gains the five callbacks and `topic-menu-visible/-x/-y`; the `Topics (packets)` title is a clickable `TouchArea`; a `TopicGroup` wires its callbacks to the window's.
 - A top-level overlay `Rectangle` (shown when `topic-menu-visible`) hosts a dismiss `TouchArea` and the menu `Rectangle` with the **Unselect All** item.
-- The detail content gains a trailing `Rectangle { vertical-stretch: 1; }`.
+- The detail content `VerticalLayout` sets `alignment: LayoutAlignment.start` so spare height collects below the hex instead of being spread between sections.
 
 ## Pseudocode
 
@@ -110,6 +110,10 @@ rust/tool/dds-echo/ui/dds_echo.slint  row selection, title clear, context menu, 
 
 ## Result
 
-Implemented. `model::TopicSelection` (toggle/clear/contains/matches) is the pure filter; `main` keeps a backing `all_records` and the filtered `records` view, appending matching records on capture and rebuilding on selection change via `apply_selection`; `refresh_topics` marks each `ui::TopicRow` selected. The Slint topics rows are clickable (left toggles, right opens the menu at the cursor), the `Topics (packets)` title clears the selection, and a right-click overlay menu offers **Unselect All**. The detail content gained a trailing `vertical-stretch: 1` rectangle so spare height falls below the hex. Files changed: `rust/tool/dds-echo/src/{model.rs,main.rs}` and `ui/dds_echo.slint`.
+Implemented. `model::TopicSelection` (toggle/clear/contains/matches) is the pure filter; `main` keeps a backing `all_records` and the filtered `records` view, appending matching records on capture and rebuilding on selection change via `apply_selection`; `refresh_topics` marks each `ui::TopicRow` selected. The Slint topics rows are clickable (left toggles, right opens the menu at the cursor), the `Topics (packets)` title clears the selection, and a right-click overlay menu offers **Unselect All**.
+
+Detail-pane spacing fix: the content `VerticalLayout` now sets `alignment: LayoutAlignment.start`. The pane's `ScrollView` stretches its content to the viewport (`Flickable` binds `content-height = max(viewport, child.min-height)`), and a layout's default main-axis `alignment` is `stretch`; when no child is growable Slint's solver distributes the leftover **equally across all children**, which put the spare height between sections. `start` packs children at their preferred sizes with the leftover after the last child (below the hex); the earlier trailing `Rectangle { vertical-stretch: 1; }` was removed.
+
+Files changed: `rust/tool/dds-echo/src/{model.rs,main.rs}` and `ui/dds_echo.slint`.
 
 Verified: `scripts/build.ps1 -Test` passes with 42 `dds-echo` tests (1 new: `topic_selection_toggle_and_match`). Release build and deploy succeed. The interactive check (select/filter/unselect, the context menu, the detail spacing) remains for the user.
