@@ -8,6 +8,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod capture;
+mod decode;
 mod model;
 mod rtps;
 mod sedp;
@@ -25,7 +26,9 @@ use clap::Parser;
 use slint::{ComponentHandle as _, Model as _, ModelRc, Timer, TimerMode, VecModel};
 
 use crate::capture::{Capture, CaptureConfig};
-use crate::model::{Discovery, RateTracker, Stats, TopicCounts, TopicSelection, MAX_RECORDS};
+use crate::model::{
+    Discovery, KnownTopics, RateTracker, Stats, TopicCounts, TopicSelection, MAX_RECORDS,
+};
 use crate::ui::MainWindow;
 
 /// The UI refresh / capture-drain tick.
@@ -49,6 +52,10 @@ struct Args {
     /// DDS domain id (sets the default group/ports).
     #[arg(long, default_value_t = 0)]
     domain: u32,
+
+    /// Topic registry (`contracts/topics.toml`).
+    #[arg(long, default_value = concat!(env!("REPO_ROOT"), "/contracts/topics.toml"))]
+    registry: String,
 }
 
 /// Shared state behind the UI.
@@ -65,6 +72,8 @@ struct State {
     selection: RefCell<TopicSelection>,
     /// The full, capped list of records; the displayed model is the filtered view.
     all_records: RefCell<Vec<ui::Record>>,
+    /// The registry's topics (name -> IDL type), loaded at startup.
+    known_topics: KnownTopics,
 }
 
 /// A submessage's envelope row, e.g.
@@ -99,7 +108,7 @@ fn frame_detail(f: &model::Frame) -> String {
     }
 }
 
-fn to_ui(r: &model::Record) -> ui::Record {
+fn to_ui(r: &model::Record, known: &KnownTopics) -> ui::Record {
     ui::Record {
         time: r.time_label().into(),
         protocol: r.protocol().into(),
@@ -111,7 +120,7 @@ fn to_ui(r: &model::Record) -> ui::Record {
         decoded: r.decoded.clone().into(),
         guid: r.guid_prefix.clone().unwrap_or_default().into(),
         entity: r.entity_id.clone().unwrap_or_default().into(),
-        known: r.is_known(),
+        known: r.is_known(known),
         frames: {
             let frames: Vec<ui::Frame> = r
                 .frames
@@ -123,6 +132,24 @@ fn to_ui(r: &model::Record) -> ui::Record {
                 .collect();
             ModelRc::from(frames.as_slice())
         },
+    }
+}
+
+/// Decode the sample's payload when the record's topic is registered, filling
+/// `record.decoded` (the detail pane shows raw hex otherwise).
+fn decode_record(record: &mut model::Record, known: &KnownTopics) {
+    let Some(idl_type) = record.topic.as_deref().and_then(|t| known.idl_type(t)) else {
+        return;
+    };
+    let range = record
+        .frames
+        .iter()
+        .find(|f| f.kind == "DATA" && f.payload.is_some())
+        .and_then(|f| f.payload.clone());
+    if let Some(range) = range {
+        if let Some(bytes) = record.hex.get(range) {
+            record.decoded = decode::decode(idl_type, bytes).unwrap_or_default();
+        }
     }
 }
 
@@ -160,7 +187,7 @@ fn apply_selection(
 ) {
     refresh_topics(
         app,
-        &state.counts.borrow().rows(),
+        &state.counts.borrow().rows(&state.known_topics),
         &state.selection.borrow(),
         known,
         unknown,
@@ -217,11 +244,12 @@ fn tick(
                 match rx.try_recv() {
                     Ok(mut record) => {
                         state.discovery.borrow_mut().observe_and_attr(&mut record);
+                        decode_record(&mut record, &state.known_topics);
                         state.stats.borrow_mut().observe(&record);
                         state.counts.borrow_mut().observe(&record);
 
                         let matched = state.selection.borrow().matches(record.topic.as_deref());
-                        let ui = to_ui(&record);
+                        let ui = to_ui(&record, &state.known_topics);
                         {
                             let mut all = state.all_records.borrow_mut();
                             all.push(ui.clone());
@@ -244,7 +272,7 @@ fn tick(
 
     refresh_topics(
         app,
-        &state.counts.borrow().rows(),
+        &state.counts.borrow().rows(&state.known_topics),
         &state.selection.borrow(),
         known,
         unknown,
@@ -272,9 +300,25 @@ fn tick(
     }
 }
 
+/// Load the topic registry into `KnownTopics`; on failure, log and return an
+/// empty set (everything then shows as Unknown/hex).
+fn load_known(path: &str) -> KnownTopics {
+    let mut known = KnownTopics::default();
+    match stations_dds::contract::TopicRegistry::load(std::path::Path::new(path)) {
+        Ok(registry) => {
+            for topic in &registry.topics {
+                known.insert(&topic.name, &topic.idl_type);
+            }
+        }
+        Err(e) => eprintln!("dds-echo: failed to load registry {path}: {e}"),
+    }
+    known
+}
+
 fn main() -> Result<(), slint::PlatformError> {
     let args = Args::parse();
     let app = MainWindow::new()?;
+    let known_topics = load_known(&args.registry);
 
     // Seed the toolbar fields from the CLI (group/ports default from --domain).
     let defaults = CaptureConfig::for_domain(args.domain);
@@ -313,6 +357,7 @@ fn main() -> Result<(), slint::PlatformError> {
         following: Cell::new(true),
         selection: RefCell::new(TopicSelection::default()),
         all_records: RefCell::new(Vec::new()),
+        known_topics,
     });
 
     let records = Rc::new(VecModel::<ui::Record>::default());
@@ -323,7 +368,7 @@ fn main() -> Result<(), slint::PlatformError> {
     app.set_unknown_topics(ModelRc::from(unknown.clone()));
     refresh_topics(
         &app,
-        &state.counts.borrow().rows(),
+        &state.counts.borrow().rows(&state.known_topics),
         &state.selection.borrow(),
         &known,
         &unknown,
@@ -415,7 +460,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 *state.rates.borrow_mut() = RateTracker::default();
                 refresh_topics(
                     &app,
-                    &state.counts.borrow().rows(),
+                    &state.counts.borrow().rows(&state.known_topics),
                     &state.selection.borrow(),
                     &known,
                     &unknown,

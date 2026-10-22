@@ -142,10 +142,26 @@ function ParticipantPayload([byte[]]$prefix) {
         (Param 0x0001 (B0)))
 }
 
+# A CDR_LE-encoded hello_world::HelloWorldTopic: string greeting + Quaternion.
+function CdrHelloWorldTopic([string]$greeting, [double]$x, [double]$y, [double]$z, [double]$w) {
+    $s = [System.Text.Encoding]::ASCII.GetBytes($greeting)
+    $out = [System.Collections.Generic.List[byte]]::new()
+    $out.AddRange([byte[]]@(0x00, 0x01, 0x00, 0x00))  # CDR_LE encapsulation
+    $out.AddRange([byte[]](U32LE ($s.Length + 1)))     # string length incl NUL
+    $out.AddRange($s)
+    $out.Add(0)
+    while ((($out.Count - 4) % 8) -ne 0) { $out.Add(0) }  # align body to the doubles
+    foreach ($d in @($x, $y, $z, $w)) {
+        $out.AddRange([byte[]][BitConverter]::GetBytes([double]$d))
+    }
+    return , $out.ToArray()
+}
+
 $prefix = [byte[]]@(0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c)
 $w1 = 0x00000102  # FakeTopicOne writer
 $w2 = 0x00000103  # FakeTopicTwo writer
 $rd = 0x00000107  # FakeTopicOne reader
+$w4 = 0x00000104  # HelloWorldTopic writer (registered)
 $sedpPub = 0x000003c2
 $sedpSub = 0x000004c2
 $spdp = 0x000100c2
@@ -159,7 +175,8 @@ $d1 = Concat @(
     (DataSub $sedpPub 1 (EndpointPayload $prefix $w1 'FakeTopicOne' 'fake::FakeTopicOne')),
     (DataSub $sedpPub 2 (EndpointPayload $prefix $w2 'FakeTopicTwo' 'fake::FakeTopicTwo')),
     (DataSub $sedpSub 1 (EndpointPayload $prefix $rd 'FakeTopicOne' 'fake::FakeTopicOne')),
-    (Heartbeat $sedpPub 1 3 1))
+    (DataSub $sedpPub 4 (EndpointPayload $prefix $w4 'HelloWorldTopic' 'hello_world::HelloWorldTopic')),
+    (Heartbeat $sedpPub 1 4 1))
 
 # Datagram 2: an SPDP participant announcement + HEARTBEAT.
 $d2 = Concat @(
@@ -196,7 +213,14 @@ $d5 = Concat @(
     (Sub 0x99 0x01 ([byte[]]@(1, 2, 3, 4, 5, 6))),
     (Heartbeat $w1 2 2 1))
 
-$datagrams = @($d1, $d2, $d3, $d4, $d5)
+# Datagram 6: a decodable HelloWorldTopic sample (a registered/known topic).
+$d6 = Concat @(
+    (RtpsHeader $prefix),
+    (InfoTs),
+    (DataSub $w4 1 (CdrHelloWorldTopic 'Hello, world!' 0.0 0.0 0.0 1.0)),
+    (Heartbeat $w4 1 1 1))
+
+$datagrams = @($d1, $d2, $d3, $d4, $d5, $d6)
 
 $sock = [System.Net.Sockets.Socket]::new(
     [System.Net.Sockets.AddressFamily]::InterNetworkV6,
@@ -214,8 +238,9 @@ try {
             Start-Sleep -Milliseconds $DelayMs
         }
     }
-    Write-Host "Expected: FakeTopicOne and FakeTopicTwo under Unknown; participant/endpoint chips;"
-    Write-Host "the detail pane shows each submessage envelope with its decoded announcement beneath."
+    Write-Host "Expected: HelloWorldTopic under Known with the decoded fields in the detail pane;"
+    Write-Host "FakeTopicOne/FakeTopicTwo/unidentified under Unknown; each datagram's detail pane shows"
+    Write-Host "its submessage envelopes with any decoded announcement beneath them."
 }
 finally {
     $sock.Close()

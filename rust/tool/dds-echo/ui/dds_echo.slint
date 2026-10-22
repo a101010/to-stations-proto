@@ -336,9 +336,9 @@ export component MainWindow inherits Window {
                             Rectangle { height: 1px; background: #3a3a3a; }
                         }
                         Rectangle { height: 6px; }
-                        Text { text: root.selected.known ? "decoded" : "hex"; color: #9a9a9a; }
+                        Text { text: root.selected.decoded != "" ? "decoded" : "hex"; color: #9a9a9a; }
                         Text {
-                            text: root.selected.known ? root.selected.decoded : root.selected.hex;
+                            text: root.selected.decoded != "" ? root.selected.decoded : root.selected.hex;
                             color: #c0c0c0;
                             font-family: "Courier New";
                             font-size: 12px;

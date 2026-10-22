@@ -1062,6 +1062,7 @@ dependencies = [
  "slint",
  "slint-build",
  "socket2",
+ "stations-dds",
  "windows-sys 0.59.0",
 ]
 

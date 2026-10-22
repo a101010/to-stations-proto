@@ -196,6 +196,7 @@ fn frame_from(f: &rtps::Frame) -> model::Frame {
         seq,
         len: f.len,
         announcement: None,
+        payload: f.payload.clone(),
     }
 }
 

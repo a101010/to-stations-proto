@@ -135,3 +135,11 @@ rust/tool/dds-echo/src/decode.rs   CdrDeserializer dispatch (HelloWorldTopic)
 rust/tool/dds-echo/src/main.rs     registry load, KnownTopics state, tick decode
 rust/tool/dds-echo/ui/dds_echo.slint  decoded/hex keyed on decoded != ""
 ```
+
+## Result
+
+Implemented. `model::KnownTopics` (name -> IDL type) replaces the hardcoded `KNOWN_TOPICS`, built in `main` from `contracts/topics.toml` via `stations_dds::contract::TopicRegistry` (default path `REPO_ROOT/contracts/topics.toml`, `--registry` override); `Record::is_known` and `TopicCounts::rows` take it, so the Known group is registry-driven. `model::Frame` gained `payload: Option<Range<usize>>` (copied by `capture::frame_from`), and `main::decode_record` finds the DATA submessage's payload and, for a registered topic, fills `record.decoded` via the new `src/decode.rs` (`CdrDeserializer::<HelloWorldTopic>`; strips the encapsulation, requires little-endian; pretty-printed). The detail pane now keys decoded vs hex on `decoded != ""`, so a known topic that fails to decode falls back to hex. `dds-echo` gained a `stations-dds` dependency. Files: authored `rust/tool/dds-echo/src/decode.rs`; changed `rust/tool/dds-echo/{Cargo.toml,src/{model.rs,capture.rs,main.rs},ui/dds_echo.slint}` and `scripts/traffic-fake-topic.ps1`.
+
+Registry load failure logs to stderr and yields an empty known set (everything shows as Unknown/hex); only little-endian samples decode (BE falls back to hex).
+
+Verified: `scripts/build.ps1 -Test` passes with 49 `dds-echo` tests (7 new: `decode::{decodes_hello_world_fields, decodes_stimulus_style_payload, unknown_type_is_none, non_native_encapsulation_is_none, truncated_body_is_none}`, `model::{known_topics_insert_and_lookup, record_is_known_uses_the_registry}`). Release build and deploy succeed. The stimulus now emits a `HelloWorldTopic` SEDP announcement and a CDR-encoded sample (confirmed on the adapter: the 60-byte payload is a `CDR_LE` encapsulation + the expected CDR body). The interactive check (select the `HelloWorldTopic` record → decoded fields; an unregistered topic → hex) remains for the user.

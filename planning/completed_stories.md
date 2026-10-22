@@ -153,3 +153,9 @@ Make the left Topics pane a multi-select filter for the center datagram list: cl
 - **Completed:** 2026-10-22 12:20:22.
 - **Depends on:** none.
 - **Minimal test:** select `FakeTopicOne` (only its data datagrams remain), add `FakeTopicTwo` (both appear), click the title (all traffic returns), and right-click **Unselect All** clears.
+
+### dds-echo-decode
+Decode known-type samples from the wire (`CdrDeserializer`) and show the decoded fields in the detail pane; raw hex otherwise. Also drives the **Known** topics from the registry (`contracts/topics.toml`) via `stations-dds` instead of the hardcoded list.
+- **Completed:** 2026-10-22 14:47:12.
+- **Depends on:** none.
+- **Minimal test:** a known-topic sample is shown decoded (fields) under Known and an unknown sample as hex.

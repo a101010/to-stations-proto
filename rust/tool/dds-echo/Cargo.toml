@@ -10,6 +10,7 @@ slint = "1.18"
 clap = { workspace = true }
 socket2 = { workspace = true }
 if-addrs = { workspace = true }
+stations-dds = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [

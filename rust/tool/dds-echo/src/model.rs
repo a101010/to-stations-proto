@@ -10,8 +10,6 @@ pub const MAX_RECORDS: usize = 1000;
 pub const HEX_PREVIEW: usize = 4096;
 /// Bytes per line in the pre-wrapped hex view.
 pub const HEX_BYTES_PER_LINE: usize = 16;
-/// Known topics; the capture/SEDP stories read `contracts/topics.toml`.
-pub const KNOWN_TOPICS: &[&str] = &["HelloWorldTopic"];
 
 /// How much is understood about a message.
 #[allow(dead_code)] // Unregistered/Known are produced by later stories
@@ -44,6 +42,9 @@ pub struct Frame {
     pub len: usize,
     /// The discovery announcement this submessage's payload decoded, if any.
     pub announcement: Option<Announcement>,
+    /// For a DATA submessage, the range of its serialized payload within the
+    /// datagram (`record.hex`); `None` for non-DATA or empty payloads.
+    pub payload: Option<std::ops::Range<usize>>,
 }
 
 /// Which a discovered endpoint is.
@@ -142,10 +143,8 @@ impl Record {
         out
     }
 
-    pub fn is_known(&self) -> bool {
-        self.topic
-            .as_deref()
-            .is_some_and(|t| KNOWN_TOPICS.contains(&t))
+    pub fn is_known(&self, known: &KnownTopics) -> bool {
+        self.topic.as_deref().is_some_and(|t| known.contains(t))
     }
 
     /// The transport protocol for the table's `Protocol` column.
@@ -198,6 +197,34 @@ impl Stats {
     }
 }
 
+/// The registry's topics: wire name -> scoped IDL/DDS type name. Built from
+/// `contracts/topics.toml`; UI-agnostic so `model` need not depend on the DDS
+/// binding.
+#[derive(Clone, Debug, Default)]
+pub struct KnownTopics {
+    by_name: BTreeMap<String, String>,
+}
+
+impl KnownTopics {
+    pub fn insert(&mut self, name: &str, idl_type: &str) {
+        self.by_name.insert(name.to_string(), idl_type.to_string());
+    }
+
+    pub fn contains(&self, name: &str) -> bool {
+        self.by_name.contains_key(name)
+    }
+
+    /// The scoped IDL/DDS type name registered for `name`.
+    pub fn idl_type(&self, name: &str) -> Option<&str> {
+        self.by_name.get(name).map(String::as_str)
+    }
+
+    /// The registered wire names, sorted.
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        self.by_name.keys().map(String::as_str)
+    }
+}
+
 /// A row in the topics view.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TopicRow {
@@ -224,17 +251,17 @@ impl TopicCounts {
 
     /// Known topics (0 if unseen), then unregistered topics seen and an
     /// `unidentified` row when there are unattributed datagrams, sorted.
-    pub fn rows(&self) -> Vec<TopicRow> {
+    pub fn rows(&self, known: &KnownTopics) -> Vec<TopicRow> {
         let mut rows = Vec::new();
-        for name in KNOWN_TOPICS {
+        for name in known.names() {
             rows.push(TopicRow {
-                name: (*name).to_string(),
+                name: name.to_string(),
                 known: true,
-                packets: self.counts.get(*name).copied().unwrap_or(0),
+                packets: self.counts.get(name).copied().unwrap_or(0),
             });
         }
         for (name, packets) in &self.counts {
-            if !KNOWN_TOPICS.contains(&name.as_str()) {
+            if !known.contains(name) {
                 rows.push(TopicRow {
                     name: name.clone(),
                     known: false,
@@ -416,17 +443,36 @@ mod tests {
     }
 
     #[test]
+    fn known_topics_insert_and_lookup() {
+        let k = known();
+        assert!(k.contains("HelloWorldTopic"));
+        assert_eq!(k.idl_type("HelloWorldTopic"), Some("hello_world::HelloWorldTopic"));
+        assert_eq!(k.names().collect::<Vec<_>>(), vec!["HelloWorldTopic"]);
+        assert!(!k.contains("Nope"));
+        assert_eq!(k.idl_type("Nope"), None);
+    }
+
+    #[test]
+    fn record_is_known_uses_the_registry() {
+        let k = known();
+        assert!(record(Class::Rtps, 0, Some("HelloWorldTopic")).is_known(&k));
+        assert!(!record(Class::Rtps, 0, Some("WeatherTopic")).is_known(&k));
+        assert!(!record(Class::Rtps, 0, None).is_known(&k));
+    }
+
+    #[test]
     fn topic_counts_include_known_unregistered_and_unidentified() {
+        let k = known();
         let mut c = TopicCounts::default();
         assert!(c
-            .rows()
+            .rows(&k)
             .iter()
             .any(|r| r.name == "HelloWorldTopic" && r.known && r.packets == 0));
         c.observe(&record(Class::Known, 1, Some("HelloWorldTopic")));
         c.observe(&record(Class::Unregistered, 1, Some("WeatherTopic")));
         c.observe(&record(Class::Udp, 1, None));
         c.observe(&record(Class::Rtps, 1, None));
-        let rows = c.rows();
+        let rows = c.rows(&k);
         assert!(rows
             .iter()
             .any(|r| r.name == "HelloWorldTopic" && r.known && r.packets == 1));
@@ -484,7 +530,14 @@ mod tests {
             seq: seq.into(),
             len,
             announcement: None,
+            payload: None,
         }
+    }
+
+    fn known() -> KnownTopics {
+        let mut k = KnownTopics::default();
+        k.insert("HelloWorldTopic", "hello_world::HelloWorldTopic");
+        k
     }
 
     #[test]
