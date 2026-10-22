@@ -38,14 +38,20 @@ Third-party libraries are built/installed to an external prefix (for example `C:
 **Done when.** `launch-rust.ps1` brings up the model service, the view service, and `lil-d` from `build/deploy`; `lil-d` shows the tilted, cube-mapped earth lit from the upper right with the greeting text rendered in the loaded font, its power button works, and the format manager switches between the default and hello-world formats. `dds-echo` observes every topic in the registry, `--topics` and `build/topics.md` match `contracts/`, and `cleanup.ps1` stops everything.
 
 ### dds-echo-decode
-Decode known-type samples from the wire (`CdrDeserializer`), with drill-down from a topic to decoded fields; raw hex otherwise.
-- **Depends on:** dds-echo-sedp.
-- **Minimal test:** a known-topic sample is shown decoded (fields) and an unknown sample as hex.
+Decode known-type samples from the wire (`CdrDeserializer`) and show the decoded fields in the detail pane; raw hex otherwise. Also drives the **Known** topics from the registry (`contracts/topics.toml`) via `stations-dds` instead of the hardcoded list.
+- **Depends on:** none.
+- **Minimal test:** a known-topic sample is shown decoded (fields) under Known and an unknown sample as hex.
+- **Status:** todo.
+
+### topic-field-metadata
+Extend the fork's code generation (the `cyclonedds-build` codegen or `cyclonedds-derive`) to emit a per-struct field schema (reusing the generated `DynamicTypeSchema`/`DynamicValue` shapes) plus field get/set, so tools can build generic field views for display and editing without runtime reflection (Rust has none). Consumed by `dds-echo`'s detail pane and send form and by `tentacles-injector`.
+- **Depends on:** none (a fork change; re-pin the fork rev).
+- **Minimal test:** enumerate a generated topic's fields from the metadata and round-trip a value to and from the typed sample.
 - **Status:** todo.
 
 ### dds-echo-send
-Add a send screen to `dds-echo`: the window becomes two tabs, **Capture** (the current UI) and **Send**. In the Send tab, choose a registered topic from `contracts/topics.toml`, fill in its fields, and publish the sample **once or periodically** at a chosen rate. Publishing uses `stations-dds` (a `Node` typed writer), so `dds-echo` gains a `stations-dds` dependency; per-type field forms are added per topic, starting with the registered topic.
-- **Depends on:** dds-echo-capture.
+Add a send screen to `dds-echo`: the window becomes two tabs, **Capture** (the current UI) and **Send**. In the Send tab, choose a registered topic from `contracts/topics.toml`, fill in its fields, and publish the sample **once or periodically** at a chosen rate. Publishing uses `stations-dds` (a `Node` typed writer); per-type field forms come from `topic-field-metadata`.
+- **Depends on:** dds-echo-decode; topic-field-metadata.
 - **Minimal test:** in the Send tab, fill the hello-world fields and press Send; the sample appears on the Capture tab.
 - **Status:** todo.
 
@@ -125,8 +131,8 @@ A communication layer in the DDS stack (`stations-dds`) through which a controll
 - **Status:** todo.
 
 ### tentacles-injector
-Add a known-message inspector/injector as a bottom panel of the `tentacles` launcher GUI. Unlike `dds-echo`, which originates stand-alone samples, it does not send messages of its own: it intercepts the messages a service is about to publish and overrides individual fields of them, leaving the rest of the real flow intact. The panel reuses the per-topic field knowledge from `dds-echo-decode` and drives the `dds-override-layer`.
-- **Depends on:** tentacles; dds-echo-decode; dds-override-layer.
+Add a known-message inspector/injector as a bottom panel of the `tentacles` launcher GUI. Unlike `dds-echo`, which originates stand-alone samples, it does not send messages of its own: it intercepts the messages a service is about to publish and overrides individual fields of them, leaving the rest of the real flow intact. The panel reuses the per-topic field knowledge from `topic-field-metadata` and drives the `dds-override-layer`.
+- **Depends on:** tentacles; topic-field-metadata; dds-override-layer.
 - **Minimal test:** in the tentacles panel, select a known topic, override one field, and observe the published sample carrying the overridden value while every other field is unchanged.
 - **Status:** todo.
 

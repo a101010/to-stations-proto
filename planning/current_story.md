@@ -1,119 +1,137 @@
-# Current story: dds-echo-topic-filter
+# Current story: dds-echo-decode
 
 This file is the detailed, living plan for the one active story. It is rewritten for each story. The backlog in `backlog.md` holds all work and the per-story status.
 
 ## Story
 
-Make the left **Topics** pane a multi-select filter for the center datagram list. Clicking a topic row toggles its selection (background-highlighted); the center list then shows only datagrams whose topic matches any selected row (union), or all traffic when nothing is selected. The **Topics (packets)** title clears the selection and is always visible; a right-click context menu offers **Unselect All**. Also, the detail pane's spare height must sit below the hex, not between sections.
+Decode known-type DATA samples from the wire and show the fields in the detail pane (raw hex otherwise), and drive the **Known** topics from the registry (`contracts/topics.toml`) instead of the hardcoded list. Field-level display is interim (a formatted dump); a proper field model is deferred to `topic-field-metadata`.
 
 - **Depends on:** none.
-- **Minimal test:** select `FakeTopicOne` (only its data datagrams remain), add `FakeTopicTwo` (both appear), click the title (all traffic returns), and the context menu's **Unselect All** also clears.
+- **Minimal test:** with the crafted stimulus running, a `HelloWorldTopic` sample shows the decoded fields in the detail pane and its row sits under **Known**; an unregistered topic still shows hex.
 
 ## Context
 
-- `records: VecModel<ui::Record>` is the only store; `tick` appends each captured record and trims to `MAX_RECORDS`.
-- `refresh_topics` rebuilds `ui::TopicRow { name, known, packets }` every tick; rows are not clickable and carry no selection.
-- The center table has no filter; the detail pane is one `ScrollView` whose content has no trailing stretch, so spare height is distributed between sections.
-- `TopicCounts::rows()` already yields `Known` + `Unknown` (including the `unidentified` row).
+- The UI already renders the decoded/hex choice: `main::to_ui` sets `known: r.is_known()` and `decoded: r.decoded`, and `ui/dds_echo.slint` shows `decoded` vs `hex`. `decoded` is never filled, and `model::KNOWN_TOPICS` is a hardcoded `["HelloWorldTopic"]`.
+- `record.topic` is attributed in `main::tick` from SEDP (`Discovery::observe_and_attr`); `model::Frame` does not carry the DATA payload (only `rtps::Frame::payload` does).
+- `CdrDeserializer::<T>::deserialize(data, encoding)` (fork `cyclonedds/src/serialization.rs`, re-exported by `stations-dds`) expects the CDR sample **without** the 4-byte encapsulation header, in **native endianness** (`dds_stream_normalize` starts at offset 0; `bswap=false`); `CdrEncoding` selects XCDR1/XCDR2 only. It validates and returns `Err` on malformed input (no panic).
+- The generated `hello_world::HelloWorldTopic` derives `Debug`, so `format!("{sample:#?}")` is a usable interim dump.
+- No real publisher of `HelloWorldTopic` exists yet (`hello-service` is later; `traffic-roundtrip.ps1` uses a single participant, so no SEDP is emitted and nothing is attributed). Verification uses the crafted stimulus.
 
 ## Decisions
 
-- Keep a backing `all_records` (the full, capped list) plus the filtered **view** `records`; append incrementally on capture, rebuild the view only when the selection changes.
-- Selection is a set of row names; a record's row name is its topic, or `unidentified` when the topic is empty. Union (OR); empty selection = all.
-- The **Topics (packets)** title is the always-visible clear header.
-- The context menu is an in-window overlay (Slint has no built-in context menu): a right-click opens it at the cursor; a full-window transparent layer dismisses it.
-- On filter change, reset `selected-index` (indices shift).
-- No `Total` row.
+- **Registry-driven known set.** Load `contracts/topics.toml` at startup via `stations-dds::contract::TopicRegistry` (default path from `REPO_ROOT`, `--registry` override) and convert it to a UI-agnostic `model::KnownTopics` (name -> idl_type), so `model.rs` stays independent of `stations-dds`.
+- **Add a `stations-dds` dependency** to `dds-echo` (registry, generated types, and `cyclonedds::{CdrDeserializer, CdrEncoding}`). The bypass scan is unaffected (only serialization/contract APIs are used).
+- **Decode is a compile-time dispatch** topic/type -> `CdrDeserializer::<T>`; only `hello_world::HelloWorldTopic` for now.
+- **Interim rendering** is `format!("{sample:#?}")`; a field-level model (display and editing) is deferred to `topic-field-metadata`.
+- Decode runs in `tick` after attribution, only for known topics; unknown topics, a failed decode, or a non-native-endian payload fall back to hex.
+- If the registry fails to load, log to stderr and use an empty known set (everything shows as Unknown/hex).
 
 ## Interfaces
+
+### `rust/tool/dds-echo/Cargo.toml` (changed)
+
+```toml
+stations-dds = { workspace = true }
+```
 
 ### `rust/tool/dds-echo/src/model.rs` (changed)
 
 ```rust
-/// The topic rows selected in the topics pane. Empty = match everything.
+/// The registry's topics: name -> scoped IDL/DDS type name.
 #[derive(Clone, Debug, Default)]
-pub struct TopicSelection {
-    names: BTreeSet<String>,
+pub struct KnownTopics {
+    by_name: BTreeMap<String, String>,
 }
-impl TopicSelection {
-    pub fn toggle(&mut self, name: &str);
-    pub fn clear(&mut self);
+impl KnownTopics {
+    pub fn insert(&mut self, name: &str, idl_type: &str);
     pub fn contains(&self, name: &str) -> bool;
-    /// Empty selection matches everything; `None`/empty topic is `unidentified`.
-    pub fn matches(&self, topic: Option<&str>) -> bool;
+    pub fn idl_type(&self, name: &str) -> Option<&str>;
+    pub fn names(&self) -> impl Iterator<Item = &str>;
 }
 ```
 
+- Remove the `KNOWN_TOPICS` const.
+- `Record::is_known(&self, known: &KnownTopics) -> bool`.
+- `TopicCounts::rows(&self, known: &KnownTopics) -> Vec<TopicRow>` (seeds the Known group from `known.names()`).
+- `Frame` gains `pub payload: Option<std::ops::Range<usize>>` (the DATA serialized payload, into `record.hex`).
+
+### `rust/tool/dds-echo/src/capture.rs` (changed)
+
+- `frame_from` copies `f.payload` into `model::Frame.payload`.
+
+### `rust/tool/dds-echo/src/decode.rs` (new)
+
+```rust
+/// Decode a known-type DATA payload (encapsulation header + CDR) into a
+/// human-readable dump; `None` for an unknown type, a non-native-endian
+/// encapsulation, or malformed data.
+pub fn decode(idl_type: &str, payload: &[u8]) -> Option<String>;
+```
+
+- Match `"hello_world::HelloWorldTopic"` -> `HelloWorldTopic`.
+- Check bytes `[0..2]` are `CDR_LE` (`0x0001`); strip the 4-byte encapsulation; `CdrDeserializer::<HelloWorldTopic>::deserialize(&payload[4..], CdrEncoding::Xcdr1).ok()`; `format!("{sample:#?}")`.
+
 ### `rust/tool/dds-echo/src/main.rs` (changed)
 
-- `State` gains `selection: RefCell<TopicSelection>` and `all_records: RefCell<Vec<ui::Record>>`.
-- `fn ui_topic(r: &ui::Record) -> Option<&str>` (empty topic -> `None`).
-- `fn rebuild_records(view, all, selection)` — clear + push matching, cap at `MAX_RECORDS`.
-- `fn apply_selection(app, state, records, known, unknown)` — `refresh_topics` + `rebuild_records` + reset `selected-index`.
-- `refresh_topics` takes `selection` and sets `selected: selection.contains(&row.name)`.
-- `tick` drain: build `to_ui`; push to `all_records`; if `selection.matches(record.topic.as_deref())` push to the view; trim both.
-- New handlers: `toggle-topic(name)`, `clear-topics()`, `topic-menu(x, y)`, `dismiss-topic-menu()`, `unselect-all-topics()`.
-- `Clear` also clears `all_records` + selection.
+- `mod decode;`.
+- `Args` gains `--registry <path>` (default `concat!(env!("REPO_ROOT"), "/contracts/topics.toml")`).
+- `State` gains `known: KnownTopics`.
+- Thread `&KnownTopics` through `to_ui`, `refresh_topics`, and `tick`.
+- In `tick`, after `observe_and_attr`: if the record's topic is known, find the DATA frame whose `writer == record.entity_id` with a payload, and set `record.decoded = decode(idl_type, &record.hex[range]).unwrap_or_default()`.
 
 ### `rust/tool/dds-echo/ui/dds_echo.slint` (changed)
 
-- `TopicRow` gains `selected: bool`.
-- `TopicGroup` gains `callback toggle-row(string)` and `callback topic-menu(length, length)`; each row is a `TouchArea` with a selected background and a `pointer-event` handler (left = toggle, right = open the menu at `absolute-position + mouse`).
-- `MainWindow` gains the five callbacks and `topic-menu-visible/-x/-y`; the `Topics (packets)` title is a clickable `TouchArea`; a `TopicGroup` wires its callbacks to the window's.
-- A top-level overlay `Rectangle` (shown when `topic-menu-visible`) hosts a dismiss `TouchArea` and the menu `Rectangle` with the **Unselect All** item.
-- The detail content `VerticalLayout` sets `alignment: LayoutAlignment.start` so spare height collects below the hex instead of being spread between sections.
+- The decoded/hex area keys off `root.selected.decoded != ""` (label and text), so a known topic that fails to decode falls back to hex instead of showing an empty pane.
 
 ## Pseudocode
 
 ```
-// tick, per captured record
-selection = state.selection; all = state.all_records
-ui = to_ui(record)
-all.push(ui.clone()); trim(all)
-if selection.matches(record.topic.as_deref()): view.push(ui); trim(view)
+// main: load the registry once
+let registry = TopicRegistry::load(&registry_path);   // errors logged, empty known set on failure
+let known: KnownTopics = <name, idl_type from registry.topics>;
 
-// on selection change
-fn apply_selection():
-    refresh_topics(counts.rows(), selection)
-    view.clear()
-    for r in all: if selection.matches(ui_topic(r)): view.push(r.clone())
-    selected_index = -1
+// tick, per captured record, after Discovery::observe_and_attr:
+if let Some(topic) = &record.topic {
+    if let Some(idl_type) = known.idl_type(topic) {
+        if let Some(f) = record.frames.iter().rev()
+            .find(|f| f.kind == "DATA" && f.payload.is_some()) {
+            record.decoded = decode(idl_type, &record.hex[f.payload.clone().unwrap()])
+                .unwrap_or_default();
+        }
+    }
+}
 ```
 
 ## Tests
 
-- `model.rs`: `TopicSelection` — toggle add/remove, `clear`, `matches` for a named topic, `unidentified` (`None`/empty), and empty-selection = all.
+- `decode.rs`: `CdrSerializer::serialize(&HelloWorldTopic { .. }, CdrEncoding::Xcdr1)` + a `CDR_LE` header -> `decode` returns a dump containing `greeting`, the greeting text, and the quaternion fields; unknown idl_type -> `None`; truncated payload -> `None`; `CDR_BE` encapsulation -> `None`; empty payload -> `None`.
+- `model.rs`: `KnownTopics` `insert`/`contains`/`idl_type`/`names`; `TopicCounts::rows` seeds Known from `KnownTopics`; `Record::is_known`.
+- Update existing `model`/`capture`/`main` tests for the new signatures and the `Frame.payload` field (the `record(..)`/`frame(..)` helpers gain the field).
 
 ## Minimal test
 
 ```
 .\scripts\build.ps1 -Test
 .\scripts\build.ps1
-# then: build\deploy\bin\dds-echo.exe, Start, .\scripts\traffic-fake-topic.ps1 -Repeat 2
+# build\deploy\bin\dds-echo.exe, Start, then:
+.\scripts\traffic-fake-topic.ps1 -Repeat 2
 ```
 
-Expect `FakeTopicOne`/`FakeTopicTwo`/`unidentified` rows; selecting filters the center list (union) with highlighted rows; the title and the context menu's **Unselect All** both clear; spare detail height sits below the hex.
+Select the `HelloWorldTopic` data datagram: the detail pane shows the decoded fields, and its row is under **Known**. An unregistered topic's datagram still shows hex.
 
 ## Risks and follow-ups
 
-- Overlay z-order and right-click handling in Slint (no native context menu).
-- Rebuilding the view clones `ui::Record` (SharedString clones are cheap) and only happens on selection changes.
-- Follow-the-tail still acts on the filtered view.
+- **Endianness:** only native (little-endian) samples decode; `CDR_BE` falls back to hex.
+- **Dependency weight:** `stations-dds` links the CycloneDDS binding into `dds-echo` (static; no runtime DLL), and building `dds-echo` now requires the generated IDL (produced by `scripts/build.ps1`).
+- **Registry path:** the default is the compile-time `REPO_ROOT` (fine for a dev tool run from the repo); `--registry` overrides.
+- **Field display** is pretty-printed until `topic-field-metadata` provides a field model.
 
 ## Module layout
 
 ```
-rust/tool/dds-echo/src/model.rs  + TopicSelection
-rust/tool/dds-echo/src/main.rs   selection state, filtering, callbacks
-rust/tool/dds-echo/ui/dds_echo.slint  row selection, title clear, context menu, detail stretch
+rust/tool/dds-echo/src/model.rs    + KnownTopics; Frame.payload; is_known/rows take &KnownTopics
+rust/tool/dds-echo/src/capture.rs  frame_from copies payload
+rust/tool/dds-echo/src/decode.rs   CdrDeserializer dispatch (HelloWorldTopic)
+rust/tool/dds-echo/src/main.rs     registry load, KnownTopics state, tick decode
+rust/tool/dds-echo/ui/dds_echo.slint  decoded/hex keyed on decoded != ""
 ```
-
-## Result
-
-Implemented. `model::TopicSelection` (toggle/clear/contains/matches) is the pure filter; `main` keeps a backing `all_records` and the filtered `records` view, appending matching records on capture and rebuilding on selection change via `apply_selection`; `refresh_topics` marks each `ui::TopicRow` selected. The Slint topics rows are clickable (left toggles, right opens the menu at the cursor), the `Topics (packets)` title clears the selection, and a right-click overlay menu offers **Unselect All**.
-
-Detail-pane spacing fix: the content `VerticalLayout` now sets `alignment: LayoutAlignment.start`. The pane's `ScrollView` stretches its content to the viewport (`Flickable` binds `content-height = max(viewport, child.min-height)`), and a layout's default main-axis `alignment` is `stretch`; when no child is growable Slint's solver distributes the leftover **equally across all children**, which put the spare height between sections. `start` packs children at their preferred sizes with the leftover after the last child (below the hex); the earlier trailing `Rectangle { vertical-stretch: 1; }` was removed.
-
-Files changed: `rust/tool/dds-echo/src/{model.rs,main.rs}` and `ui/dds_echo.slint`.
-
-Verified: `scripts/build.ps1 -Test` passes with 42 `dds-echo` tests (1 new: `topic_selection_toggle_and_match`). Release build and deploy succeed. The interactive check (select/filter/unselect, the context menu, the detail spacing) remains for the user.
