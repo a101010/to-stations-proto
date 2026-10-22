@@ -15,6 +15,7 @@ use socket2::{Domain, Protocol, Socket, Type};
 
 use crate::model::{self, Class, Record};
 use crate::rtps;
+use crate::sedp;
 
 const READ_TIMEOUT: Duration = Duration::from_millis(200);
 const BUF_SIZE: usize = 65_535;
@@ -115,7 +116,7 @@ pub fn record_from(data: &[u8], src: SocketAddr, local_port: u16, elapsed_ms: u6
         dest_port: local_port,
         size: data.len(),
         topic: None,
-        summary: if class == Class::Rtps { "RTPS" } else { "UDP" }.to_string(),
+        submessages: if class == Class::Rtps { "RTPS" } else { "UDP" }.to_string(),
         hex: data.to_vec(),
         decoded: String::new(),
         frames: Vec::new(),
@@ -130,11 +131,50 @@ pub fn record_from(data: &[u8], src: SocketAddr, local_port: u16, elapsed_ms: u6
             .rev()
             .find_map(|f| f.writer)
             .map(|e| rtps::hex(&e));
+
+        // Decode each submessage's SPDP/SEDP parameter-list payload, attaching
+        // the announcement to that submessage.
+        for (i, frame) in parsed.frames.iter().enumerate() {
+            let Some(range) = &frame.payload else {
+                continue;
+            };
+            let Some(found) = data.get(range.clone()).and_then(sedp::parse) else {
+                continue;
+            };
+            record.frames[i].announcement = Some(match found {
+                sedp::Discovered::Participant { guid_prefix } => model::Announcement::Participant {
+                    prefix: rtps::hex(&guid_prefix),
+                },
+                sedp::Discovered::Endpoint {
+                    guid,
+                    kind,
+                    topic,
+                    type_name,
+                } => model::Announcement::Endpoint(model::Endpoint {
+                    guid: rtps::hex(&guid),
+                    prefix: rtps::hex(&guid[..12]),
+                    kind: kind.into(),
+                    topic: topic.unwrap_or_default(),
+                    type_name: type_name.unwrap_or_default(),
+                }),
+            });
+        }
+
         if !record.frames.is_empty() {
-            record.summary = record.frame_summary();
+            record.submessages = record.submessage_list();
         }
     }
     record
+}
+
+impl From<sedp::EndpointKind> for model::EndpointKind {
+    fn from(kind: sedp::EndpointKind) -> Self {
+        match kind {
+            sedp::EndpointKind::Writer => model::EndpointKind::Writer,
+            sedp::EndpointKind::Reader => model::EndpointKind::Reader,
+            sedp::EndpointKind::Other => model::EndpointKind::Other,
+        }
+    }
 }
 
 /// Map a parsed RTPS [`rtps::Frame`] to the display [`model::Frame`].
@@ -155,6 +195,7 @@ fn frame_from(f: &rtps::Frame) -> model::Frame {
         reader: f.reader.map(|e| rtps::hex(&e)).unwrap_or_default(),
         seq,
         len: f.len,
+        announcement: None,
     }
 }
 
@@ -513,7 +554,7 @@ mod tests {
         assert_eq!(r.class, Class::Rtps);
         assert_eq!(r.size, 12);
         assert_eq!(r.hex, b"RTPS\x02\x04abcdef");
-        assert_eq!(r.summary, "RTPS");
+        assert_eq!(r.submessages, "RTPS");
         assert!(r.frames.is_empty());
         assert!(r.guid_prefix.is_none());
         assert_eq!(r.src_addr, "127.0.0.1:1234");
@@ -543,7 +584,92 @@ mod tests {
         assert_eq!(r.frames.len(), 1);
         assert_eq!(r.frames[0].kind, "DATA");
         assert_eq!(r.frames[0].seq, "7");
-        assert_eq!(r.summary, "DATA(sn=7)");
+        assert_eq!(r.submessages, "DATA");
+    }
+
+    /// A parameter with its length padded to a multiple of 4, little-endian.
+    fn param(pid: u16, value: &[u8]) -> Vec<u8> {
+        let padded = (value.len() + 3) & !3;
+        let mut v = Vec::new();
+        v.extend_from_slice(&pid.to_le_bytes());
+        v.extend_from_slice(&(padded as u16).to_le_bytes());
+        v.extend_from_slice(value);
+        v.resize(v.len() + (padded - value.len()), 0);
+        v
+    }
+
+    fn cdr_string(s: &str) -> Vec<u8> {
+        let n = s.len() as u32 + 1;
+        let mut v = Vec::new();
+        v.extend_from_slice(&n.to_le_bytes());
+        v.extend_from_slice(s.as_bytes());
+        v.push(0);
+        v
+    }
+
+    /// An RTPS datagram with one DATA submessage carrying `payload`.
+    fn rtps_data(prefix: [u8; 12], payload: &[u8]) -> Vec<u8> {
+        let mut d = Vec::new();
+        d.extend_from_slice(b"RTPS");
+        d.extend_from_slice(&[2, 4]);
+        d.extend_from_slice(&[0x01, 0x0f]);
+        d.extend_from_slice(&prefix);
+        d.extend_from_slice(&[0x15, 0x05]); // DATA, E|D
+        d.extend_from_slice(&((20 + payload.len()) as u16).to_le_bytes());
+        d.extend_from_slice(&0u16.to_le_bytes()); // extraFlags
+        d.extend_from_slice(&16u16.to_le_bytes()); // octetsToInlineQos
+        d.extend_from_slice(&[0, 0, 0, 0]); // reader
+        d.extend_from_slice(&[0, 0, 0x03, 0xc2]); // writer (SEDP publications)
+        d.extend_from_slice(&0u32.to_le_bytes());
+        d.extend_from_slice(&1u32.to_le_bytes()); // writerSN
+        d.extend_from_slice(payload);
+        d
+    }
+
+    #[test]
+    fn record_from_parses_sedp_endpoint() {
+        let src: SocketAddr = "127.0.0.1:1234".parse().unwrap();
+        let mut guid = [0u8; 16];
+        guid[0..12].copy_from_slice(&[0xaa; 12]);
+        guid[12..16].copy_from_slice(&[0, 0, 0x01, 0x02]); // writer
+
+        let mut pl = vec![0x00, 0x03, 0x00, 0x00]; // PL_CDR_LE
+        pl.extend(param(0x005a, &guid));
+        pl.extend(param(0x0005, &cdr_string("HelloWorldTopic")));
+        pl.extend(param(0x0007, &cdr_string("hello_world::HelloWorldTopic")));
+        pl.extend(param(0x0001, &[])); // sentinel
+
+        let d = rtps_data([0x11; 12], &pl);
+        let r = record_from(&d, src, 7400, 5);
+        assert_eq!(r.class, Class::Rtps);
+        assert_eq!(r.frames.len(), 1);
+        match r.frames[0].announcement.as_ref().expect("announcement") {
+            model::Announcement::Endpoint(e) => {
+                assert_eq!(e.guid, "aaaaaaaaaaaaaaaaaaaaaaaa00000102");
+                assert_eq!(e.prefix, "aaaaaaaaaaaaaaaaaaaaaaaa");
+                assert_eq!(e.kind, model::EndpointKind::Writer);
+                assert_eq!(e.topic, "HelloWorldTopic");
+                assert_eq!(e.type_name, "hello_world::HelloWorldTopic");
+            }
+            other => panic!("expected endpoint, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn record_from_parses_spdp_participant() {
+        let src: SocketAddr = "127.0.0.1:1234".parse().unwrap();
+        let mut pl = vec![0x00, 0x03, 0x00, 0x00]; // PL_CDR_LE
+        pl.extend(param(0x0050, &[0xcc; 12]));
+        pl.extend(param(0x0001, &[])); // sentinel
+
+        let d = rtps_data([0x11; 12], &pl);
+        let r = record_from(&d, src, 7400, 5);
+        match r.frames[0].announcement.as_ref().expect("announcement") {
+            model::Announcement::Participant { prefix } => {
+                assert_eq!(prefix, "cccccccccccccccccccccccc");
+            }
+            other => panic!("expected participant, got {other:?}"),
+        }
     }
 
     #[test]

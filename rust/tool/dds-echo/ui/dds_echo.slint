@@ -1,21 +1,17 @@
 import { Button, LineEdit, ListView, ScrollView } from "std-widgets.slint";
 
 export struct Frame {
-    id: string,
-    kind: string,
-    writer: string,
-    reader: string,
-    seq: string,
-    len: int,
+    line: string,
+    detail: string,
 }
 
 export struct Record {
     time: string,
-    class: string,
+    protocol: string,
     source: string,
     size: int,
     topic: string,
-    summary: string,
+    submessages: string,
     hex: string,
     decoded: string,
     guid: string,
@@ -61,7 +57,6 @@ component TopicGroup inherits Rectangle {
     in property <[TopicRow]> rows;
     in property <int> packets;
     in-out property <bool> expanded: true;
-    callback toggle();
 
     background: transparent;
 
@@ -78,7 +73,7 @@ component TopicGroup inherits Rectangle {
                 font-weight: 600;
             }
             TouchArea {
-                clicked => { root.toggle(); }
+                clicked => { root.expanded = !root.expanded; }
             }
         }
         if root.expanded : VerticalLayout {
@@ -139,11 +134,11 @@ export component MainWindow inherits Window {
 
     in-out property <Record> selected: {
         time: "",
-        class: "",
+        protocol: "",
         source: "",
         size: 0,
         topic: "",
-        summary: "",
+        submessages: "",
         hex: "",
         decoded: "",
         guid: "",
@@ -224,8 +219,8 @@ export component MainWindow inherits Window {
                         vertical-stretch: 1;
                         VerticalLayout {
                             spacing: 6px;
-                            TopicGroup { title: "Known"; rows: root.known-topics; packets: root.known-total; expanded: true; }
-                            TopicGroup { title: "Unknown"; rows: root.unknown-topics; packets: root.unknown-total; expanded: false; }
+                            TopicGroup { title: "Known"; rows: root.known-topics; packets: root.known-total; }
+                            TopicGroup { title: "Unknown"; rows: root.unknown-topics; packets: root.unknown-total; }
                         }
                     }
                 }
@@ -241,12 +236,12 @@ export component MainWindow inherits Window {
                     spacing: 4px;
                     HorizontalLayout {
                         spacing: 8px;
-                        Text { text: "Time"; color: #9a9a9a; min-width: 70px; }
-                        Text { text: "Class"; color: #9a9a9a; min-width: 80px; }
-                        Text { text: "Source"; color: #9a9a9a; min-width: 100px; }
-                        Text { text: "Topic"; color: #9a9a9a; min-width: 130px; }
-                        Text { text: "Size"; color: #9a9a9a; min-width: 50px; }
-                        Text { text: "Summary"; color: #9a9a9a; horizontal-stretch: 1; }
+                        Text { text: "Time"; color: #9a9a9a; width: 70px; }
+                        Text { text: "Protocol"; color: #9a9a9a; width: 80px; }
+                        Text { text: "Source"; color: #9a9a9a; width: 300px; }
+                        Text { text: "Topic"; color: #9a9a9a; width: 130px; }
+                        Text { text: "Size"; color: #9a9a9a; width: 50px; }
+                        Text { text: "Submessages"; color: #9a9a9a; horizontal-stretch: 1; }
                     }
                     list := ScrollView {
                         content-y <=> root.list-content-y;
@@ -258,17 +253,12 @@ export component MainWindow inherits Window {
                                 background: i == root.selected-index ? #333a44 : transparent;
                                 HorizontalLayout {
                                     spacing: 8px;
-                                    Text { text: r.time; color: #d0d0d0; min-width: 70px; vertical-alignment: center; }
-                                    Text {
-                                        text: r.class;
-                                        min-width: 80px;
-                                        vertical-alignment: center;
-                                        color: r.class == "known" ? #8fd18f : (r.class == "unregistered" ? #c9a26a : (r.class == "RTPS" ? #9aa0b0 : #7a7a7a));
-                                    }
-                                    Text { text: r.source; color: #d0d0d0; min-width: 100px; vertical-alignment: center; }
-                                    Text { text: r.topic; color: r.known ? #8fd18f : #c9a26a; min-width: 130px; vertical-alignment: center; }
-                                    Text { text: "" + r.size; color: #d0d0d0; min-width: 50px; vertical-alignment: center; }
-                                    Text { text: r.summary; color: #d0d0d0; horizontal-stretch: 1; vertical-alignment: center; }
+                                    Text { text: r.time; color: #d0d0d0; width: 70px; vertical-alignment: center; }
+                                    Text { text: r.protocol; color: #9aa0b0; width: 80px; vertical-alignment: center; }
+                                    Text { text: r.source; color: #d0d0d0; width: 300px; vertical-alignment: center; }
+                                    Text { text: r.topic; color: r.known ? #8fd18f : #c9a26a; width: 130px; vertical-alignment: center; }
+                                    Text { text: "" + r.size; color: #d0d0d0; width: 50px; vertical-alignment: center; }
+                                    Text { text: r.submessages; color: #9a9a9a; horizontal-stretch: 1; vertical-alignment: center; }
                                 }
                                 TouchArea {
                                     clicked => { root.select(i); }
@@ -285,57 +275,34 @@ export component MainWindow inherits Window {
                 max-width: 361px;
                 background: #202020;
                 border-radius: 6px;
-                VerticalLayout {
-                    padding: 8px;
-                    spacing: 4px;
-                    Text { text: "Detail"; color: #ffffff; font-weight: 700; }
-                    Text { text: "class: " + root.selected.class; color: #d0d0d0; }
-                    Text { text: "source: " + root.selected.source; color: #d0d0d0; }
-                    Text { text: "guid: " + root.selected.guid; color: #d0d0d0; }
-                    Text { text: "entity: " + root.selected.entity; color: #d0d0d0; }
-                    Text { text: "size: " + root.selected.size; color: #d0d0d0; }
-                    Text { text: "topic: " + root.selected.topic; color: #d0d0d0; }
-                    Text { text: "summary: " + root.selected.summary; color: #d0d0d0; }
-                    Text { text: "submessages (" + root.selected.frames.length + ")"; color: #9a9a9a; }
-                    ScrollView {
-                        height: 150px;
-                        VerticalLayout {
+                ScrollView {
+                    VerticalLayout {
+                        padding: 8px;
+                        spacing: 4px;
+                        Text { text: "Detail"; color: #ffffff; font-weight: 700; }
+                        Text { text: "protocol: " + root.selected.protocol; color: #d0d0d0; }
+                        Text { text: "source: " + root.selected.source; color: #d0d0d0; wrap: word-wrap; }
+                        Text { text: "participant: " + root.selected.guid; color: #d0d0d0; }
+                        Text { text: "writer: " + root.selected.entity; color: #d0d0d0; }
+                        Text { text: "size: " + root.selected.size; color: #d0d0d0; }
+                        Text { text: "topic: " + root.selected.topic; color: #d0d0d0; }
+                        Rectangle { height: 6px; }
+                        Text { text: "submessages (" + root.selected.frames.length + ")"; color: #9a9a9a; }
+                        for f in root.selected.frames : VerticalLayout {
                             spacing: 1px;
-                            HorizontalLayout {
-                                spacing: 6px;
-                                Text { text: "id"; color: #9a9a9a; min-width: 24px; }
-                                Text { text: "kind"; color: #9a9a9a; min-width: 62px; }
-                                Text { text: "writer"; color: #9a9a9a; min-width: 72px; }
-                                Text { text: "seq"; color: #9a9a9a; min-width: 62px; }
-                                Text { text: "len"; color: #9a9a9a; horizontal-stretch: 1; }
-                            }
-                            for f in root.selected.frames : Rectangle {
-                                height: 16px;
-                                HorizontalLayout {
-                                    spacing: 6px;
-                                    Text { text: f.id; color: #9aa0b0; min-width: 24px; vertical-alignment: center; font-family: "Courier New"; font-size: 12px; }
-                                    Text { text: f.kind; color: #d0d0d0; min-width: 62px; vertical-alignment: center; }
-                                    Text { text: f.writer; color: #9aa0b0; min-width: 72px; vertical-alignment: center; font-family: "Courier New"; font-size: 12px; }
-                                    Text { text: f.seq; color: #d0d0d0; min-width: 62px; vertical-alignment: center; }
-                                    Text { text: "" + f.len; color: #9a9a9a; horizontal-stretch: 1; vertical-alignment: center; }
-                                }
-                            }
+                            Text { text: f.line; color: #d0d0d0; font-family: "Courier New"; font-size: 12px; wrap: word-wrap; }
+                            if f.detail != "" : Text { text: f.detail; color: #8fd18f; font-size: 12px; wrap: word-wrap; }
+                            Rectangle { height: 1px; background: #3a3a3a; }
                         }
-                    }
-                    Text { text: root.selected.known ? "decoded" : "hex"; color: #9a9a9a; }
-                    ScrollView {
-                        vertical-stretch: 1;
-                        HorizontalLayout {
-                            Text {
-                                text: root.selected.known ? root.selected.decoded : root.selected.hex;
-                                color: #c0c0c0;
-                                font-family: "Courier New";
-                                font-size: 12px;
-                                wrap: no-wrap;
-                                horizontal-alignment: left;
-                                vertical-alignment: top;
-                            }
-                            Rectangle { horizontal-stretch: 1; }
+                        Rectangle { height: 6px; }
+                        Text { text: root.selected.known ? "decoded" : "hex"; color: #9a9a9a; }
+                        Text {
+                            text: root.selected.known ? root.selected.decoded : root.selected.hex;
+                            color: #c0c0c0;
+                            font-family: "Courier New";
+                            font-size: 12px;
+                            wrap: no-wrap;
+                            horizontal-alignment: left;
                         }
                     }
                 }

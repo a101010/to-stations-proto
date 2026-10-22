@@ -10,6 +10,7 @@
 mod capture;
 mod model;
 mod rtps;
+mod sedp;
 
 mod ui {
     slint::include_modules!();
@@ -24,7 +25,7 @@ use clap::Parser;
 use slint::{ComponentHandle as _, Model as _, ModelRc, Timer, TimerMode, VecModel};
 
 use crate::capture::{Capture, CaptureConfig};
-use crate::model::{RateTracker, Stats, TopicCounts, MAX_RECORDS};
+use crate::model::{Discovery, RateTracker, Stats, TopicCounts, MAX_RECORDS};
 use crate::ui::MainWindow;
 
 /// The UI refresh / capture-drain tick.
@@ -56,19 +57,52 @@ struct State {
     rx: RefCell<Option<Receiver<model::Record>>>,
     stats: RefCell<Stats>,
     counts: RefCell<TopicCounts>,
+    discovery: RefCell<Discovery>,
     rates: RefCell<RateTracker>,
     start: Cell<Instant>,
     following: Cell<bool>,
 }
 
+/// A submessage's envelope row, e.g.
+/// `ID 15   Kind DATA   Writer 000003c2   Reader 00000000   Seq 1   Len 92`.
+fn frame_line(f: &model::Frame) -> String {
+    let mut parts = vec![format!("ID {:02x}", f.id), format!("Kind {}", f.kind)];
+    if !f.writer.is_empty() {
+        parts.push(format!("Writer {}", f.writer));
+    }
+    if !f.reader.is_empty() {
+        parts.push(format!("Reader {}", f.reader));
+    }
+    if !f.seq.is_empty() {
+        parts.push(format!("Seq {}", f.seq));
+    }
+    parts.push(format!("Len {}", f.len));
+    parts.join("   ")
+}
+
+/// The decoded row(s) beneath a submessage envelope (empty when nothing decoded).
+fn frame_detail(f: &model::Frame) -> String {
+    match &f.announcement {
+        Some(model::Announcement::Participant { prefix }) => format!("Participant {prefix}"),
+        Some(model::Announcement::Endpoint(e)) => format!(
+            "Endpoint {} {}   Topic {}   Type {}",
+            e.kind.label(),
+            e.guid.get(24..).unwrap_or(&e.guid),
+            e.topic,
+            e.type_name
+        ),
+        None => String::new(),
+    }
+}
+
 fn to_ui(r: &model::Record) -> ui::Record {
     ui::Record {
         time: r.time_label().into(),
-        class: r.class.label().into(),
+        protocol: r.protocol().into(),
         source: r.src_addr.clone().into(),
         size: r.size as i32,
         topic: r.topic.clone().unwrap_or_default().into(),
-        summary: r.summary.clone().into(),
+        submessages: r.submessages.clone().into(),
         hex: r.hex_string().into(),
         decoded: r.decoded.clone().into(),
         guid: r.guid_prefix.clone().unwrap_or_default().into(),
@@ -79,12 +113,8 @@ fn to_ui(r: &model::Record) -> ui::Record {
                 .frames
                 .iter()
                 .map(|f| ui::Frame {
-                    id: format!("{:02x}", f.id).into(),
-                    kind: f.kind.clone().into(),
-                    writer: f.writer.clone().into(),
-                    reader: f.reader.clone().into(),
-                    seq: f.seq.clone().into(),
-                    len: f.len as i32,
+                    line: frame_line(f).into(),
+                    detail: frame_detail(f).into(),
                 })
                 .collect();
             ModelRc::from(frames.as_slice())
@@ -136,7 +166,8 @@ fn tick(
         if let Some(rx) = rx.as_ref() {
             loop {
                 match rx.try_recv() {
-                    Ok(record) => {
+                    Ok(mut record) => {
+                        state.discovery.borrow_mut().observe_and_attr(&mut record);
                         state.stats.borrow_mut().observe(&record);
                         state.counts.borrow_mut().observe(&record);
                         records.push(to_ui(&record));
@@ -151,6 +182,12 @@ fn tick(
     }
 
     refresh_topics(app, &state.counts.borrow().rows(), known, unknown);
+
+    {
+        let discovery = state.discovery.borrow();
+        app.set_participants(discovery.participants() as i32);
+        app.set_endpoints(discovery.endpoints() as i32);
+    }
 
     let rates = state.rates.borrow_mut().sample(&state.stats.borrow(), now_ms);
     let stats = state.stats.borrow();
@@ -203,6 +240,7 @@ fn main() -> Result<(), slint::PlatformError> {
         rx: RefCell::new(None),
         stats: RefCell::new(Stats::default()),
         counts: RefCell::new(TopicCounts::default()),
+        discovery: RefCell::new(Discovery::default()),
         rates: RefCell::new(RateTracker::default()),
         start: Cell::new(Instant::now()),
         following: Cell::new(true),
@@ -296,6 +334,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 records.clear();
                 state.stats.borrow_mut().reset();
                 state.counts.borrow_mut().reset();
+                state.discovery.borrow_mut().reset();
                 *state.rates.borrow_mut() = RateTracker::default();
                 refresh_topics(&app, &state.counts.borrow().rows(), &known, &unknown);
                 app.set_packets(0);
@@ -303,6 +342,8 @@ fn main() -> Result<(), slint::PlatformError> {
                 app.set_rtps(0);
                 app.set_pps(0);
                 app.set_bps(0);
+                app.set_participants(0);
+                app.set_endpoints(0);
                 app.set_selected_index(-1);
             }
         });

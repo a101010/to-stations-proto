@@ -2,7 +2,7 @@
 //!
 //! UI-agnostic (no Slint types) so it is unit-testable.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// The datagram table cap.
 pub const MAX_RECORDS: usize = 1000;
@@ -27,17 +27,6 @@ pub enum Class {
     Known,
 }
 
-impl Class {
-    pub fn label(self) -> &'static str {
-        match self {
-            Class::Udp => "UDP",
-            Class::Rtps => "RTPS",
-            Class::Unregistered => "unregistered",
-            Class::Known => "known",
-        }
-    }
-}
-
 /// One decoded RTPS submessage, formatted for display.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Frame {
@@ -53,6 +42,49 @@ pub struct Frame {
     pub seq: String,
     /// The submessage length in bytes.
     pub len: usize,
+    /// The discovery announcement this submessage's payload decoded, if any.
+    pub announcement: Option<Announcement>,
+}
+
+/// Which a discovered endpoint is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EndpointKind {
+    Writer,
+    Reader,
+    Other,
+}
+
+impl EndpointKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            EndpointKind::Writer => "writer",
+            EndpointKind::Reader => "reader",
+            EndpointKind::Other => "other",
+        }
+    }
+}
+
+/// A discovered endpoint (from SEDP), formatted for display.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Endpoint {
+    /// The full endpoint GUID (hex, 32 chars): participant prefix + entity id.
+    pub guid: String,
+    /// The participant GUID prefix (hex, 24 chars).
+    pub prefix: String,
+    pub kind: EndpointKind,
+    /// The topic the endpoint uses; empty for a builtin endpoint.
+    pub topic: String,
+    /// The IDL type name; empty when absent.
+    pub type_name: String,
+}
+
+/// What a submessage's payload decoded to (SPDP/SEDP discovery).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Announcement {
+    /// A participant announcement (SPDP): the announced participant prefix.
+    Participant { prefix: String },
+    /// An endpoint announcement (SEDP).
+    Endpoint(Endpoint),
 }
 
 /// One captured datagram (or a decoded sample).
@@ -69,7 +101,8 @@ pub struct Record {
     pub dest_port: u16,
     pub size: usize,
     pub topic: Option<String>,
-    pub summary: String,
+    /// The submessage kinds in order (the table's `Submessages` column).
+    pub submessages: String,
     pub hex: Vec<u8>,
     /// Rendered fields for a decoded [`Class::Known`] message; empty otherwise.
     pub decoded: String,
@@ -115,22 +148,31 @@ impl Record {
             .is_some_and(|t| KNOWN_TOPICS.contains(&t))
     }
 
-    /// A one-line summary of the decoded submessages, e.g.
-    /// `"DATA(sn=42); HEARTBEAT(1..5); INFO_TS"` (empty when there are none).
-    pub fn frame_summary(&self) -> String {
+    /// The transport protocol for the table's `Protocol` column.
+    pub fn protocol(&self) -> &'static str {
+        match self.class {
+            Class::Udp => "UDP",
+            _ => "RTPS",
+        }
+    }
+
+    /// The datagram writer's full GUID (hex), when both its prefix and entity
+    /// id are known.
+    pub fn writer_guid(&self) -> Option<String> {
+        match (&self.guid_prefix, &self.entity_id) {
+            (Some(prefix), Some(entity)) => Some(format!("{prefix}{entity}")),
+            _ => None,
+        }
+    }
+
+    /// The submessage kinds in order, e.g. `"INFO_TS, DATA, DATA, HEARTBEAT"`
+    /// (empty when there are none).
+    pub fn submessage_list(&self) -> String {
         self.frames
             .iter()
-            .map(|f| {
-                if f.seq.is_empty() {
-                    f.kind.clone()
-                } else if f.kind == "HEARTBEAT" {
-                    format!("{}({})", f.kind, f.seq)
-                } else {
-                    format!("{}(sn={})", f.kind, f.seq)
-                }
-            })
+            .map(|f| f.kind.as_str())
             .collect::<Vec<_>>()
-            .join("; ")
+            .join(", ")
     }
 }
 
@@ -217,6 +259,61 @@ impl TopicCounts {
     }
 }
 
+/// The participants, endpoints, and writer->topic map learned from SPDP/SEDP.
+///
+/// Accumulated on the UI thread; every item is keyed by GUID so repeated
+/// announcements are deduplicated.
+#[derive(Clone, Debug, Default)]
+pub struct Discovery {
+    participants: BTreeSet<String>,
+    endpoints: BTreeMap<String, Endpoint>,
+}
+
+impl Discovery {
+    /// Learn this datagram's announcements, then attribute its topic: when the
+    /// record's topic is still unknown and its writer GUID matches a learned
+    /// endpoint that carries a topic, set `record.topic` from it.
+    pub fn observe_and_attr(&mut self, record: &mut Record) {
+        for frame in &record.frames {
+            match &frame.announcement {
+                Some(Announcement::Participant { prefix }) => {
+                    self.participants.insert(prefix.clone());
+                }
+                Some(Announcement::Endpoint(endpoint)) => {
+                    self.participants.insert(endpoint.prefix.clone());
+                    self.endpoints.insert(endpoint.guid.clone(), endpoint.clone());
+                }
+                None => {}
+            }
+        }
+
+        if record.topic.is_none() {
+            if let Some(guid) = record.writer_guid() {
+                if let Some(endpoint) = self.endpoints.get(&guid) {
+                    if !endpoint.topic.is_empty() {
+                        record.topic = Some(endpoint.topic.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    /// The number of distinct participants observed.
+    pub fn participants(&self) -> usize {
+        self.participants.len()
+    }
+
+    /// The number of distinct endpoints observed.
+    pub fn endpoints(&self) -> usize {
+        self.endpoints.len()
+    }
+
+    pub fn reset(&mut self) {
+        self.participants.clear();
+        self.endpoints.clear();
+    }
+}
+
 /// Per-second rates.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Rates {
@@ -267,7 +364,7 @@ mod tests {
             dest_port: 7400,
             size,
             topic: topic.map(str::to_string),
-            summary: String::new(),
+            submessages: String::new(),
             hex: vec![0],
             decoded: String::new(),
             frames: Vec::new(),
@@ -344,39 +441,92 @@ mod tests {
         assert_eq!(lines[1].split(' ').count(), 1);
     }
 
+    fn frame(id: u8, kind: &str, writer: &str, seq: &str, len: usize) -> Frame {
+        Frame {
+            id,
+            kind: kind.into(),
+            writer: writer.into(),
+            reader: String::new(),
+            seq: seq.into(),
+            len,
+            announcement: None,
+        }
+    }
+
     #[test]
-    fn frame_summary_lists_submessages() {
+    fn submessage_list_lists_kinds() {
         let mut r = record(Class::Rtps, 0, None);
-        assert_eq!(r.frame_summary(), "");
+        assert_eq!(r.submessage_list(), "");
         r.frames = vec![
-            Frame {
-                id: 0x15,
-                kind: "DATA".into(),
-                writer: "000003c2".into(),
-                reader: "00000000".into(),
-                seq: "42".into(),
-                len: 20,
-            },
-            Frame {
-                id: 0x07,
-                kind: "HEARTBEAT".into(),
-                writer: "000003c2".into(),
-                reader: "00000000".into(),
-                seq: "1..5".into(),
-                len: 28,
-            },
-            Frame {
-                id: 0x09,
-                kind: "INFO_TS".into(),
-                writer: String::new(),
-                reader: String::new(),
-                seq: String::new(),
-                len: 8,
-            },
+            frame(0x15, "DATA", "000003c2", "42", 20),
+            frame(0x15, "DATA", "000003c2", "43", 20),
+            frame(0x07, "HEARTBEAT", "000003c2", "1..5", 28),
+            frame(0x09, "INFO_TS", "", "", 8),
         ];
+        assert_eq!(r.submessage_list(), "DATA, DATA, HEARTBEAT, INFO_TS");
+    }
+
+    #[test]
+    fn discovery_learns_endpoints_and_attributes_data() {
+        let mut d = Discovery::default();
+
+        // An SEDP endpoint announcement carried by a DATA submessage.
+        let mut ann = record(Class::Rtps, 0, None);
+        ann.frames.push(Frame {
+            announcement: Some(Announcement::Endpoint(Endpoint {
+                guid: "aaaaaaaaaaaaaaaaaaaaaaaa00000102".into(),
+                prefix: "aaaaaaaaaaaaaaaaaaaaaaaa".into(),
+                kind: EndpointKind::Writer,
+                topic: "Throughput".into(),
+                type_name: "Throughput".into(),
+            })),
+            ..frame(0x15, "DATA", "000003c2", "1", 20)
+        });
+        ann.frames.push(Frame {
+            announcement: Some(Announcement::Participant {
+                prefix: "aaaaaaaaaaaaaaaaaaaaaaaa".into(),
+            }),
+            ..frame(0x15, "DATA", "000001c1", "1", 20)
+        });
+        d.observe_and_attr(&mut ann);
+        assert_eq!(d.participants(), 1);
+        assert_eq!(d.endpoints(), 1);
+        assert!(ann.topic.is_none()); // the announcement is not itself data
+
+        // Data from the announced writer is attributed to its topic.
+        let mut data = record(Class::Rtps, 0, None);
+        data.guid_prefix = Some("aaaaaaaaaaaaaaaaaaaaaaaa".into());
+        data.entity_id = Some("00000102".into());
+        d.observe_and_attr(&mut data);
+        assert_eq!(data.topic.as_deref(), Some("Throughput"));
+
+        // Data from an unknown writer stays untitled.
+        let mut other = record(Class::Rtps, 0, None);
+        other.guid_prefix = Some("bbbbbbbbbbbbbbbbbbbbbbbb".into());
+        other.entity_id = Some("00000102".into());
+        d.observe_and_attr(&mut other);
+        assert!(other.topic.is_none());
+
+        // Re-announcing the same endpoint does not double-count.
+        d.observe_and_attr(&mut ann.clone());
+        assert_eq!(d.participants(), 1);
+        assert_eq!(d.endpoints(), 1);
+
+        d.reset();
+        assert_eq!(d.participants(), 0);
+        assert_eq!(d.endpoints(), 0);
+    }
+
+    #[test]
+    fn writer_guid_needs_prefix_and_entity() {
+        let mut r = record(Class::Rtps, 0, None);
+        assert_eq!(r.writer_guid(), None);
+        r.guid_prefix = Some("111111111111111111111111".into());
+        assert_eq!(r.writer_guid(), None);
+        r.entity_id = Some("000003c2".into());
         assert_eq!(
-            r.frame_summary(),
-            "DATA(sn=42); HEARTBEAT(1..5); INFO_TS"
+            r.writer_guid().as_deref(),
+            Some("111111111111111111111111000003c2")
         );
     }
 }

@@ -36,6 +36,10 @@ pub struct Frame {
     pub count: Option<u32>,
     /// The submessage length (resolved to the end of the message when `0`).
     pub len: usize,
+    /// For a DATA submessage, the absolute byte range (within the datagram) of
+    /// its serialized payload (the encapsulation header onward); `None` for
+    /// non-DATA, empty, or DATA_FRAG submessages.
+    pub payload: Option<std::ops::Range<usize>>,
 }
 
 /// The result of parsing one datagram.
@@ -125,6 +129,7 @@ pub fn parse(data: &[u8]) -> Parsed {
             sn_last: None,
             count: None,
             len: sub.len(),
+            payload: None,
         };
 
         match id {
@@ -151,6 +156,9 @@ pub fn parse(data: &[u8]) -> Parsed {
                     frame.sn_last = read_seq(sub, base + 16, le);
                     frame.count = read_u32(sub, base + 24, le);
                 }
+                if id == 0x15 {
+                    frame.payload = data_payload(sub, base, flags, le, body, end);
+                }
             }
             0x0c => {
                 if let Some(prefix) = read_array12(sub, 8) {
@@ -171,6 +179,38 @@ pub fn parse(data: &[u8]) -> Parsed {
         header: Some(header),
         frames,
         src_guid_prefix: Some(src),
+    }
+}
+
+/// The absolute range, within the datagram, of a DATA submessage's serialized
+/// payload: the octets after `writerSN` (skipping the inline QoS parameter list
+/// when the `Q` flag is set) through the end of the submessage. `None` when the
+/// submessage carries no payload.
+fn data_payload(
+    sub: &[u8],
+    base: usize,
+    flags: u8,
+    le: bool,
+    body: usize,
+    end: usize,
+) -> Option<std::ops::Range<usize>> {
+    let mut start = base + 16;
+    if flags & 0x02 != 0 {
+        // Inline QoS: a parameter list (u16 pid, u16 len, value) terminated by
+        // the sentinel (pid 1). The serialized payload follows it.
+        while start + 4 <= sub.len() {
+            let pid = read_u16(sub, start, le)?;
+            let len = read_u16(sub, start + 2, le)? as usize;
+            start += 4 + len;
+            if pid == 0x01 {
+                break;
+            }
+        }
+    }
+    if start < sub.len() {
+        Some((body + start)..end)
+    } else {
+        None
     }
 }
 
@@ -384,5 +424,89 @@ mod tests {
     #[test]
     fn hex_is_lowercase_pairs() {
         assert_eq!(hex(&[0x0a, 0xbc, 0xde]), "0abcde");
+    }
+
+    #[test]
+    fn data_payload_range_points_at_encapsulation() {
+        let mut d = header();
+        d.extend_from_slice(&[0x15, 0x05]); // DATA, E|D
+        d.extend_from_slice(&24u16.to_le_bytes()); // fields (20) + payload (4)
+        d.extend_from_slice(&0u16.to_le_bytes()); // extraFlags
+        d.extend_from_slice(&16u16.to_le_bytes()); // octetsToInlineQos
+        d.extend_from_slice(&[0, 0, 0, 0]); // readerId
+        d.extend_from_slice(&[0, 0, 0x03, 0xc2]); // writerId
+        d.extend_from_slice(&0u32.to_le_bytes());
+        d.extend_from_slice(&1u32.to_le_bytes()); // writerSN
+        d.extend_from_slice(&[0x00, 0x03, 0x00, 0x00]); // payload
+        let p = parse(&d);
+        let range = p.frames[0].payload.clone().expect("payload");
+        assert_eq!(&d[range], &[0x00, 0x03, 0x00, 0x00]);
+    }
+
+    #[test]
+    fn data_with_inline_qos_skips_to_payload() {
+        let mut d = header();
+        d.extend_from_slice(&[0x15, 0x07]); // DATA, E|Q|D
+        d.extend_from_slice(&36u16.to_le_bytes()); // 20 fields + 8 qos + 4 sentinel + 4 payload
+        d.extend_from_slice(&0u16.to_le_bytes()); // extraFlags
+        d.extend_from_slice(&16u16.to_le_bytes()); // octetsToInlineQos
+        d.extend_from_slice(&[0, 0, 0, 0]); // readerId
+        d.extend_from_slice(&[0, 0, 0x03, 0xc2]); // writerId
+        d.extend_from_slice(&0u32.to_le_bytes());
+        d.extend_from_slice(&2u32.to_le_bytes()); // writerSN
+        d.extend_from_slice(&0x0071u16.to_le_bytes()); // PID_STATUSINFO
+        d.extend_from_slice(&4u16.to_le_bytes());
+        d.extend_from_slice(&[0, 0, 0, 0]);
+        d.extend_from_slice(&0x0001u16.to_le_bytes()); // sentinel
+        d.extend_from_slice(&0u16.to_le_bytes());
+        d.extend_from_slice(&[0xde, 0xad, 0xbe, 0xef]); // payload
+        let p = parse(&d);
+        let range = p.frames[0].payload.clone().expect("payload");
+        assert_eq!(&d[range], &[0xde, 0xad, 0xbe, 0xef]);
+    }
+
+    #[test]
+    fn data_without_payload_is_none() {
+        let mut d = header();
+        d.extend_from_slice(&[0x15, 0x05]);
+        d.extend_from_slice(&20u16.to_le_bytes());
+        d.extend_from_slice(&0u16.to_le_bytes());
+        d.extend_from_slice(&16u16.to_le_bytes());
+        d.extend_from_slice(&[0, 0, 0, 0]);
+        d.extend_from_slice(&[0, 0, 0x03, 0xc2]);
+        d.extend_from_slice(&0u32.to_le_bytes());
+        d.extend_from_slice(&1u32.to_le_bytes());
+        let p = parse(&d);
+        assert!(p.frames[0].payload.is_none());
+    }
+
+    /// A real RTPS datagram from CycloneDDS's own test
+    /// (`src/core/ddsi/tests/receive_packet.c`, `rti_dispose_with_key`):
+    /// INFO_TS, then a DATA with the Q flag set whose inline QoS is
+    /// `PID_KEY_HASH(16)` + `PID_STATUS_INFO(4)` + sentinel, followed by a
+    /// PL_CDR_LE serialized payload.
+    #[test]
+    fn real_cyclonedds_data_with_inline_qos() {
+        let d: [u8; 124] = [
+            0x52, 0x54, 0x50, 0x53, 0x2, 0x5, 0x1, 0x1, 0x1, 0x1, 0x5c, 0x45, 0x1f, 0x8c, 0x14,
+            0xb5, 0xdf, 0x19, 0xb3, 0xbd, 0x9, 0x1, 0x8, 0x0, 0x75, 0x36, 0x2b, 0x68, 0xa9, 0xca,
+            0x85, 0x9e, 0x15, 0xb, 0x58, 0x0, 0x0, 0x0, 0x10, 0x0, 0x0, 0x0, 0x0, 0x0, 0x80, 0x0,
+            0x0, 0x2, 0x0, 0x0, 0x0, 0x0, 0x20, 0x0, 0x0, 0x0, 0x70, 0x0, 0x10, 0x0, 0xd4, 0x1c,
+            0x50, 0xb, 0xdd, 0x93, 0x7e, 0x4b, 0x5a, 0x1, 0xe7, 0x91, 0x2e, 0x41, 0xa0, 0x6d, 0x71,
+            0x0, 0x4, 0x0, 0x0, 0x0, 0x0, 0x1, 0x1, 0x0, 0x0, 0x0, 0x0, 0x3, 0x0, 0x0, 0x1, 0x3f,
+            0x8, 0x0, 0xb8, 0xb, 0xb7, 0x4, 0x10, 0x0, 0x0, 0x0, 0x56, 0x46, 0x44, 0x55, 0x66,
+            0x42, 0x56, 0xb4, 0xd3, 0x22, 0x9b, 0xe8, 0x67, 0x45, 0x3e, 0x22, 0x2, 0x7f, 0x0, 0x0,
+        ];
+        let p = parse(&d);
+        assert_eq!(p.frames.len(), 2);
+        assert_eq!(p.frames[0].kind, "INFO_TS");
+        let data = &p.frames[1];
+        assert_eq!(data.kind, "DATA");
+        assert_eq!(data.writer, Some([0x80, 0x00, 0x00, 0x02]));
+        assert_eq!(data.sn, Some(32));
+        let range = data.payload.clone().expect("payload");
+        assert_eq!(range.start, 88);
+        assert_eq!(range.end, 124);
+        assert_eq!(&d[range][..4], &[0x00, 0x03, 0x00, 0x00]); // PL_CDR_LE
     }
 }

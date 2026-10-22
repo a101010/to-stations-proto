@@ -141,3 +141,9 @@ Parse the RTPS header and submessages (writer GUID, sequence number, sizes) and 
 - **Completed:** 2026-10-21 17:02:33.
 - **Depends on:** dds-echo-capture.
 - **Minimal test:** a datagram's detail shows submessage ids, writer GUID, and sequence numbers.
+
+### dds-echo-sedp
+Parse SEDP/SPDP so the inspector learns the participants, endpoints, and topics (topic/type names) it observes, attributes data traffic to the topics learned from SEDP, and accumulates per-topic packet stats (grouped by topic; unattributable datagrams under the existing `unknown` row).
+- **Completed:** 2026-10-22 08:22:37.
+- **Depends on:** dds-echo-frame.
+- **Minimal test:** the inspector lists the participants/endpoints/topics it observes; per-topic counts accumulate; unattributable datagrams stay under `unknown`.
