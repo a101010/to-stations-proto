@@ -147,3 +147,9 @@ Parse SEDP/SPDP so the inspector learns the participants, endpoints, and topics 
 - **Completed:** 2026-10-22 08:22:37.
 - **Depends on:** dds-echo-frame.
 - **Minimal test:** the inspector lists the participants/endpoints/topics it observes; per-topic counts accumulate; unattributable datagrams stay under `unknown`.
+
+### dds-echo-topic-filter
+Make the left Topics pane a multi-select filter for the center datagram list: clicking a topic row toggles its selection (background-highlighted) and the center list shows only datagrams whose topic matches any selected row (union; nothing selected shows all). The `Topics (packets)` title clears the selection and is always visible; a right-click context menu offers **Unselect All**. Also, spare height in the detail pane collects below the hex rather than between sections.
+- **Completed:** 2026-10-22 12:20:22.
+- **Depends on:** none.
+- **Minimal test:** select `FakeTopicOne` (only its data datagrams remain), add `FakeTopicTwo` (both appear), click the title (all traffic returns), and right-click **Unselect All** clears.

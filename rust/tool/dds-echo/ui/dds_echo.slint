@@ -24,6 +24,7 @@ export struct TopicRow {
     name: string,
     known: bool,
     packets: int,
+    selected: bool,
 }
 
 component StatChip inherits Rectangle {
@@ -57,6 +58,8 @@ component TopicGroup inherits Rectangle {
     in property <[TopicRow]> rows;
     in property <int> packets;
     in-out property <bool> expanded: true;
+    callback toggle-row(string);
+    callback topic-menu(length, length);
 
     background: transparent;
 
@@ -80,7 +83,7 @@ component TopicGroup inherits Rectangle {
             spacing: 1px;
             for row in root.rows : Rectangle {
                 height: 20px;
-                background: transparent;
+                background: row.selected ? #3a4a5a : transparent;
                 HorizontalLayout {
                     padding-left: 14px;
                     padding-right: 4px;
@@ -94,6 +97,19 @@ component TopicGroup inherits Rectangle {
                         text: "" + row.packets;
                         color: #9a9a9a;
                         vertical-alignment: center;
+                    }
+                }
+                TouchArea {
+                    pointer-event(event) => {
+                        if (event.kind == PointerEventKind.down && event.button == PointerEventButton.left) {
+                            root.toggle-row(row.name);
+                            return EventResult.accept;
+                        }
+                        if (event.kind == PointerEventKind.down && event.button == PointerEventButton.right) {
+                            root.topic-menu(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                            return EventResult.accept;
+                        }
+                        EventResult.reject
                     }
                 }
             }
@@ -156,6 +172,17 @@ export component MainWindow inherits Window {
     callback list-scrolled();
     callback dismiss-error();
 
+    // Topic selection (the center filter) and its context menu.
+    callback toggle-topic(string);
+    callback clear-topics();
+    callback topic-menu(length, length);
+    callback dismiss-topic-menu();
+    callback unselect-all-topics();
+
+    in-out property <bool> topic-menu-visible: false;
+    in-out property <length> topic-menu-x: 0px;
+    in-out property <length> topic-menu-y: 0px;
+
     VerticalLayout {
         padding: 10px;
         spacing: 10px;
@@ -214,13 +241,26 @@ export component MainWindow inherits Window {
                 VerticalLayout {
                     padding: 8px;
                     spacing: 6px;
-                    Text { text: "Topics (packets)"; color: #ffffff; font-weight: 700; }
+                    Rectangle {
+                        height: 20px;
+                        background: transparent;
+                        Text { text: "Topics (packets)"; color: #ffffff; font-weight: 700; vertical-alignment: center; }
+                        TouchArea { clicked => { root.clear-topics(); } }
+                    }
                     ScrollView {
                         vertical-stretch: 1;
                         VerticalLayout {
                             spacing: 6px;
-                            TopicGroup { title: "Known"; rows: root.known-topics; packets: root.known-total; }
-                            TopicGroup { title: "Unknown"; rows: root.unknown-topics; packets: root.unknown-total; }
+                            TopicGroup {
+                                title: "Known"; rows: root.known-topics; packets: root.known-total;
+                                toggle-row(name) => { root.toggle-topic(name); }
+                                topic-menu(x, y) => { root.topic-menu(x, y); }
+                            }
+                            TopicGroup {
+                                title: "Unknown"; rows: root.unknown-topics; packets: root.unknown-total;
+                                toggle-row(name) => { root.toggle-topic(name); }
+                                topic-menu(x, y) => { root.topic-menu(x, y); }
+                            }
                         }
                     }
                 }
@@ -304,8 +344,36 @@ export component MainWindow inherits Window {
                             wrap: no-wrap;
                             horizontal-alignment: left;
                         }
+                        Rectangle { vertical-stretch: 1; }
                     }
                 }
+            }
+        }
+    }
+
+    // Topic-selection context menu (right-click in the topics pane).
+    if root.topic-menu-visible : Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: transparent;
+        TouchArea {
+            clicked => { root.dismiss-topic-menu(); }
+        }
+        Rectangle {
+            x: min(root.topic-menu-x, parent.width - self.width);
+            y: min(root.topic-menu-y, parent.height - self.height);
+            width: 120px;
+            height: 26px;
+            background: #2f2f2f;
+            border-radius: 4px;
+            Text {
+                text: "Unselect All";
+                color: #e0e0e0;
+                vertical-alignment: center;
+                horizontal-alignment: center;
+            }
+            TouchArea {
+                clicked => { root.unselect-all-topics(); }
             }
         }
     }

@@ -314,6 +314,40 @@ impl Discovery {
     }
 }
 
+/// The set of topic rows the user has selected in the topics pane. An empty
+/// selection matches every datagram.
+#[derive(Clone, Debug, Default)]
+pub struct TopicSelection {
+    names: BTreeSet<String>,
+}
+
+impl TopicSelection {
+    /// Add `name` if absent, else remove it.
+    pub fn toggle(&mut self, name: &str) {
+        if !self.names.remove(name) {
+            self.names.insert(name.to_string());
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.names.clear();
+    }
+
+    pub fn contains(&self, name: &str) -> bool {
+        self.names.contains(name)
+    }
+
+    /// Whether a datagram with `topic` passes the filter. An empty selection
+    /// matches everything; a `None`/empty topic is the `unidentified` row.
+    pub fn matches(&self, topic: Option<&str>) -> bool {
+        if self.names.is_empty() {
+            return true;
+        }
+        let name = topic.filter(|t| !t.is_empty()).unwrap_or("unidentified");
+        self.names.contains(name)
+    }
+}
+
 /// Per-second rates.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Rates {
@@ -515,6 +549,32 @@ mod tests {
         d.reset();
         assert_eq!(d.participants(), 0);
         assert_eq!(d.endpoints(), 0);
+    }
+
+    #[test]
+    fn topic_selection_toggle_and_match() {
+        let mut s = TopicSelection::default();
+        assert!(s.matches(None)); // empty selection = all
+        assert!(s.matches(Some("A")));
+
+        s.toggle("A");
+        assert!(s.contains("A"));
+        assert!(s.matches(Some("A")));
+        assert!(!s.matches(Some("B")));
+        assert!(!s.matches(None));
+
+        s.toggle("unidentified");
+        assert!(s.matches(None));
+        assert!(s.matches(Some(""))); // empty topic is the unidentified row
+
+        s.toggle("A"); // toggles off
+        assert!(!s.contains("A"));
+        assert!(s.matches(None));
+        assert!(!s.matches(Some("B")));
+
+        s.clear();
+        assert!(!s.contains("A"));
+        assert!(s.matches(Some("B")));
     }
 
     #[test]

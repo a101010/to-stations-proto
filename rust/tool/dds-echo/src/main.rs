@@ -25,7 +25,7 @@ use clap::Parser;
 use slint::{ComponentHandle as _, Model as _, ModelRc, Timer, TimerMode, VecModel};
 
 use crate::capture::{Capture, CaptureConfig};
-use crate::model::{Discovery, RateTracker, Stats, TopicCounts, MAX_RECORDS};
+use crate::model::{Discovery, RateTracker, Stats, TopicCounts, TopicSelection, MAX_RECORDS};
 use crate::ui::MainWindow;
 
 /// The UI refresh / capture-drain tick.
@@ -61,6 +61,10 @@ struct State {
     rates: RefCell<RateTracker>,
     start: Cell<Instant>,
     following: Cell<bool>,
+    /// The topic rows selected in the topics pane (the center filter).
+    selection: RefCell<TopicSelection>,
+    /// The full, capped list of records; the displayed model is the filtered view.
+    all_records: RefCell<Vec<ui::Record>>,
 }
 
 /// A submessage's envelope row, e.g.
@@ -122,9 +126,53 @@ fn to_ui(r: &model::Record) -> ui::Record {
     }
 }
 
+/// The filter name of a displayed record: its topic, or `unidentified`.
+fn ui_topic(r: &ui::Record) -> Option<&str> {
+    if r.topic.is_empty() {
+        None
+    } else {
+        Some(r.topic.as_str())
+    }
+}
+
+/// Rebuild the displayed records from the backing list, keeping only those that
+/// pass `selection`.
+fn rebuild_records(view: &VecModel<ui::Record>, all: &[ui::Record], selection: &TopicSelection) {
+    view.clear();
+    for r in all {
+        if selection.matches(ui_topic(r)) {
+            view.push(r.clone());
+        }
+    }
+    while view.row_count() > MAX_RECORDS {
+        view.remove(0);
+    }
+}
+
+/// Re-apply the current selection: refresh the topics rows, rebuild the record
+/// view, and drop the detail selection (its index no longer lines up).
+fn apply_selection(
+    app: &MainWindow,
+    state: &State,
+    records: &VecModel<ui::Record>,
+    known: &VecModel<ui::TopicRow>,
+    unknown: &VecModel<ui::TopicRow>,
+) {
+    refresh_topics(
+        app,
+        &state.counts.borrow().rows(),
+        &state.selection.borrow(),
+        known,
+        unknown,
+    );
+    rebuild_records(records, &state.all_records.borrow(), &state.selection.borrow());
+    app.set_selected_index(-1);
+}
+
 fn refresh_topics(
     app: &MainWindow,
     rows: &[model::TopicRow],
+    selection: &TopicSelection,
     known: &VecModel<ui::TopicRow>,
     unknown: &VecModel<ui::TopicRow>,
 ) {
@@ -138,6 +186,7 @@ fn refresh_topics(
             name: row.name.clone().into(),
             known: row.known,
             packets,
+            selected: selection.contains(&row.name),
         };
         if row.known {
             known_total += packets;
@@ -170,9 +219,21 @@ fn tick(
                         state.discovery.borrow_mut().observe_and_attr(&mut record);
                         state.stats.borrow_mut().observe(&record);
                         state.counts.borrow_mut().observe(&record);
-                        records.push(to_ui(&record));
-                        while records.row_count() > MAX_RECORDS {
-                            records.remove(0);
+
+                        let matched = state.selection.borrow().matches(record.topic.as_deref());
+                        let ui = to_ui(&record);
+                        {
+                            let mut all = state.all_records.borrow_mut();
+                            all.push(ui.clone());
+                            while all.len() > MAX_RECORDS {
+                                all.remove(0);
+                            }
+                        }
+                        if matched {
+                            records.push(ui);
+                            while records.row_count() > MAX_RECORDS {
+                                records.remove(0);
+                            }
                         }
                     }
                     Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
@@ -181,7 +242,13 @@ fn tick(
         }
     }
 
-    refresh_topics(app, &state.counts.borrow().rows(), known, unknown);
+    refresh_topics(
+        app,
+        &state.counts.borrow().rows(),
+        &state.selection.borrow(),
+        known,
+        unknown,
+    );
 
     {
         let discovery = state.discovery.borrow();
@@ -244,6 +311,8 @@ fn main() -> Result<(), slint::PlatformError> {
         rates: RefCell::new(RateTracker::default()),
         start: Cell::new(Instant::now()),
         following: Cell::new(true),
+        selection: RefCell::new(TopicSelection::default()),
+        all_records: RefCell::new(Vec::new()),
     });
 
     let records = Rc::new(VecModel::<ui::Record>::default());
@@ -252,7 +321,13 @@ fn main() -> Result<(), slint::PlatformError> {
     app.set_records(ModelRc::from(records.clone()));
     app.set_known_topics(ModelRc::from(known.clone()));
     app.set_unknown_topics(ModelRc::from(unknown.clone()));
-    refresh_topics(&app, &state.counts.borrow().rows(), &known, &unknown);
+    refresh_topics(
+        &app,
+        &state.counts.borrow().rows(),
+        &state.selection.borrow(),
+        &known,
+        &unknown,
+    );
 
     let timer = Rc::new(Timer::default());
 
@@ -332,11 +407,19 @@ fn main() -> Result<(), slint::PlatformError> {
         app.on_clear(move || {
             if let Some(app) = app_weak.upgrade() {
                 records.clear();
+                state.all_records.borrow_mut().clear();
+                state.selection.borrow_mut().clear();
                 state.stats.borrow_mut().reset();
                 state.counts.borrow_mut().reset();
                 state.discovery.borrow_mut().reset();
                 *state.rates.borrow_mut() = RateTracker::default();
-                refresh_topics(&app, &state.counts.borrow().rows(), &known, &unknown);
+                refresh_topics(
+                    &app,
+                    &state.counts.borrow().rows(),
+                    &state.selection.borrow(),
+                    &known,
+                    &unknown,
+                );
                 app.set_packets(0);
                 app.set_bytes(0);
                 app.set_rtps(0);
@@ -361,6 +444,74 @@ fn main() -> Result<(), slint::PlatformError> {
                     }
                     app.set_selected_index(index);
                 }
+            }
+        });
+    }
+
+    // Toggle a topic row's selection (the center filter).
+    {
+        let app_weak = app.as_weak();
+        let state = state.clone();
+        let records = records.clone();
+        let known = known.clone();
+        let unknown = unknown.clone();
+        app.on_toggle_topic(move |name| {
+            if let Some(app) = app_weak.upgrade() {
+                state.selection.borrow_mut().toggle(&name);
+                apply_selection(&app, &state, &records, &known, &unknown);
+            }
+        });
+    }
+
+    // Clicking the topics title clears the selection.
+    {
+        let app_weak = app.as_weak();
+        let state = state.clone();
+        let records = records.clone();
+        let known = known.clone();
+        let unknown = unknown.clone();
+        app.on_clear_topics(move || {
+            if let Some(app) = app_weak.upgrade() {
+                state.selection.borrow_mut().clear();
+                apply_selection(&app, &state, &records, &known, &unknown);
+            }
+        });
+    }
+
+    // Right-click opens the context menu at the cursor.
+    {
+        let app_weak = app.as_weak();
+        app.on_topic_menu(move |x, y| {
+            if let Some(app) = app_weak.upgrade() {
+                app.set_topic_menu_x(x);
+                app.set_topic_menu_y(y);
+                app.set_topic_menu_visible(true);
+            }
+        });
+    }
+
+    // Dismiss the context menu.
+    {
+        let app_weak = app.as_weak();
+        app.on_dismiss_topic_menu(move || {
+            if let Some(app) = app_weak.upgrade() {
+                app.set_topic_menu_visible(false);
+            }
+        });
+    }
+
+    // The context menu's "Unselect All".
+    {
+        let app_weak = app.as_weak();
+        let state = state.clone();
+        let records = records.clone();
+        let known = known.clone();
+        let unknown = unknown.clone();
+        app.on_unselect_all_topics(move || {
+            if let Some(app) = app_weak.upgrade() {
+                state.selection.borrow_mut().clear();
+                app.set_topic_menu_visible(false);
+                apply_selection(&app, &state, &records, &known, &unknown);
             }
         });
     }
