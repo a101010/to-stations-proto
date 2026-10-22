@@ -37,18 +37,6 @@ Third-party libraries are built/installed to an external prefix (for example `C:
 
 **Done when.** `launch-rust.ps1` brings up the model service, the view service, and `lil-d` from `build/deploy`; `lil-d` shows the tilted, cube-mapped earth lit from the upper right with the greeting text rendered in the loaded font, its power button works, and the format manager switches between the default and hello-world formats. `dds-echo` observes every topic in the registry, `--topics` and `build/topics.md` match `contracts/`, and `cleanup.ps1` stops everything.
 
-### topic-field-metadata
-Extend the fork's code generation (the `cyclonedds-build` codegen or `cyclonedds-derive`) to emit a per-struct field schema (reusing the generated `DynamicTypeSchema`/`DynamicValue` shapes) plus field get/set, so tools can build generic field views for display and editing without runtime reflection (Rust has none). Consumed by `dds-echo`'s detail pane and send form and by `tentacles-injector`.
-- **Depends on:** none (a fork change; re-pin the fork rev).
-- **Minimal test:** enumerate a generated topic's fields from the metadata and round-trip a value to and from the typed sample.
-- **Status:** todo.
-
-### dds-echo-send
-Add a send screen to `dds-echo`: the window becomes two tabs, **Capture** (the current UI) and **Send**. In the Send tab, choose a registered topic from `contracts/topics.toml`, fill in its fields, and publish the sample **once or periodically** at a chosen rate. Publishing uses `stations-dds` (a `Node` typed writer); per-type field forms come from `topic-field-metadata`.
-- **Depends on:** topic-field-metadata.
-- **Minimal test:** in the Send tab, fill the hello-world fields and press Send; the sample appears on the Capture tab.
-- **Status:** todo.
-
 ### hello-view-service
 Create the hello_world view service (`hello-view-service`): add the trivial `HelloWorldViewTopic` to `DDS/hello_world.idl` (an exact copy of `HelloWorldTopic`; rotation is added later) and publish it; extend the display library to subscribe to `HelloWorldViewTopic` and render the hello-world format from the received greeting and attitude instead of the hardcoded values. The model data moves out of the display library to this service; later `hello-service` becomes its source.
 - **Depends on:** none.
@@ -59,6 +47,18 @@ Create the hello_world view service (`hello-view-service`): add the trivial `Hel
 Create the hello_world model service (`hello-service`): publish `HelloWorldTopic` (greeting text and quaternion attitude) at a fixed rate, a 23.5 degree tilt. The model data moves out of the view service to this service, and the view service now subscribes to it and relays. One revolution every twelve minutes is added later.
 - **Depends on:** none.
 - **Minimal test:** `dds-echo` shows `HelloWorldTopic` samples and the display shows the model-driven world.
+- **Status:** todo.
+
+### topic-field-metadata
+Extend the fork's code generation (the `cyclonedds-build` codegen or `cyclonedds-derive`) to emit a per-struct field schema (reusing the generated `DynamicTypeSchema`/`DynamicValue` shapes) plus field get/set, so tools can build generic field views for display and editing without runtime reflection (Rust has none). Consumed by `dds-echo`'s detail pane and send form and by `tentacles-injector`.
+- **Depends on:** none (a fork change; re-pin the fork rev).
+- **Minimal test:** enumerate a generated topic's fields from the metadata and round-trip a value to and from the typed sample.
+- **Status:** todo.
+
+### dds-echo-send
+Add a send screen to `dds-echo`: the window becomes two tabs, **Capture** (the current UI) and **Send**. In the Send tab, choose a registered topic from `contracts/topics.toml`, fill in its fields, and publish the sample **once or periodically** at a chosen rate. Publishing uses `stations-dds` (a `Node` typed writer); per-type field forms come from `topic-field-metadata`.
+- **Depends on:** topic-field-metadata.
+- **Minimal test:** in the Send tab, fill the hello-world fields and press Send; the sample appears on the Capture tab.
 - **Status:** todo.
 
 ## Later increments
