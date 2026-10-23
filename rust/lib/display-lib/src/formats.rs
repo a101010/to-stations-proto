@@ -31,9 +31,10 @@ pub(crate) trait Format {
 pub(crate) fn registry(
     gl: &glow::Context,
     assets_root: &Path,
+    state: crate::view::ViewState,
 ) -> Result<Vec<Box<dyn Format>>, DisplayError> {
     Ok(vec![
-        Box::new(hello_world::HelloWorld::new(gl, assets_root)?),
+        Box::new(hello_world::HelloWorld::new(gl, assets_root, state)?),
         Box::new(default::Default::new(gl)?),
     ])
 }

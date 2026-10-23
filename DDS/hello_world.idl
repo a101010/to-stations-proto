@@ -5,4 +5,8 @@ module hello_world {
     string greeting;
     math::Quaternion attitude;
   };
+  struct HelloWorldViewTopic {
+    string greeting;
+    math::Quaternion attitude;
+  };
 };

@@ -159,3 +159,9 @@ Decode known-type samples from the wire (`CdrDeserializer`) and show the decoded
 - **Completed:** 2026-10-22 14:47:12.
 - **Depends on:** none.
 - **Minimal test:** a known-topic sample is shown decoded (fields) under Known and an unknown sample as hex.
+
+### hello-view-service
+Add `HelloWorldViewTopic` and create the hello_world view service that publishes it (a permanent 23.5 deg axial tilt, spun about the tilted polar axis, one revolution per 12 minutes, at 100 Hz best-effort); the display library subscribes to it and renders the received greeting/attitude (black until a sample arrives), moving the model data out of the library.
+- **Completed:** 2026-10-22 16:07:11.
+- **Depends on:** none.
+- **Minimal test:** `dds-echo` shows `HelloWorldViewTopic` samples and the display renders the published view.

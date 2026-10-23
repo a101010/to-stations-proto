@@ -13,3 +13,4 @@ crate-type = ["cdylib"]
 glow = { workspace = true }
 harfbuzz = { workspace = true }
 image = { workspace = true }
+stations-dds = { workspace = true }

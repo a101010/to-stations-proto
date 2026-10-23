@@ -207,7 +207,12 @@ impl ApplicationHandler for App {
         }
     }
 
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {}
+    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        // Render continuously so the display library polls DDS each frame.
+        if let Some(gl_window) = self.gl_window.as_ref() {
+            gl_window.window().request_redraw();
+        }
+    }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         if let Some(egui_glow) = self.egui_glow.as_mut() {

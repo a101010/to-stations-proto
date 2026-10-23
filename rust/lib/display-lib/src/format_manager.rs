@@ -24,9 +24,13 @@ pub(crate) struct FormatManager {
 
 impl FormatManager {
     /// Build the registry and select the initial format.
-    pub(crate) fn new(gl: &glow::Context, assets_root: &Path) -> Result<Self, DisplayError> {
+    pub(crate) fn new(
+        gl: &glow::Context,
+        assets_root: &Path,
+        state: crate::view::ViewState,
+    ) -> Result<Self, DisplayError> {
         Ok(Self {
-            formats: formats::registry(gl, assets_root)?,
+            formats: formats::registry(gl, assets_root, state)?,
             active: 0,
             region: (0, 0, 0, 0),
         })

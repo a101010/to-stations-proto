@@ -1,0 +1,5 @@
+[service]
+name = "hello-view-service"
+
+[[publish]]
+topic = "HelloWorldViewTopic"

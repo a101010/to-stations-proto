@@ -16,7 +16,7 @@ $ErrorActionPreference = 'Stop'
 
 # Every application launched by a configuration launch script. Later stories
 # append the services and the other displays as they are added.
-$apps = @('lil-d')
+$apps = @('lil-d', 'hello-view-service')
 
 foreach ($name in $apps) {
     $procs = Get-Process -Name $name -ErrorAction SilentlyContinue

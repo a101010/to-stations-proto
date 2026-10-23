@@ -6,3 +6,9 @@ name = "HelloWorldTopic"
 type = "hello_world::HelloWorldTopic"
 qos = "default"
 key = []
+
+[[topics]]
+name = "HelloWorldViewTopic"
+type = "hello_world::HelloWorldViewTopic"
+qos = "best_effort"
+key = []

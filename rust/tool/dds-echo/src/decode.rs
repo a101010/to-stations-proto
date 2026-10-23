@@ -8,7 +8,7 @@
 //! `topic-field-metadata`.
 
 use stations_dds::cyclonedds::{CdrDeserializer, CdrEncoding, DdsType};
-use stations_dds::hello_world::HelloWorldTopic;
+use stations_dds::hello_world::{HelloWorldTopic, HelloWorldViewTopic};
 
 /// Decode a known-type DATA payload (encapsulation header + CDR) into a
 /// human-readable field dump. Returns `None` for an unknown type, a
@@ -17,6 +17,10 @@ pub fn decode(idl_type: &str, payload: &[u8]) -> Option<String> {
     match idl_type {
         "hello_world::HelloWorldTopic" => {
             let sample = deserialize::<HelloWorldTopic>(payload)?;
+            Some(format!("{sample:#?}"))
+        }
+        "hello_world::HelloWorldViewTopic" => {
+            let sample = deserialize::<HelloWorldViewTopic>(payload)?;
             Some(format!("{sample:#?}"))
         }
         _ => None,
@@ -91,6 +95,25 @@ mod tests {
         let dump = decode(HELLO, &b).expect("decoded");
         assert!(dump.contains("Hello, world!"));
         assert!(dump.contains("w: 1.0"));
+    }
+
+    #[test]
+    fn decodes_hello_world_view_fields() {
+        let sample = HelloWorldViewTopic {
+            greeting: "Hello, world!".to_string(),
+            attitude: Quaternion {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+                w: 1.0,
+            },
+        };
+        let cdr = CdrSerializer::serialize(&sample, CdrEncoding::Xcdr1).unwrap();
+        let mut payload = vec![0x00, 0x01, 0x00, 0x00];
+        payload.extend_from_slice(&cdr);
+        let dump = decode("hello_world::HelloWorldViewTopic", &payload).expect("decoded");
+        assert!(dump.contains("Hello, world!"));
+        assert!(dump.contains("attitude"));
     }
 
     #[test]

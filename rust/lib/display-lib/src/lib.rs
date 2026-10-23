@@ -13,6 +13,7 @@ mod format_manager;
 mod formats;
 mod shader;
 mod text;
+mod view;
 
 use std::cell::RefCell;
 use std::ffi::{c_char, c_int, c_void, CString};
@@ -53,18 +54,35 @@ impl std::error::Error for DisplayError {}
 struct Display {
     gl: glow::Context,
     format_manager: format_manager::FormatManager,
+    /// The DDS subscription for the hello_world view; `None` when it could not
+    /// be created (the format then renders black).
+    view: Option<view::ViewSource>,
+    /// The latest received view sample, shared with the formats.
+    state: view::ViewState,
 }
 
 impl Display {
     fn new(loader: impl FnMut(&str) -> *const c_void) -> Result<Self, DisplayError> {
         let gl = unsafe { glow::Context::from_loader_function(loader) };
-        let format_manager = format_manager::FormatManager::new(&gl, &assets_root())?;
-        Ok(Self { gl, format_manager })
+        let state = view::new_state();
+        let format_manager =
+            format_manager::FormatManager::new(&gl, &assets_root(), state.clone())?;
+        // Best-effort: without DDS/config the format simply renders black.
+        let view = view::ViewSource::new(0, &config_root()).ok();
+        Ok(Self {
+            gl,
+            format_manager,
+            view,
+            state,
+        })
     }
 
     /// Render the active format into the region (physical pixels, top-left
     /// origin). `framebuffer_height` is the whole framebuffer height.
     fn render(&mut self, framebuffer_height: i32, x: i32, y: i32, width: i32, height: i32) {
+        if let Some(view) = &self.view {
+            view.poll(&self.state);
+        }
         self.format_manager
             .render(&self.gl, framebuffer_height, x, y, width, height);
     }
@@ -83,6 +101,21 @@ fn assets_root() -> std::path::PathBuf {
         .and_then(|exe| exe.parent().map(std::path::Path::to_path_buf))
         .and_then(|bin| bin.parent().map(|deploy| deploy.join("assets")))
         .unwrap_or_else(|| std::path::PathBuf::from("assets"))
+}
+
+/// The contracts directory: the deploy root's `config/`, else the repository's
+/// `contracts/` (so a debug build run from the repository still finds it).
+fn config_root() -> std::path::PathBuf {
+    let deployed = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(std::path::Path::to_path_buf))
+        .and_then(|bin| bin.parent().map(|deploy| deploy.join("config")));
+    if let Some(dir) = &deployed {
+        if dir.join("topics.toml").is_file() {
+            return dir.clone();
+        }
+    }
+    std::path::PathBuf::from(env!("REPO_ROOT")).join("contracts")
 }
 
 thread_local! {

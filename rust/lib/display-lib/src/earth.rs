@@ -263,25 +263,6 @@ pub(crate) fn quat_to_mat3(q: [f32; 4]) -> [f32; 9] {
     ]
 }
 
-/// Quaternion `(x, y, z, w)` for a rotation of `angle_rad` about `axis`.
-pub(crate) fn quat_from_axis_angle(axis: [f32; 3], angle_rad: f32) -> [f32; 4] {
-    let half = angle_rad / 2.0;
-    let s = half.sin();
-    [axis[0] * s, axis[1] * s, axis[2] * s, half.cos()]
-}
-
-/// Hamilton product `a * b` (the rotation `a` applied after `b`).
-pub(crate) fn quat_mul(a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
-    let [ax, ay, az, aw] = a;
-    let [bx, by, bz, bw] = b;
-    [
-        aw * bx + ax * bw + ay * bz - az * by,
-        aw * by - ax * bz + ay * bw + az * bx,
-        aw * bz + ax * by - ay * bx + az * bw,
-        aw * bw - ax * bx - ay * by - az * bz,
-    ]
-}
-
 /// Perspective projection times a `(0, 0, -d)` view translation, column-major.
 /// The camera looks down `-Z` at a unit sphere at the origin; `d` is chosen so
 /// the globe fills `GLOBE_FRACTION` of the half-fov.

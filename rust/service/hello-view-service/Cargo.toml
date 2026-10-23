@@ -1,0 +1,13 @@
+[package]
+name = "hello-view-service"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "hello-view-service"
+path = "src/main.rs"
+
+[dependencies]
+stations-dds = { workspace = true }
+clap = { workspace = true }

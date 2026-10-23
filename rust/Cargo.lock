@@ -1112,6 +1112,7 @@ dependencies = [
  "glow 0.17.0",
  "harfbuzz",
  "image",
+ "stations-dds",
 ]
 
 [[package]]
@@ -1978,6 +1979,14 @@ name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
+
+[[package]]
+name = "hello-view-service"
+version = "0.0.0"
+dependencies = [
+ "clap",
+ "stations-dds",
+]
 
 [[package]]
 name = "hermit-abi"

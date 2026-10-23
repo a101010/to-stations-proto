@@ -97,7 +97,10 @@ impl std::error::Error for ContractError {}
 
 /// Scoped DDS type names of the generated topic types.
 pub fn known_types() -> &'static [&'static str] {
-    &["hello_world::HelloWorldTopic"]
+    &[
+        "hello_world::HelloWorldTopic",
+        "hello_world::HelloWorldViewTopic",
+    ]
 }
 
 impl TopicRegistry {
