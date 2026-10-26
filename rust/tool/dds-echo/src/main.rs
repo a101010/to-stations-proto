@@ -1,7 +1,8 @@
 //! The `dds-echo` traffic inspector (Slint).
 //!
-//! A real UDP capture backend (see [`capture`]) feeds the UI through a channel
-//! drained on the event loop, so Slint models are only touched on the UI thread.
+//! A real UDP capture backend (see [`capture`]) feeds the UI through a bounded
+//! queue drained on the event loop, so Slint models are only touched on the UI
+//! thread.
 
 // Release builds are a GUI application (no console window); debug builds keep
 // the console for diagnostics.
@@ -19,15 +20,15 @@ mod ui {
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use clap::Parser;
-use slint::{ComponentHandle as _, Model as _, ModelRc, Timer, TimerMode, VecModel};
+use slint::{ComponentHandle as _, ModelRc, Timer, TimerMode, VecModel};
 
-use crate::capture::{Capture, CaptureConfig};
+use crate::capture::{Capture, CaptureConfig, CaptureQueue, DRAIN_MAX_PER_TICK};
 use crate::model::{
-    Discovery, KnownTopics, RateTracker, Stats, TopicCounts, TopicSelection, MAX_RECORDS,
+    Discovery, History, KnownTopics, RateTracker, Stats, TopicCounts, TopicSelection,
 };
 use crate::ui::MainWindow;
 
@@ -61,7 +62,7 @@ struct Args {
 /// Shared state behind the UI.
 struct State {
     capture: RefCell<Option<Capture>>,
-    rx: RefCell<Option<Receiver<model::Record>>>,
+    queue: RefCell<Option<Arc<CaptureQueue>>>,
     stats: RefCell<Stats>,
     counts: RefCell<TopicCounts>,
     discovery: RefCell<Discovery>,
@@ -70,8 +71,16 @@ struct State {
     following: Cell<bool>,
     /// The topic rows selected in the topics pane (the center filter).
     selection: RefCell<TopicSelection>,
-    /// The full, capped list of records; the displayed model is the filtered view.
-    all_records: RefCell<Vec<ui::Record>>,
+    /// The retained raw records, evicted frequency-first.
+    history: RefCell<History>,
+    /// History ids aligned with the visible record rows.
+    displayed_ids: RefCell<Vec<u64>>,
+    /// The selected record's history id, preserved across view rebuilds.
+    selected_id: Cell<Option<u64>>,
+    /// Records evicted from the capture queue (never observed by the UI).
+    dropped: Cell<u64>,
+    /// Records evicted from the history (observed, then trimmed from the table).
+    trimmed: Cell<u64>,
     /// The registry's topics (name -> IDL type), loaded at startup.
     known_topics: KnownTopics,
 }
@@ -108,7 +117,27 @@ fn frame_detail(f: &model::Frame) -> String {
     }
 }
 
-fn to_ui(r: &model::Record, known: &KnownTopics) -> ui::Record {
+/// An empty detail model, used when no record is selected.
+fn empty_record() -> ui::Record {
+    ui::Record {
+        time: "".into(),
+        protocol: "".into(),
+        source: "".into(),
+        size: 0,
+        topic: "".into(),
+        submessages: "".into(),
+        hex: "".into(),
+        decoded: "".into(),
+        guid: "".into(),
+        entity: "".into(),
+        known: false,
+        frames: ModelRc::default(),
+    }
+}
+
+/// The lightweight table row; hex, decoded fields, and frames are deferred to
+/// [`to_detail`].
+fn to_row(r: &model::Record, known: &KnownTopics) -> ui::Record {
     ui::Record {
         time: r.time_label().into(),
         protocol: r.protocol().into(),
@@ -116,68 +145,82 @@ fn to_ui(r: &model::Record, known: &KnownTopics) -> ui::Record {
         size: r.size as i32,
         topic: r.topic.clone().unwrap_or_default().into(),
         submessages: r.submessages.clone().into(),
-        hex: r.hex_string().into(),
-        decoded: r.decoded.clone().into(),
-        guid: r.guid_prefix.clone().unwrap_or_default().into(),
-        entity: r.entity_id.clone().unwrap_or_default().into(),
+        hex: "".into(),
+        decoded: "".into(),
+        guid: "".into(),
+        entity: "".into(),
         known: r.is_known(known),
-        frames: {
-            let frames: Vec<ui::Frame> = r
-                .frames
-                .iter()
-                .map(|f| ui::Frame {
-                    line: frame_line(f).into(),
-                    detail: frame_detail(f).into(),
-                })
-                .collect();
-            ModelRc::from(frames.as_slice())
-        },
+        frames: ModelRc::default(),
     }
 }
 
-/// Decode the sample's payload when the record's topic is registered, filling
-/// `record.decoded` (the detail pane shows raw hex otherwise).
-fn decode_record(record: &mut model::Record, known: &KnownTopics) {
-    let Some(idl_type) = record.topic.as_deref().and_then(|t| known.idl_type(t)) else {
-        return;
+/// The full detail model, built only when a row is selected.
+fn to_detail(r: &model::Record, known: &KnownTopics) -> ui::Record {
+    let mut row = to_row(r, known);
+    row.guid = r.guid_prefix.clone().unwrap_or_default().into();
+    row.entity = r.entity_id.clone().unwrap_or_default().into();
+    row.hex = r.hex_string().into();
+    row.decoded = decoded_text(r, known).into();
+    let frames: Vec<ui::Frame> = r
+        .frames
+        .iter()
+        .map(|f| ui::Frame {
+            line: frame_line(f).into(),
+            detail: frame_detail(f).into(),
+        })
+        .collect();
+    row.frames = ModelRc::from(frames.as_slice());
+    row
+}
+
+/// Decode the sample's payload when the record's topic is registered; the
+/// detail pane shows raw hex otherwise.
+fn decoded_text(r: &model::Record, known: &KnownTopics) -> String {
+    let Some(idl_type) = r.topic.as_deref().and_then(|t| known.idl_type(t)) else {
+        return String::new();
     };
-    let range = record
+    let Some(range) = r
         .frames
         .iter()
         .find(|f| f.kind == "DATA" && f.payload.is_some())
-        .and_then(|f| f.payload.clone());
-    if let Some(range) = range {
-        if let Some(bytes) = record.hex.get(range) {
-            record.decoded = decode::decode(idl_type, bytes).unwrap_or_default();
+        .and_then(|f| f.payload.clone())
+    else {
+        return String::new();
+    };
+    r.hex
+        .get(range)
+        .and_then(|bytes| decode::decode(idl_type, bytes))
+        .unwrap_or_default()
+}
+
+/// Rebuild the visible rows from the retained history, in arrival order,
+/// formatting only records that pass the topic filter. This runs at most once
+/// per tick (and immediately on a filter change), never per record.
+fn rebuild_view(app: &MainWindow, state: &State, records: &VecModel<ui::Record>) {
+    let history = state.history.borrow();
+    let selection = state.selection.borrow();
+    let selected = state.selected_id.get();
+    let mut rows = Vec::new();
+    let mut ids = Vec::new();
+    let mut selected_index = -1i32;
+    for (id, record) in history.matching(&selection) {
+        if Some(id) == selected {
+            selected_index = rows.len() as i32;
         }
+        rows.push(to_row(record, &state.known_topics));
+        ids.push(id);
+    }
+    records.set_vec(rows);
+    *state.displayed_ids.borrow_mut() = ids;
+    app.set_selected_index(selected_index);
+    if selected.is_some() && selected_index < 0 {
+        state.selected_id.set(None);
+        app.set_selected(empty_record());
     }
 }
 
-/// The filter name of a displayed record: its topic, or `unidentified`.
-fn ui_topic(r: &ui::Record) -> Option<&str> {
-    if r.topic.is_empty() {
-        None
-    } else {
-        Some(r.topic.as_str())
-    }
-}
-
-/// Rebuild the displayed records from the backing list, keeping only those that
-/// pass `selection`.
-fn rebuild_records(view: &VecModel<ui::Record>, all: &[ui::Record], selection: &TopicSelection) {
-    view.clear();
-    for r in all {
-        if selection.matches(ui_topic(r)) {
-            view.push(r.clone());
-        }
-    }
-    while view.row_count() > MAX_RECORDS {
-        view.remove(0);
-    }
-}
-
-/// Re-apply the current selection: refresh the topics rows, rebuild the record
-/// view, and drop the detail selection (its index no longer lines up).
+/// Re-apply the current selection: refresh the topics rows and rebuild the
+/// record view.
 fn apply_selection(
     app: &MainWindow,
     state: &State,
@@ -192,8 +235,7 @@ fn apply_selection(
         known,
         unknown,
     );
-    rebuild_records(records, &state.all_records.borrow(), &state.selection.borrow());
-    app.set_selected_index(-1);
+    rebuild_view(app, state, records);
 }
 
 fn refresh_topics(
@@ -236,38 +278,30 @@ fn tick(
 ) {
     let now_ms = state.start.get().elapsed().as_millis() as u64;
 
-    // Drain the capture channel.
+    // Drain a bounded batch from the capture queue and append it to the
+    // frequency-ranked history.
+    let mut dirty = false;
+    let mut trimmed = 0usize;
     {
-        let rx = state.rx.borrow();
-        if let Some(rx) = rx.as_ref() {
-            loop {
-                match rx.try_recv() {
-                    Ok(mut record) => {
-                        state.discovery.borrow_mut().observe_and_attr(&mut record);
-                        decode_record(&mut record, &state.known_topics);
-                        state.stats.borrow_mut().observe(&record);
-                        state.counts.borrow_mut().observe(&record);
-
-                        let matched = state.selection.borrow().matches(record.topic.as_deref());
-                        let ui = to_ui(&record, &state.known_topics);
-                        {
-                            let mut all = state.all_records.borrow_mut();
-                            all.push(ui.clone());
-                            while all.len() > MAX_RECORDS {
-                                all.remove(0);
-                            }
-                        }
-                        if matched {
-                            records.push(ui);
-                            while records.row_count() > MAX_RECORDS {
-                                records.remove(0);
-                            }
-                        }
-                    }
-                    Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
-                }
+        let queue = state.queue.borrow();
+        if let Some(queue) = queue.as_ref() {
+            let batch = queue.drain(DRAIN_MAX_PER_TICK);
+            dirty = !batch.is_empty();
+            let mut history = state.history.borrow_mut();
+            for mut record in batch {
+                state.discovery.borrow_mut().observe_and_attr(&mut record);
+                state.stats.borrow_mut().observe(&record);
+                state.counts.borrow_mut().observe(&record);
+                trimmed += history.push(record).len();
             }
+            state.dropped.set(queue.dropped());
         }
+    }
+    if trimmed > 0 {
+        state.trimmed.set(state.trimmed.get() + trimmed as u64);
+    }
+    if dirty {
+        rebuild_view(app, state, records);
     }
 
     refresh_topics(
@@ -291,6 +325,8 @@ fn tick(
     app.set_rtps(stats.rtps as i32);
     app.set_pps(rates.pps as i32);
     app.set_bps(rates.bps as i32);
+    app.set_dropped(state.dropped.get().min(i32::MAX as u64) as i32);
+    app.set_trimmed(state.trimmed.get().min(i32::MAX as u64) as i32);
 
     // Follow the tail while the user has not scrolled up.
     let visible_h = app.get_list_visible_height();
@@ -348,7 +384,7 @@ fn main() -> Result<(), slint::PlatformError> {
 
     let state = Rc::new(State {
         capture: RefCell::new(None),
-        rx: RefCell::new(None),
+        queue: RefCell::new(None),
         stats: RefCell::new(Stats::default()),
         counts: RefCell::new(TopicCounts::default()),
         discovery: RefCell::new(Discovery::default()),
@@ -356,7 +392,11 @@ fn main() -> Result<(), slint::PlatformError> {
         start: Cell::new(Instant::now()),
         following: Cell::new(true),
         selection: RefCell::new(TopicSelection::default()),
-        all_records: RefCell::new(Vec::new()),
+        history: RefCell::new(History::default()),
+        displayed_ids: RefCell::new(Vec::new()),
+        selected_id: Cell::new(None),
+        dropped: Cell::new(0),
+        trimmed: Cell::new(0),
         known_topics,
     });
 
@@ -399,15 +439,44 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
             };
 
-            let (tx, rx) = mpsc::channel();
-            match Capture::start(&config, tx) {
+            let queue = Arc::new(CaptureQueue::default());
+            match Capture::start(&config, queue.clone()) {
                 Ok(capture) => {
                     *state.capture.borrow_mut() = Some(capture);
-                    *state.rx.borrow_mut() = Some(rx);
+                    *state.queue.borrow_mut() = Some(queue);
                     app.set_running(true);
                     state.start.set(Instant::now());
                     *state.rates.borrow_mut() = RateTracker::default();
                     state.following.set(true);
+
+                    state.stats.borrow_mut().reset();
+                    state.counts.borrow_mut().reset();
+                    state.discovery.borrow_mut().reset();
+                    state.history.borrow_mut().clear();
+                    state.displayed_ids.borrow_mut().clear();
+                    state.selected_id.set(None);
+                    state.dropped.set(0);
+                    state.trimmed.set(0);
+
+                    records.clear();
+                    refresh_topics(
+                        &app,
+                        &state.counts.borrow().rows(&state.known_topics),
+                        &state.selection.borrow(),
+                        &known,
+                        &unknown,
+                    );
+                    app.set_selected(empty_record());
+                    app.set_selected_index(-1);
+                    app.set_packets(0);
+                    app.set_bytes(0);
+                    app.set_rtps(0);
+                    app.set_pps(0);
+                    app.set_bps(0);
+                    app.set_participants(0);
+                    app.set_endpoints(0);
+                    app.set_dropped(0);
+                    app.set_trimmed(0);
 
                     let app_weak = app.as_weak();
                     let state = state.clone();
@@ -438,7 +507,13 @@ fn main() -> Result<(), slint::PlatformError> {
             if let Some(capture) = state.capture.borrow_mut().take() {
                 capture.stop();
             }
-            *state.rx.borrow_mut() = None;
+            if let Some(queue) = state.queue.borrow_mut().take() {
+                state.dropped.set(queue.dropped());
+            }
+            if let Some(app) = app_weak.upgrade() {
+                app.set_dropped(state.dropped.get().min(i32::MAX as u64) as i32);
+                app.set_trimmed(state.trimmed.get().min(i32::MAX as u64) as i32);
+            }
         });
     }
 
@@ -451,13 +526,21 @@ fn main() -> Result<(), slint::PlatformError> {
         let unknown = unknown.clone();
         app.on_clear(move || {
             if let Some(app) = app_weak.upgrade() {
+                if let Some(queue) = state.queue.borrow().as_ref() {
+                    queue.clear();
+                }
                 records.clear();
-                state.all_records.borrow_mut().clear();
+                state.displayed_ids.borrow_mut().clear();
+                state.history.borrow_mut().clear();
                 state.selection.borrow_mut().clear();
                 state.stats.borrow_mut().reset();
                 state.counts.borrow_mut().reset();
                 state.discovery.borrow_mut().reset();
                 *state.rates.borrow_mut() = RateTracker::default();
+                state.selected_id.set(None);
+                state.dropped.set(0);
+                state.trimmed.set(0);
+                app.set_selected(empty_record());
                 refresh_topics(
                     &app,
                     &state.counts.borrow().rows(&state.known_topics),
@@ -472,6 +555,8 @@ fn main() -> Result<(), slint::PlatformError> {
                 app.set_bps(0);
                 app.set_participants(0);
                 app.set_endpoints(0);
+                app.set_dropped(0);
+                app.set_trimmed(0);
                 app.set_selected_index(-1);
             }
         });
@@ -480,15 +565,27 @@ fn main() -> Result<(), slint::PlatformError> {
     // Select.
     {
         let app_weak = app.as_weak();
-        let records = records.clone();
+        let state = state.clone();
         app.on_select(move |index| {
-            if index >= 0 {
-                if let Some(app) = app_weak.upgrade() {
-                    if let Some(record) = records.row_data(index as usize) {
-                        app.set_selected(record);
-                    }
-                    app.set_selected_index(index);
-                }
+            if index < 0 {
+                return;
+            }
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            let Some(id) = state.displayed_ids.borrow().get(index as usize).copied() else {
+                return;
+            };
+            let detail = {
+                let history = state.history.borrow();
+                history
+                    .find(id)
+                    .map(|record| to_detail(record, &state.known_topics))
+            };
+            if let Some(detail) = detail {
+                app.set_selected(detail);
+                app.set_selected_index(index);
+                state.selected_id.set(Some(id));
             }
         });
     }

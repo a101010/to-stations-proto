@@ -2,7 +2,8 @@
 //!
 //! UI-agnostic (no Slint types) so it is unit-testable.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::cmp::Reverse;
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 
 /// The datagram table cap.
 pub const MAX_RECORDS: usize = 1000;
@@ -105,8 +106,6 @@ pub struct Record {
     /// The submessage kinds in order (the table's `Submessages` column).
     pub submessages: String,
     pub hex: Vec<u8>,
-    /// Rendered fields for a decoded [`Class::Known`] message; empty otherwise.
-    pub decoded: String,
     /// The decoded RTPS submessages (empty for non-RTPS datagrams).
     pub frames: Vec<Frame>,
 }
@@ -162,6 +161,19 @@ impl Record {
             (Some(prefix), Some(entity)) => Some(format!("{prefix}{entity}")),
             _ => None,
         }
+    }
+
+    /// The key used to group records for retention. The topic is used when
+    /// known; otherwise the writer GUID, so an unattributed stream still forms
+    /// its own group; otherwise the source address.
+    pub fn retention_key(&self) -> String {
+        if let Some(topic) = self.topic.as_deref().filter(|t| !t.is_empty()) {
+            return topic.to_string();
+        }
+        if let Some(guid) = self.writer_guid() {
+            return format!("@writer:{guid}");
+        }
+        format!("@source:{}", self.src_addr)
     }
 
     /// The submessage kinds in order, e.g. `"INFO_TS, DATA, DATA, HEARTBEAT"`
@@ -377,6 +389,204 @@ impl TopicSelection {
     }
 }
 
+/// A bounded buffer that evicts from the most frequent key first.
+///
+/// Records keep their arrival order by id. When a cap is exceeded, the oldest
+/// record of the key with the most buffered records is dropped. A key with one
+/// buffered record is never chosen while another key has two or more. If every
+/// key has one record and a cap is still exceeded, the globally oldest record
+/// is dropped; the hard cap wins.
+#[derive(Clone, Debug)]
+pub struct FrequencyBuffer<T> {
+    entries: BTreeMap<u64, Slot<T>>,
+    by_key: HashMap<String, VecDeque<u64>>,
+    next_id: u64,
+    max_records: usize,
+    max_bytes: usize,
+    bytes: usize,
+}
+
+#[derive(Clone, Debug)]
+struct Slot<T> {
+    key: String,
+    size: usize,
+    value: T,
+}
+
+impl<T> FrequencyBuffer<T> {
+    pub fn new(max_records: usize, max_bytes: usize) -> Self {
+        Self {
+            entries: BTreeMap::new(),
+            by_key: HashMap::new(),
+            next_id: 0,
+            max_records,
+            max_bytes,
+            bytes: 0,
+        }
+    }
+
+    /// Insert `value`; returns the entries evicted to respect the caps.
+    pub fn push(&mut self, key: String, size: usize, value: T) -> Vec<(u64, T)> {
+        let id = self.next_id;
+        self.next_id = self.next_id.wrapping_add(1);
+        self.bytes += size;
+        self.by_key.entry(key.clone()).or_default().push_back(id);
+        self.entries.insert(
+            id,
+            Slot {
+                key,
+                size,
+                value,
+            },
+        );
+
+        let mut evicted = Vec::new();
+        while self.over_cap() {
+            if let Some((id, value)) = self.evict_one() {
+                evicted.push((id, value));
+            } else {
+                break;
+            }
+        }
+        evicted
+    }
+
+    /// Remove and return up to `max` of the oldest records.
+    pub fn drain_batch(&mut self, max: usize) -> Vec<(u64, T)> {
+        let mut out = Vec::with_capacity(max.min(self.entries.len()));
+        while out.len() < max {
+            let Some((&id, _)) = self.entries.iter().next() else {
+                break;
+            };
+            if let Some(slot) = self.remove(id) {
+                out.push((id, slot));
+            } else {
+                break;
+            }
+        }
+        out
+    }
+
+    /// Retained records in arrival order.
+    pub fn iter(&self) -> impl Iterator<Item = (u64, &T)> {
+        self.entries.iter().map(|(&id, slot)| (id, &slot.value))
+    }
+
+    pub fn find(&self, id: u64) -> Option<&T> {
+        self.entries.get(&id).map(|slot| &slot.value)
+    }
+
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.by_key.clear();
+        self.next_id = 0;
+        self.bytes = 0;
+    }
+
+    #[cfg(test)]
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    #[cfg(test)]
+    pub fn bytes(&self) -> usize {
+        self.bytes
+    }
+
+    fn over_cap(&self) -> bool {
+        self.entries.len() > self.max_records
+            || (self.max_bytes != usize::MAX && self.bytes > self.max_bytes)
+    }
+
+    /// Evict the oldest record of the most frequent key; fall back to the
+    /// globally oldest record when every key has one buffered record.
+    fn evict_one(&mut self) -> Option<(u64, T)> {
+        let victim = self
+            .by_key
+            .iter()
+            .filter(|(_, ids)| ids.len() >= 2)
+            .max_by_key(|(_, ids)| {
+                (
+                    ids.len(),
+                    Reverse(ids.front().copied().unwrap_or(u64::MAX)),
+                )
+            })
+            .map(|(key, _)| key.clone());
+
+        let id = match victim {
+            Some(key) => self.by_key.get_mut(&key)?.pop_front()?,
+            None => *self.entries.keys().next()?,
+        };
+        self.remove(id).map(|value| (id, value))
+    }
+
+    /// Remove `id` from both indexes, returning its value.
+    fn remove(&mut self, id: u64) -> Option<T> {
+        let slot = self.entries.remove(&id)?;
+        self.bytes = self.bytes.saturating_sub(slot.size);
+        if let Some(ids) = self.by_key.get_mut(&slot.key) {
+            if ids.front() == Some(&id) {
+                ids.pop_front();
+            } else {
+                ids.retain(|&x| x != id);
+            }
+            if ids.is_empty() {
+                self.by_key.remove(&slot.key);
+            }
+        }
+        Some(slot.value)
+    }
+}
+
+/// The display history cap.
+pub const HISTORY_MAX_BYTES: usize = 64 * 1024 * 1024;
+
+/// The retained records shown in the table, evicted frequency-first.
+#[derive(Clone, Debug)]
+pub struct History {
+    buffer: FrequencyBuffer<Record>,
+}
+
+impl Default for History {
+    fn default() -> Self {
+        Self {
+            buffer: FrequencyBuffer::new(MAX_RECORDS, HISTORY_MAX_BYTES),
+        }
+    }
+}
+
+impl History {
+    /// Append `record`; returns the entries evicted to respect the caps.
+    pub fn push(&mut self, record: Record) -> Vec<(u64, Record)> {
+        let key = record.retention_key();
+        let size = record.size;
+        self.buffer.push(key, size, record)
+    }
+
+    /// Retained records that pass `selection`, in arrival order.
+    pub fn matching<'a>(
+        &'a self,
+        selection: &'a TopicSelection,
+    ) -> impl Iterator<Item = (u64, &'a Record)> + 'a {
+        self.buffer
+            .iter()
+            .filter(move |(_, record)| selection.matches(record.topic.as_deref()))
+    }
+
+    pub fn find(&self, id: u64) -> Option<&Record> {
+        self.buffer.find(id)
+    }
+
+    pub fn clear(&mut self) {
+        self.buffer.clear();
+    }
+
+    #[cfg(test)]
+    pub fn len(&self) -> usize {
+        self.buffer.len()
+    }
+}
+
 /// Per-second rates.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Rates {
@@ -429,7 +639,6 @@ mod tests {
             topic: topic.map(str::to_string),
             submessages: String::new(),
             hex: vec![0],
-            decoded: String::new(),
             frames: Vec::new(),
         }
     }
@@ -643,5 +852,114 @@ mod tests {
             r.writer_guid().as_deref(),
             Some("111111111111111111111111000003c2")
         );
+    }
+
+    #[test]
+    fn retention_key_prefers_topic_then_writer_then_source() {
+        let mut r = record(Class::Rtps, 0, Some("A"));
+        assert_eq!(r.retention_key(), "A");
+        r.topic = None;
+        r.guid_prefix = Some("111111111111111111111111".into());
+        r.entity_id = Some("000003c2".into());
+        assert_eq!(
+            r.retention_key(),
+            "@writer:111111111111111111111111000003c2"
+        );
+        r.guid_prefix = None;
+        r.entity_id = None;
+        assert_eq!(r.retention_key(), "@source:[::1]:7400");
+    }
+
+    #[test]
+    fn frequency_buffer_evicts_high_frequency_key_first() {
+        let mut buf = FrequencyBuffer::new(4, usize::MAX);
+        for i in 0..4 {
+            assert!(buf.push("fast".into(), 1, i).is_empty());
+        }
+
+        let first = buf.push("rare-a".into(), 1, 100);
+        let second = buf.push("rare-b".into(), 1, 200);
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].1, 0); // oldest fast record
+        assert_eq!(second.len(), 1);
+        assert_eq!(second[0].1, 1); // the next fast record
+        assert_eq!(buf.len(), 4);
+        let values: Vec<i32> = buf.iter().map(|(_, v)| *v).collect();
+        assert!(values.contains(&100) && values.contains(&200));
+    }
+
+    #[test]
+    fn frequency_buffer_keeps_singletons_until_all_keys_are_singletons() {
+        let mut buf = FrequencyBuffer::new(3, usize::MAX);
+        assert!(buf.push("a".into(), 1, 1).is_empty());
+        assert!(buf.push("b".into(), 1, 2).is_empty());
+        assert!(buf.push("a".into(), 1, 3).is_empty());
+
+        let evicted = buf.push("c".into(), 1, 4);
+        assert_eq!(evicted.len(), 1);
+        assert_eq!(evicted[0].1, 1); // oldest a, not the singleton b
+        let values: Vec<i32> = buf.iter().map(|(_, v)| *v).collect();
+        assert!(values.contains(&2) && values.contains(&3) && values.contains(&4));
+        assert_eq!(buf.len(), 3);
+    }
+
+    #[test]
+    fn frequency_buffer_evicts_oldest_when_all_keys_are_singletons() {
+        let mut buf = FrequencyBuffer::new(2, usize::MAX);
+        buf.push("a".into(), 1, 1);
+        buf.push("b".into(), 1, 2);
+
+        let evicted = buf.push("c".into(), 1, 3);
+        assert_eq!(evicted.len(), 1);
+        assert_eq!(evicted[0].1, 1); // globally oldest
+        let values: Vec<i32> = buf.iter().map(|(_, v)| *v).collect();
+        assert_eq!(values, vec![2, 3]);
+    }
+
+    #[test]
+    fn frequency_buffer_byte_cap_evicts_high_frequency_first() {
+        let mut buf = FrequencyBuffer::new(100, 35);
+        for i in 0..3 {
+            buf.push("fast".into(), 10, i); // 30 bytes
+        }
+
+        let evicted = buf.push("rare".into(), 10, 99); // 40 > 35
+        assert_eq!(evicted.len(), 1);
+        assert_eq!(evicted[0].1, 0); // oldest fast
+        assert_eq!(buf.bytes(), 30);
+        assert!(buf.iter().any(|(_, v)| *v == 99));
+    }
+
+    #[test]
+    fn history_keeps_a_one_shot_topic_while_trimming_fast_records() {
+        let mut history = History::default();
+        for _ in 0..MAX_RECORDS {
+            assert!(history.push(record(Class::Known, 10, Some("fast"))).is_empty());
+        }
+
+        let evicted = history.push(record(Class::Known, 10, Some("rare")));
+        assert_eq!(evicted.len(), 1);
+        assert_eq!(history.len(), MAX_RECORDS);
+
+        let mut selection = TopicSelection::default();
+        selection.toggle("rare");
+        assert_eq!(history.matching(&selection).count(), 1);
+    }
+
+    #[test]
+    fn history_matching_applies_the_topic_filter() {
+        let mut history = History::default();
+        history.push(record(Class::Known, 0, Some("A")));
+        history.push(record(Class::Known, 0, Some("B")));
+        history.push(record(Class::Rtps, 0, None));
+
+        let mut selection = TopicSelection::default();
+        selection.toggle("A");
+        let topics: Vec<Option<String>> = history
+            .matching(&selection)
+            .map(|(_, r)| r.topic.clone())
+            .collect();
+        assert_eq!(topics, vec![Some("A".to_string())]);
+        assert_eq!(history.len(), 3);
     }
 }

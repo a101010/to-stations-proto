@@ -132,6 +132,8 @@ export component MainWindow inherits Window {
     in-out property <int> bps: 0;
     in-out property <int> participants: 0;
     in-out property <int> endpoints: 0;
+    in-out property <int> dropped: 0;
+    in-out property <int> trimmed: 0;
 
     in-out property <string> iface: "StationsDDS";
     in-out property <string> group: "ff02::ffff:239.255.0.1";
@@ -221,6 +223,8 @@ export component MainWindow inherits Window {
             StatChip { label: "packets"; value: "" + root.packets; }
             StatChip { label: "bytes"; value: "" + root.bytes; }
             StatChip { label: "rtps"; value: "" + root.rtps; }
+            StatChip { label: "dropped"; value: "" + root.dropped; }
+            StatChip { label: "trimmed"; value: "" + root.trimmed; }
             StatChip { label: "pps"; value: "" + root.pps; }
             StatChip { label: "bps"; value: "" + root.bps; }
             StatChip { label: "participants"; value: "" + root.participants; }

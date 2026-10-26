@@ -10,10 +10,10 @@
 //! data from endpoints discovered before capture starts stays `unidentified`.
 //! The proper fix is the `dds-echo-discovery-attribution` story.
 
+use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::Sender;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use socket2::{Domain, Protocol, Socket, Type};
@@ -97,6 +97,110 @@ impl std::fmt::Display for ConfigError {
 
 impl std::error::Error for ConfigError {}
 
+/// Maximum datagrams pending between the capture threads and the UI.
+pub const QUEUE_MAX_RECORDS: usize = 4096;
+/// Maximum pending datagram bytes between the capture threads and the UI.
+pub const QUEUE_MAX_BYTES: usize = 32 * 1024 * 1024;
+/// Maximum datagrams the UI processes per tick, keeping the event loop moving.
+pub const DRAIN_MAX_PER_TICK: usize = 2048;
+
+struct QueueState {
+    buffer: model::FrequencyBuffer<Record>,
+    /// Writer GUID -> topic, learned from SEDP so the queue can group data
+    /// before the UI attributes it.
+    writer_topic: HashMap<String, String>,
+}
+
+/// The bounded handoff from the capture threads to the UI.
+///
+/// Eviction is frequency-first: the oldest record of the most frequent key is
+/// dropped, and a key with one buffered record is kept while any other key has
+/// two or more. The `dropped` count records evictions the UI never observed.
+pub struct CaptureQueue {
+    inner: Mutex<QueueState>,
+    dropped: AtomicU64,
+}
+
+impl Default for CaptureQueue {
+    fn default() -> Self {
+        Self {
+            inner: Mutex::new(QueueState {
+                buffer: model::FrequencyBuffer::new(QUEUE_MAX_RECORDS, QUEUE_MAX_BYTES),
+                writer_topic: HashMap::new(),
+            }),
+            dropped: AtomicU64::new(0),
+        }
+    }
+}
+
+impl CaptureQueue {
+    pub fn push(&self, record: Record) {
+        let mut state = self.lock();
+        for frame in &record.frames {
+            if let Some(model::Announcement::Endpoint(endpoint)) = &frame.announcement {
+                if endpoint.kind == model::EndpointKind::Writer && !endpoint.topic.is_empty() {
+                    state
+                        .writer_topic
+                        .insert(endpoint.guid.clone(), endpoint.topic.clone());
+                }
+            }
+        }
+        let key = queue_key(&state, &record);
+        let evicted = state.buffer.push(key, record.size, record);
+        let dropped = evicted.len() as u64;
+        drop(state);
+        if dropped > 0 {
+            self.dropped.fetch_add(dropped, Ordering::Relaxed);
+        }
+    }
+
+    /// Remove and return up to `max` of the oldest pending records.
+    pub fn drain(&self, max: usize) -> Vec<Record> {
+        self.lock()
+            .buffer
+            .drain_batch(max)
+            .into_iter()
+            .map(|(_, record)| record)
+            .collect()
+    }
+
+    pub fn dropped(&self) -> u64 {
+        self.dropped.load(Ordering::Relaxed)
+    }
+
+    /// Discard pending records without counting them as dropped and forget the
+    /// learned writer topics.
+    pub fn clear(&self) {
+        let mut state = self.lock();
+        state.buffer.clear();
+        state.writer_topic.clear();
+        drop(state);
+        self.dropped.store(0, Ordering::Relaxed);
+    }
+
+    #[cfg(test)]
+    pub fn len(&self) -> usize {
+        self.lock().buffer.len()
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, QueueState> {
+        self.inner.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+fn queue_key(state: &QueueState, record: &Record) -> String {
+    if let Some(topic) = record.topic.as_deref().filter(|t| !t.is_empty()) {
+        return topic.to_string();
+    }
+    if let Some(guid) = record.writer_guid() {
+        if let Some(topic) = state.writer_topic.get(&guid) {
+            return topic.clone();
+        }
+        return format!("@writer:{guid}");
+    }
+    format!("@source:{}", record.src_addr)
+}
+
 pub fn is_rtps(data: &[u8]) -> bool {
     rtps::is_rtps(data)
 }
@@ -123,7 +227,6 @@ pub fn record_from(data: &[u8], src: SocketAddr, local_port: u16, elapsed_ms: u6
         topic: None,
         submessages: if class == Class::Rtps { "RTPS" } else { "UDP" }.to_string(),
         hex: data.to_vec(),
-        decoded: String::new(),
         frames: Vec::new(),
     };
     if class == Class::Rtps {
@@ -216,7 +319,10 @@ pub struct Capture {
 
 impl Capture {
     /// Bind the sockets, join the multicast groups, and start receiving.
-    pub fn start(config: &CaptureConfig, tx: Sender<Record>) -> std::io::Result<Self> {
+    pub fn start(
+        config: &CaptureConfig,
+        queue: Arc<CaptureQueue>,
+    ) -> std::io::Result<Self> {
         let resolved = resolve_interfaces(&config.interfaces);
         let families = families(config);
 
@@ -234,9 +340,9 @@ impl Capture {
         for socket in &sockets {
             let udp = socket.try_clone()?;
             let port = socket.local_addr().map(|a| a.port()).unwrap_or(0);
-            let tx = tx.clone();
+            let queue = queue.clone();
             let stop = stop.clone();
-            threads.push(std::thread::spawn(move || recv_loop(udp, port, tx, stop)));
+            threads.push(std::thread::spawn(move || recv_loop(udp, port, queue, stop)));
         }
 
         Ok(Capture {
@@ -264,16 +370,14 @@ impl Capture {
     }
 }
 
-fn recv_loop(udp: UdpSocket, port: u16, tx: Sender<Record>, stop: Arc<AtomicBool>) {
+fn recv_loop(udp: UdpSocket, port: u16, queue: Arc<CaptureQueue>, stop: Arc<AtomicBool>) {
     let epoch = Instant::now();
     let mut buf = vec![0u8; BUF_SIZE];
     loop {
         match udp.recv_from(&mut buf) {
             Ok((n, src)) => {
                 let elapsed = epoch.elapsed().as_millis() as u64;
-                if tx.send(record_from(&buf[..n], src, port, elapsed)).is_err() {
-                    break; // the receiver was dropped
-                }
+                queue.push(record_from(&buf[..n], src, port, elapsed));
             }
             Err(e)
                 if e.kind() == std::io::ErrorKind::WouldBlock
@@ -496,7 +600,18 @@ fn parse_ports(field: &str) -> Result<Vec<u16>, ConfigError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
+
+    fn next_record(queue: &CaptureQueue, timeout: Duration) -> Record {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if let Some(record) = queue.drain(1).into_iter().next() {
+                return record;
+            }
+            assert!(Instant::now() < deadline, "a record arrives");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
 
     #[test]
     fn detects_rtps() {
@@ -516,8 +631,8 @@ mod tests {
             ports: vec![7400],
             broadcast: false,
         };
-        let (tx, rx) = std::sync::mpsc::channel();
-        let capture = Capture::start(&config, tx).expect("start capture");
+        let queue = Arc::new(CaptureQueue::default());
+        let capture = Capture::start(&config, queue.clone()).expect("start capture");
 
         let sender = Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP)).unwrap();
         sender.set_multicast_if_v6(index).unwrap();
@@ -525,9 +640,7 @@ mod tests {
         let dest = SocketAddr::V6(std::net::SocketAddrV6::new(group, 7400, 0, index));
         sender.send_to(b"RTPS\x02\x04hello", dest).unwrap();
 
-        let received = rx
-            .recv_timeout(Duration::from_secs(3))
-            .expect("a record arrives");
+        let received = next_record(&queue, Duration::from_secs(3));
         assert_eq!(received.class, Class::Rtps);
         capture.stop();
     }
@@ -687,8 +800,8 @@ mod tests {
             ports: vec![0],
             broadcast: false,
         };
-        let (tx, rx) = std::sync::mpsc::channel();
-        let capture = Capture::start(&config, tx).expect("start capture");
+        let queue = Arc::new(CaptureQueue::default());
+        let capture = Capture::start(&config, queue.clone()).expect("start capture");
         let port = capture.local_ports()[0];
 
         let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
@@ -705,9 +818,7 @@ mod tests {
         d.extend_from_slice(&9u32.to_le_bytes()); // sn = 9
         sender.send_to(&d, ("127.0.0.1", port)).unwrap();
 
-        let received = rx
-            .recv_timeout(Duration::from_secs(3))
-            .expect("a record arrives");
+        let received = next_record(&queue, Duration::from_secs(3));
         assert_eq!(received.class, Class::Rtps);
         assert_eq!(received.size, d.len());
         assert_eq!(received.hex, d);
@@ -718,5 +829,91 @@ mod tests {
         assert_eq!(received.frames[0].seq, "9");
 
         capture.stop();
+    }
+
+    fn queued(topic: Option<&str>, size: usize) -> Record {
+        Record {
+            elapsed_ms: 0,
+            class: Class::Rtps,
+            src_addr: "[::1]:7400".to_string(),
+            guid_prefix: None,
+            entity_id: None,
+            dest_port: 7401,
+            size,
+            topic: topic.map(str::to_string),
+            submessages: "DATA".to_string(),
+            hex: vec![0; size],
+            frames: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn queue_drops_high_frequency_records_before_a_one_shot_topic() {
+        let queue = CaptureQueue::default();
+        for _ in 0..QUEUE_MAX_RECORDS {
+            queue.push(queued(Some("fast"), 1));
+        }
+        assert_eq!(queue.len(), QUEUE_MAX_RECORDS);
+        assert_eq!(queue.dropped(), 0);
+
+        queue.push(queued(Some("rare"), 1));
+        assert_eq!(queue.len(), QUEUE_MAX_RECORDS);
+        assert_eq!(queue.dropped(), 1);
+
+        let drained = queue.drain(usize::MAX);
+        assert!(drained
+            .iter()
+            .any(|record| record.topic.as_deref() == Some("rare")));
+        assert_eq!(
+            drained
+                .iter()
+                .filter(|record| record.topic.as_deref() == Some("fast"))
+                .count(),
+            QUEUE_MAX_RECORDS - 1
+        );
+    }
+
+    #[test]
+    fn queue_key_uses_learned_topic_then_writer_then_source() {
+        let mut state = QueueState {
+            buffer: model::FrequencyBuffer::new(QUEUE_MAX_RECORDS, QUEUE_MAX_BYTES),
+            writer_topic: std::collections::HashMap::new(),
+        };
+        state.writer_topic.insert(
+            "aaaaaaaaaaaaaaaaaaaaaaaa00000102".to_string(),
+            "Learned".to_string(),
+        );
+
+        let mut record = queued(None, 1);
+        record.guid_prefix = Some("aaaaaaaaaaaaaaaaaaaaaaaa".to_string());
+        record.entity_id = Some("00000102".to_string());
+        assert_eq!(queue_key(&state, &record), "Learned");
+
+        record.topic = Some("Explicit".to_string());
+        assert_eq!(queue_key(&state, &record), "Explicit");
+
+        record.topic = None;
+        record.entity_id = Some("00000999".to_string());
+        assert_eq!(
+            queue_key(&state, &record),
+            "@writer:aaaaaaaaaaaaaaaaaaaaaaaa00000999"
+        );
+
+        record.guid_prefix = None;
+        record.entity_id = None;
+        assert_eq!(queue_key(&state, &record), "@source:[::1]:7400");
+    }
+
+    #[test]
+    fn queue_clear_resets_pending_and_dropped() {
+        let queue = CaptureQueue::default();
+        for _ in 0..QUEUE_MAX_RECORDS + 1 {
+            queue.push(queued(Some("fast"), 1));
+        }
+        assert_eq!(queue.dropped(), 1);
+
+        queue.clear();
+        assert_eq!(queue.len(), 0);
+        assert_eq!(queue.dropped(), 0);
     }
 }
