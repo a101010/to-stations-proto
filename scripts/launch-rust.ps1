@@ -22,6 +22,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# Stop a previous run first: repeated launches must not stack services/displays
+# (which doubles streams and DDS discovery).
+& (Join-Path $PSScriptRoot 'cleanup.ps1')
+
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $bin = Join-Path $repoRoot 'build\deploy\bin'
 $config = Join-Path $repoRoot 'build\deploy\config\cyclonedds-config.xml'

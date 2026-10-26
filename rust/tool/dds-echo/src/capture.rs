@@ -4,6 +4,11 @@
 //! The sockets are standalone (no CycloneDDS participant); each datagram is
 //! classified as `UDP` or `RTPS` and forwarded over a channel. Later stories
 //! parse the RTPS/SEDP payloads.
+//!
+//! Topic attribution depends on observing SEDP during capture. SEDP is directed
+//! to matched readers and is not replayed to a late-joining passive sniffer, so
+//! data from endpoints discovered before capture starts stays `unidentified`.
+//! The proper fix is the `dds-echo-discovery-attribution` story.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};

@@ -289,7 +289,9 @@ impl TopicCounts {
 /// The participants, endpoints, and writer->topic map learned from SPDP/SEDP.
 ///
 /// Accumulated on the UI thread; every item is keyed by GUID so repeated
-/// announcements are deduplicated.
+/// announcements are deduplicated. A passive sniffer only learns endpoints
+/// whose SEDP it observes; announcements sent before capture started are not
+/// replayed, so their data stays unattributed.
 #[derive(Clone, Debug, Default)]
 pub struct Discovery {
     participants: BTreeSet<String>,

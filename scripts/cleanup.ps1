@@ -7,7 +7,7 @@ Stops the applications of every configuration by image name. The launch scripts
 start them from build/deploy; this script stops all of them.
 
 The list of applications grows as stories add executables; the Rust launch
-script currently starts only the small display (lil-d).
+script starts the hello_world view service and the small display (lil-d).
 #>
 [CmdletBinding()]
 param()

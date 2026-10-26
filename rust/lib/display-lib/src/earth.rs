@@ -349,6 +349,28 @@ mod tests {
     }
 
     #[test]
+    fn quat_to_mat3_columns_are_rotated_basis_vectors() {
+        let axis = normalize3([1.0, 1.0, 1.0]);
+        let half = 30.0_f32.to_radians() / 2.0;
+        let (s, c) = half.sin_cos();
+        let q = [axis[0] * s, axis[1] * s, axis[2] * s, c];
+        let m = quat_to_mat3(q);
+        for (col, e) in [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+            .iter()
+            .enumerate()
+        {
+            let want = rotate_q(q, *e);
+            for row in 0..3 {
+                let got = m[col * 3 + row];
+                assert!(
+                    (got - want[row]).abs() < 1e-5,
+                    "column {col}: matrix {m:?} vs rotated vector {want:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn sphere_vertices_are_unit_and_counted() {
         let verts = sphere_vertices(STACKS, SLICES);
         assert_eq!(verts.len(), ((STACKS + 1) * (SLICES + 1)) as usize);
@@ -403,6 +425,19 @@ mod tests {
 
     fn dot3(a: [f32; 3], b: [f32; 3]) -> f32 {
         a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+    }
+
+    /// Rotate `v` by the unit quaternion `(x, y, z, w)`, matching the shader.
+    fn rotate_q(q: [f32; 4], v: [f32; 3]) -> [f32; 3] {
+        let u = [q[0], q[1], q[2]];
+        let t = cross3(u, v);
+        let t = [2.0 * t[0], 2.0 * t[1], 2.0 * t[2]];
+        let c = cross3(u, t);
+        [
+            v[0] + q[3] * t[0] + c[0],
+            v[1] + q[3] * t[1] + c[1],
+            v[2] + q[3] * t[2] + c[2],
+        ]
     }
 
     #[test]

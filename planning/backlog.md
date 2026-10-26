@@ -37,12 +37,6 @@ Third-party libraries are built/installed to an external prefix (for example `C:
 
 **Done when.** `launch-rust.ps1` brings up the model service, the view service, and `lil-d` from `build/deploy`; `lil-d` shows the tilted, cube-mapped earth lit from the upper right with the greeting text rendered in the loaded font, its power button works, and the format manager switches between the default and hello-world formats. `dds-echo` observes every topic in the registry, `--topics` and `build/topics.md` match `contracts/`, and `cleanup.ps1` stops everything.
 
-### hello-view-service-fixes
-Fix the problems seen when running the Rust configuration after `hello-view-service`: `lil-d` opens behind every other window; duplicate services/displays get launched; the view samples are all `unidentified`; and the earth's north-pole point moves on screen instead of the earth spinning about its tilted polar axis. The active plan lives in `current_story.md`.
-- **Depends on:** none.
-- **Minimal test:** after `cleanup.ps1` and a single `launch-rust.ps1`, `lil-d` opens in front; exactly one `hello-view-service` and one `lil-d` run; the earth spins about a fixed tilted pole; view samples are categorized (or their non-categorization is understood).
-- **Status:** in progress.
-
 ### robust-dds-echo
 Make `dds-echo` survive many concurrent high-rate streams (for example several 100 Hz topics), not just one: a bounded capture queue with an explicit max buffer size and a drop-oldest policy plus a visible dropped-count; lazy hex/decoded formatting on selection rather than per record; a bounded `VecDeque` with a throttled view rebuild instead of per-record O(n) `remove(0)`; and no formatting of records the topic filter excludes.
 - **Depends on:** none.

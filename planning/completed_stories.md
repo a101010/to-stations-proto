@@ -165,3 +165,9 @@ Add `HelloWorldViewTopic` and create the hello_world view service that publishes
 - **Completed:** 2026-10-22 16:07:11.
 - **Depends on:** none.
 - **Minimal test:** `dds-echo` shows `HelloWorldViewTopic` samples and the display renders the published view.
+
+### hello-view-service-fixes
+Fix the problems seen when running the Rust configuration after `hello-view-service`: `lil-d` opens behind every other window; duplicate services/displays get launched; the view samples are all `unidentified`; and the earth's north-pole point moves on screen instead of the earth spinning about its tilted polar axis. Launching now stops the previous run first; `lil-d` raises and focuses itself; the rotation is pinned by a display-side convention test; the `unidentified` view samples are recorded as a passive-capture limitation, with `dds-echo-discovery-attribution` as the follow-up.
+- **Completed:** 2026-10-26 12:51:14.
+- **Depends on:** none.
+- **Minimal test:** after `cleanup.ps1` and a single `launch-rust.ps1`, `lil-d` opens in front; exactly one `hello-view-service` and one `lil-d` run; the earth spins about a fixed tilted pole; view samples are categorized (or their non-categorization is understood).

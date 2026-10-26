@@ -82,8 +82,11 @@ impl App {
         // Paint one frame while hidden, then show the window.
         self.render();
         if let Some(gl_window) = self.gl_window.as_ref() {
-            gl_window.window().set_visible(true);
-            gl_window.window().request_redraw();
+            let window = gl_window.window();
+            window.set_visible(true);
+            window.request_redraw();
+            window.focus_window();
+            window.request_user_attention(Some(winit::window::UserAttentionType::Critical));
         }
     }
 
