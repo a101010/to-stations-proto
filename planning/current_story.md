@@ -4,106 +4,93 @@ This file is the detailed, living plan for the one active story. It is rewritten
 
 ## Story
 
-Make `dds-echo` survive many concurrent high-rate streams (for example several 100 Hz topics), not just one: a bounded capture queue with frequency-first eviction that protects low-frequency and one-shot topics; separate visible `dropped` and `trimmed` counters; lazy hex/decoded formatting on selection rather than per record; a bounded history with a throttled view rebuild instead of per-record O(n) `remove(0)`; and no formatting of records the topic filter excludes. Reopened after real-world testing: the receive loop must observe stop during continuous traffic, and the table must be virtualized with its rebuild throttled so Stop does not block the UI.
+Make `dds-echo` survive many concurrent high-rate streams (for example several 100 Hz topics), not just one: a bounded capture queue with frequency-first eviction that protects low-frequency and one-shot topics; separate visible `dropped` and `trimmed` counters; lazy hex/decoded formatting on selection rather than per record; a bounded history with a throttled view rebuild instead of per-record O(n) `remove(0)`; and no formatting of records the topic filter excludes. Reopened for real-use bug fixes: the stop check, virtualized `ListView`, and rebuild throttle are in place; scrolling up must pause live table updates and selection must stay responsive while paused.
 
 - **Depends on:** none.
-- **Minimal test:** with N concurrent 100 Hz writers plus a one-shot topic, the UI stays responsive, memory stays bounded, `dropped` and `trimmed` are reported, and the one-shot topic's records survive while high-frequency records are trimmed; pressing Stop under live traffic returns immediately.
+- **Minimal test:** with N concurrent 100 Hz writers plus a one-shot topic, the UI stays responsive, memory stays bounded, `dropped` and `trimmed` are reported, and the one-shot topic's records survive while high-frequency records are trimmed; pressing Stop under live traffic returns immediately; scrolling up freezes the table while stats continue, selecting a row is responsive, and scrolling to the bottom resumes live updates.
 
-Topic attribution remains the separate `dds-echo-discovery-attribution` story. Starting `dds-echo` first does not fix it: SEDP is not visible to a non-participant sniffer.
+The story stays active until the user asks to plan the next story. Topic attribution remains the separate `dds-echo-discovery-attribution` story.
 
-## Context
+## Current state
 
-The first pass of this story is implemented:
+The first pass and stop fix are committed:
 
-- `capture.rs` has a bounded `CaptureQueue` with frequency-first eviction, singleton protection, a learned writer-to-topic index, and a `dropped` counter.
-- `model.rs` has `FrequencyBuffer` and `History`, frequency-ranked retention with `MAX_RECORDS`/`HISTORY_MAX_BYTES`, and the separate `trimmed` count.
-- `main.rs` drains a bounded batch per 100 ms tick, keeps raw history, formats lightweight rows, builds hex/decoded/frames only on selection, and preserves selection by history id.
-- `ui/dds_echo.slint` shows `dropped` and `trimmed` chips.
+- Bounded `CaptureQueue` with frequency-first eviction, singleton protection, writer-to-topic learning, and a `dropped` counter.
+- `FrequencyBuffer`/`History` with frequency-ranked retention and a separate `trimmed` counter.
+- Lazy row/detail formatting; `RecordRow` plus a virtualized `ListView`; 250 ms full-rebuild throttle.
+- `recv_loop` observes the stop flag before receiving and after each datagram; continuous-sender regression test.
 
-Two problems remain after real-world use:
-
-1. Stop blocks the UI under continuous traffic.
-2. The table still rebuilds all retained rows on every dirty tick, which can starve input on slower machines.
+Remaining bug: follow-tail and selection responsiveness. The table keeps rebuilding and snapping to the bottom while the user scrolls up, so inspecting and selecting rows is awkward.
 
 ## Findings
 
-- **Stop freeze.** `recv_loop` checks the stop flag only in the `recv_from` timeout branch. Under continuous traffic `recv_from` keeps returning `Ok`, so the receive thread never sees the flag. `Capture::stop()` sets the flag and joins the receive threads; the joins never return, so the UI thread blocks inside `on_stop` and Windows reports "Not responding." This is independent of table cost.
-- **View rebuild cost.** `rebuild_view` calls `records.set_vec` with all matching retained rows (up to 1000), and the Slint table is a `ScrollView` with a plain `for` over all rows, so every row component is instantiated. This runs on every dirty 100 ms tick.
-- **Attribution.** Passive SEDP capture is not sufficient even when `dds-echo` starts first; this is the separate follow-up story.
-- **Memory.** The queue/history caps are working; memory plateaus and is not the freeze cause.
+- **Follow-tail cause.** The ListView's `content-y` was bound two-way to a Rust mirror, but the underlying `Flickable` removes content-y bindings on user scroll. The mirror can remain stale, so the Rust tick keeps forcing the list to the bottom and keeps rebuilding the table.
+- **Selection responsiveness.** Rebuilding up to 1000 rows every 250 ms while the user is trying to read or select makes selection feel unresponsive even with a virtualized `ListView`.
+- **Stop freeze.** Already fixed; the receive loop now observes stop during continuous traffic.
+- The attribution problem is unrelated and remains the separate `dds-echo-discovery-attribution` story.
 
 ## Decisions
 
-1. Keep the implemented frequency basis, grouping key, singleton protection, all-singleton fallback, caps, counters, lazy formatting, and frequency-ranked history.
-2. Check `stop` at the top of every receive-loop iteration and again after handling each datagram.
-3. Keep the read timeout as the idle-loop bound; it also bounds Stop latency when the socket is idle.
-4. Add a lightweight `RecordRow` for the table and use `ListView` so only visible rows are instantiated.
-5. Keep the full `Record` only for the selected detail.
-6. Rebuild the table at most every `VIEW_REBUILD_MS = 250`; keep draining, stats, and topic counts on the 100 ms tick. Rebuild immediately on filter changes and Start/Clear.
-7. Preserve selection by history id through `displayed_ids`.
+1. Keep the frequency basis, grouping, singleton protection, all-singleton fallback, caps, counters, lazy formatting, and history retention.
+2. Keep the stop fix, `RecordRow`/`ListView`, and 250 ms rebuild throttle.
+3. Move follow-tail state into Slint so it reads the real ListView position instead of the stale Rust mirror.
+4. While the user is scrolled up, freeze the table entirely; keep draining records, history, stats, topic counts, and counters. Resume and rebuild when the user returns to the bottom.
+5. Preserve selection by history id as before; a frozen table makes selection stable.
+6. Do not move this story to `completed_stories.md` until the user explicitly asks to plan the next story.
 
 ## Plan
 
-### Step 1 - Capture shutdown (priority 1)
+### Step 1 - Slint-side follow-tail
 
-In `capture.rs::recv_loop`, make the stop flag authoritative:
+In `ui/dds_echo.slint`:
 
-```rust
-loop {
-    if stop.load(Ordering::Relaxed) {
-        break;
-    }
-    match udp.recv_from(&mut buf) {
-        Ok((n, src)) => {
-            // ... build and push the record ...
-            if stop.load(Ordering::Relaxed) {
-                break;
-            }
+- Add `in-out property <bool> follow: true;`.
+- Remove the two-way `content-y` binding and the `list-content-y` / `list-content-height` / `list-visible-height` mirror properties if they are no longer used.
+- In the ListView's `scrolled` handler, compute the real position:
+
+```slint
+scrolled => {
+    root.follow = list.content-y <= (list.visible-height - list.content-height) + 1px;
+}
+```
+
+- Add a low-frequency timer that sticks to the bottom only while following:
+
+```slint
+Timer {
+    interval: 100ms;
+    running: root.follow;
+    repeat: true;
+    triggered => {
+        if (root.follow) {
+            list.content-y = min(0px, list.visible-height - list.content-height);
         }
-        Err(e) if WouldBlock/TimedOut => {
-            if stop.load(Ordering::Relaxed) {
-                break;
-            }
-        }
-        Err(e) => { eprintln!(...); break; }
     }
 }
 ```
 
-`Capture::stop` keeps setting the flag and joining. A continuously busy socket exits before the next `recv_from`; an idle socket exits within one read timeout.
+- Remove the `list-scrolled` callback if it is no longer needed.
 
-Add a regression test:
+Behavior: scrolling up sets `follow = false` and stops the timer; scrolling to the bottom sets `follow = true` and the timer keeps the list at the bottom.
 
-- Bind a capture on an ephemeral unicast port.
-- Start a sender thread that sends RTPS datagrams continuously until told to stop.
-- Call `Capture::stop()` from another thread and signal completion over a channel.
-- Wait at most one second; on timeout, stop the sender and fail the test.
-
-Check: pressing Stop under live 100 Hz traffic returns immediately; pressing Stop on an idle capture returns within the read timeout.
-
-### Step 2 - Virtualized, lightweight table
-
-In `ui/dds_echo.slint`:
-
-- Add a `RecordRow` struct with `time`, `protocol`, `source`, `size`, `topic`, `submessages`, and `known`.
-- Change `records` to `[RecordRow]`.
-- Replace the table's `ScrollView` + `VerticalLayout` + `for` with a `ListView` whose only child is the single `for` loop. Keep the header, row height, styling, selection highlight, and `TouchArea` click. Keep follow-the-tail properties bound to the ListView.
-- Keep the detail pane's `selected` model as the existing full `Record`.
+### Step 2 - Rust table update policy
 
 In `main.rs`:
 
-- Use `VecModel<ui::RecordRow>` for the table.
-- `to_row` returns `ui::RecordRow` and no longer creates hex, decoded, or frame data.
-- `to_detail` keeps building the full `ui::Record` on selection.
-- `displayed_ids` stays aligned for selection lookup.
+- Remove `State.following`, the `on_list_scrolled` handler, and the tick's forced `set_list_content_y`.
+- Add `pending_view: Cell<bool>` to `State`.
+- In `tick`:
+  - Always drain the queue and update history, stats, topic counts, discovery, and counters.
+  - Set `pending_view` when records arrived or history was trimmed.
+  - If `app.get_follow()` is false, do not rebuild the table; leave the displayed rows frozen.
+  - If follow is true and `pending_view` is set and the 250 ms throttle elapsed, rebuild, clear `pending_view`, and update `last_view_ms`.
+- Start and Clear set `app.set_follow(true)` and clear `pending_view`.
+- Filter changes still rebuild immediately; when the user is scrolled up, the Slint timer will not auto-scroll because follow remains false.
+- Keep selection by history id; while paused the model is stable, so row selection and detail should be immediate.
 
-### Step 3 - Throttled rebuild
+### Step 3 - Additional bugs
 
-- Add `const VIEW_REBUILD_MS: u64 = 250;`.
-- Add `last_view_ms: Cell<u64>` to `State`, reset on Start.
-- In `tick`, rebuild only when `dirty` and `now_ms - last_view_ms >= VIEW_REBUILD_MS`; update `last_view_ms`.
-- Rebuild immediately for topic filter changes, unselect-all, Start, and Clear.
-- Keep stats, rates, topic counts, and `dropped`/`trimmed` on the 100 ms tick.
+The user is still testing. Add any further observed symptoms to this story as bug fixes; do not split them out unless they belong to a separate subsystem (attribution remains separate).
 
 ### Step 4 - Verification
 
@@ -112,32 +99,28 @@ In `main.rs`:
 .\scripts\build.ps1
 ```
 
-1. Start `build\deploy\bin\dds-echo.exe`; press Start.
-2. Send `.\scripts\traffic-fake-topic.ps1` once, then run four concurrent 100 Hz streams:
-   `traffic-throughput.ps1 -Seconds 60 -Payload 1024 -IntervalMs 10 -Burst 1`.
-3. Confirm the rare topic's records remain while high-frequency rows churn; scrolling, selecting, and filtering stay responsive.
-4. Press Stop while traffic is live: the UI returns immediately and shows Stopped; repeated Stop clicks never produce "Not responding."
-5. With an idle capture, Stop returns within the read timeout.
-6. Sample `Get-Process dds-echo | Select WorkingSet64` every 5 seconds; memory plateaus.
-7. Confirm `trimmed` rises separately from `dropped` once history is full.
-8. Stress with `traffic-throughput.ps1 -Seconds 20 -Payload 60000 -IntervalMs 1 -Burst 100`; confirm `dropped` can rise and rare records still survive.
-9. Stop traffic with `Get-Process ThroughputPublisher,ThroughputSubscriber | Stop-Process -Force`.
+1. Start live capture (view service or 100 Hz streams).
+2. Scroll up: rows stop changing and the list stays where it was; stats/counters continue.
+3. Select rows and open details while paused; selection and detail should be responsive.
+4. Scroll to the bottom: live updates resume and the list follows the tail.
+5. Press Stop while live: the UI returns immediately (`Responding=True`).
+6. Run four concurrent 100 Hz streams plus a rare topic: memory plateaus, `dropped`/`trimmed` update, rare records survive.
+7. Confirm scrolling, filtering, selection, and decoded detail still work.
 
 ## Tests
 
-- Continuous-sender Stop regression test in `capture.rs` with a bounded join timeout.
-- Existing `dds-echo` unit tests continue to pass.
-- Manual Stop-under-load and idle-Stop checks.
-- Manual table scroll/selection/detail checks after the `ListView` conversion.
+- Existing 61 `dds-echo` tests, including the continuous-sender Stop regression.
+- Manual scroll-up/pause, scroll-to-bottom/resume, selection responsiveness, Stop-under-load, and memory plateau checks.
+- Add a focused test if the follow logic is extracted into testable Rust; otherwise the Slint-side behavior is verified manually.
 
 ## Notes and risks
 
-- `ListView` accepts only a single `for` child; the header stays outside it. Follow-tail behavior must be rechecked against the ListView scroll properties.
-- Stop can take up to one read timeout (200 ms) on an idle socket; that is acceptable and does not freeze the window.
-- Throttling delays table updates to 250 ms while stats stay at 100 ms; this is intentional to keep input responsive.
-- Attribution remains `unidentified` until `dds-echo-discovery-attribution`; this story does not attempt to fix it.
-- The table continues to show the frequency-retained history, not a separate live-tail mode.
+- The Slint timer and user scroll can race; the `follow` guard in the timer and the `scrolled` handler keep the user's scroll authoritative.
+- While paused, history continues to accumulate; the table rebuild on resume shows the retained set and then follows the bottom.
+- A filter change while paused rebuilds immediately; that is intentional, and follow stays false until the user scrolls to the bottom.
+- Selection while follow is true still rebuilds at 250 ms; if it remains sluggish, the next step is to pause rebuilds while a detail is selected or reduce the cadence.
+- Attribution remains separate; this story does not attempt to categorize `HelloWorldViewTopic`.
 
 ## Bookkeeping
 
-When this story passes, move it from `backlog.md` to `completed_stories.md` with a fresh completion timestamp, then plan `dds-echo-discovery-attribution`.
+Do not move this story to `completed_stories.md`. Keep it `in progress` until the user asks to plan the next story; then record completion and plan the next story.

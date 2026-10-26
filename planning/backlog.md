@@ -6,7 +6,7 @@ Conventions:
 * A story's title is a short, unique name. The body is a description followed by `Depends on`, `Minimal test`, and `Status`.
 * **Depends on** lists prerequisite stories that are not yet done (toolchain installs are environment prerequisites, not steps inside `build.ps1`).
 * **Minimal test** is the smallest runnable check that proves the story is done; toolchain smoke tests are temporary build artifacts under `build/`.
-* **Status** is one of `todo` or `in progress`; when a story is done, it moves to `completed_stories.md`. The active story's detailed plan lives in `current_story.md`.
+* **Status** is one of `todo` or `in progress`; a story moves to `completed_stories.md` only when the user asks to plan the next story. The active story's detailed plan lives in `current_story.md`.
 * IDs, topic names, and file paths follow `architecture.md`.
 
 ## Increment 1 - Rust MVP
@@ -38,9 +38,9 @@ Third-party libraries are built/installed to an external prefix (for example `C:
 **Done when.** `launch-rust.ps1` brings up the model service, the view service, and `lil-d` from `build/deploy`; `lil-d` shows the tilted, cube-mapped earth lit from the upper right with the greeting text rendered in the loaded font, its power button works, and the format manager switches between the default and hello-world formats. `dds-echo` observes every topic in the registry, `--topics` and `build/topics.md` match `contracts/`, and `cleanup.ps1` stops everything.
 
 ### robust-dds-echo
-Make `dds-echo` survive many concurrent high-rate streams (for example several 100 Hz topics), not just one: a bounded capture queue with frequency-first eviction that protects low-frequency and one-shot topics; separate visible `dropped` (capture-queue evictions) and `trimmed` (history evictions) counters; lazy hex/decoded formatting on selection rather than per record; a bounded history with a throttled view rebuild instead of per-record O(n) `remove(0)`; and no formatting of records the topic filter excludes. Reopened after real-world testing: the receive loop must observe stop during continuous traffic, and the table must be virtualized with its rebuild throttled so Stop does not block the UI.
+Make `dds-echo` survive many concurrent high-rate streams (for example several 100 Hz topics), not just one: a bounded capture queue with frequency-first eviction that protects low-frequency and one-shot topics; separate visible `dropped` (capture-queue evictions) and `trimmed` (history evictions) counters; lazy hex/decoded formatting on selection rather than per record; a bounded history with a throttled view rebuild instead of per-record O(n) `remove(0)`; and no formatting of records the topic filter excludes. Reopened for real-use bug fixes: the stop check, virtualized `ListView`, and rebuild throttle are in place; scrolling up must pause live table updates and selection must stay responsive while paused.
 - **Depends on:** none.
-- **Minimal test:** with N concurrent 100 Hz writers plus a one-shot topic, the UI stays responsive, memory stays bounded, `dropped` and `trimmed` are reported, and the one-shot topic's records survive while high-frequency records are trimmed; pressing Stop under live traffic returns immediately.
+- **Minimal test:** with N concurrent 100 Hz writers plus a one-shot topic, the UI stays responsive, memory stays bounded, `dropped` and `trimmed` are reported, and the one-shot topic's records survive while high-frequency records are trimmed; pressing Stop under live traffic returns immediately; scrolling up freezes the table while stats continue, selecting a row is responsive, and scrolling to the bottom resumes live updates.
 - **Status:** in progress.
 
 ### dds-echo-discovery-attribution
