@@ -49,6 +49,12 @@ Make `dds-echo` survive many concurrent high-rate streams (for example several 1
 - **Minimal test:** with N concurrent 100 Hz writers, the UI stays responsive, memory stays bounded, and dropped counts are reported.
 - **Status:** todo.
 
+### dds-echo-discovery-attribution
+Give `dds-echo` a discovery-only CycloneDDS participant and use the fork's builtin publication/subscription readers to learn writer GUID -> topic, independent of passive SEDP capture; keep raw UDP capture for the datagram list. Split out of `hello-view-service-fixes`, where the `unidentified` view samples were accepted as a passive-capture limitation.
+- **Depends on:** none.
+- **Minimal test:** start `dds-echo` after the services; `HelloWorldViewTopic` samples are categorized.
+- **Status:** todo.
+
 ### hello-service
 Create the hello_world model service (`hello-service`): publish `HelloWorldTopic` (greeting text and quaternion attitude) at a fixed rate, a 23.5 degree tilt. The model data moves out of the view service to this service, and the view service now subscribes to it and relays. One revolution every twelve minutes is added later.
 - **Depends on:** none.
