@@ -34,6 +34,8 @@ use crate::ui::MainWindow;
 
 /// The UI refresh / capture-drain tick.
 const TICK: Duration = Duration::from_millis(100);
+/// Minimum interval between full table rebuilds.
+const VIEW_REBUILD_MS: u64 = 250;
 
 #[derive(Parser, Debug)]
 #[command(name = "dds-echo", about = "DDSI-RTPS multicast/UDP traffic inspector")]
@@ -68,6 +70,7 @@ struct State {
     discovery: RefCell<Discovery>,
     rates: RefCell<RateTracker>,
     start: Cell<Instant>,
+    last_view_ms: Cell<u64>,
     following: Cell<bool>,
     /// The topic rows selected in the topics pane (the center filter).
     selection: RefCell<TopicSelection>,
@@ -137,30 +140,20 @@ fn empty_record() -> ui::Record {
 
 /// The lightweight table row; hex, decoded fields, and frames are deferred to
 /// [`to_detail`].
-fn to_row(r: &model::Record, known: &KnownTopics) -> ui::Record {
-    ui::Record {
+fn to_row(r: &model::Record, known: &KnownTopics) -> ui::RecordRow {
+    ui::RecordRow {
         time: r.time_label().into(),
         protocol: r.protocol().into(),
         source: r.src_addr.clone().into(),
         size: r.size as i32,
         topic: r.topic.clone().unwrap_or_default().into(),
         submessages: r.submessages.clone().into(),
-        hex: "".into(),
-        decoded: "".into(),
-        guid: "".into(),
-        entity: "".into(),
         known: r.is_known(known),
-        frames: ModelRc::default(),
     }
 }
 
 /// The full detail model, built only when a row is selected.
 fn to_detail(r: &model::Record, known: &KnownTopics) -> ui::Record {
-    let mut row = to_row(r, known);
-    row.guid = r.guid_prefix.clone().unwrap_or_default().into();
-    row.entity = r.entity_id.clone().unwrap_or_default().into();
-    row.hex = r.hex_string().into();
-    row.decoded = decoded_text(r, known).into();
     let frames: Vec<ui::Frame> = r
         .frames
         .iter()
@@ -169,8 +162,20 @@ fn to_detail(r: &model::Record, known: &KnownTopics) -> ui::Record {
             detail: frame_detail(f).into(),
         })
         .collect();
-    row.frames = ModelRc::from(frames.as_slice());
-    row
+    ui::Record {
+        time: r.time_label().into(),
+        protocol: r.protocol().into(),
+        source: r.src_addr.clone().into(),
+        size: r.size as i32,
+        topic: r.topic.clone().unwrap_or_default().into(),
+        submessages: r.submessages.clone().into(),
+        hex: r.hex_string().into(),
+        decoded: decoded_text(r, known).into(),
+        guid: r.guid_prefix.clone().unwrap_or_default().into(),
+        entity: r.entity_id.clone().unwrap_or_default().into(),
+        known: r.is_known(known),
+        frames: ModelRc::from(frames.as_slice()),
+    }
 }
 
 /// Decode the sample's payload when the record's topic is registered; the
@@ -196,7 +201,7 @@ fn decoded_text(r: &model::Record, known: &KnownTopics) -> String {
 /// Rebuild the visible rows from the retained history, in arrival order,
 /// formatting only records that pass the topic filter. This runs at most once
 /// per tick (and immediately on a filter change), never per record.
-fn rebuild_view(app: &MainWindow, state: &State, records: &VecModel<ui::Record>) {
+fn rebuild_view(app: &MainWindow, state: &State, records: &VecModel<ui::RecordRow>) {
     let history = state.history.borrow();
     let selection = state.selection.borrow();
     let selected = state.selected_id.get();
@@ -224,7 +229,7 @@ fn rebuild_view(app: &MainWindow, state: &State, records: &VecModel<ui::Record>)
 fn apply_selection(
     app: &MainWindow,
     state: &State,
-    records: &VecModel<ui::Record>,
+    records: &VecModel<ui::RecordRow>,
     known: &VecModel<ui::TopicRow>,
     unknown: &VecModel<ui::TopicRow>,
 ) {
@@ -236,6 +241,9 @@ fn apply_selection(
         unknown,
     );
     rebuild_view(app, state, records);
+    state
+        .last_view_ms
+        .set(state.start.get().elapsed().as_millis() as u64);
 }
 
 fn refresh_topics(
@@ -272,7 +280,7 @@ fn refresh_topics(
 fn tick(
     app: &MainWindow,
     state: &State,
-    records: &VecModel<ui::Record>,
+    records: &VecModel<ui::RecordRow>,
     known: &VecModel<ui::TopicRow>,
     unknown: &VecModel<ui::TopicRow>,
 ) {
@@ -300,8 +308,9 @@ fn tick(
     if trimmed > 0 {
         state.trimmed.set(state.trimmed.get() + trimmed as u64);
     }
-    if dirty {
+    if dirty && now_ms.saturating_sub(state.last_view_ms.get()) >= VIEW_REBUILD_MS {
         rebuild_view(app, state, records);
+        state.last_view_ms.set(now_ms);
     }
 
     refresh_topics(
@@ -390,6 +399,7 @@ fn main() -> Result<(), slint::PlatformError> {
         discovery: RefCell::new(Discovery::default()),
         rates: RefCell::new(RateTracker::default()),
         start: Cell::new(Instant::now()),
+        last_view_ms: Cell::new(0),
         following: Cell::new(true),
         selection: RefCell::new(TopicSelection::default()),
         history: RefCell::new(History::default()),
@@ -400,7 +410,7 @@ fn main() -> Result<(), slint::PlatformError> {
         known_topics,
     });
 
-    let records = Rc::new(VecModel::<ui::Record>::default());
+    let records = Rc::new(VecModel::<ui::RecordRow>::default());
     let known = Rc::new(VecModel::<ui::TopicRow>::default());
     let unknown = Rc::new(VecModel::<ui::TopicRow>::default());
     app.set_records(ModelRc::from(records.clone()));
@@ -457,6 +467,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     state.selected_id.set(None);
                     state.dropped.set(0);
                     state.trimmed.set(0);
+                    state.last_view_ms.set(0);
 
                     records.clear();
                     refresh_topics(
@@ -540,6 +551,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 state.selected_id.set(None);
                 state.dropped.set(0);
                 state.trimmed.set(0);
+                state.last_view_ms.set(0);
                 app.set_selected(empty_record());
                 refresh_topics(
                     &app,

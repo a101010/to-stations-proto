@@ -20,6 +20,16 @@ export struct Record {
     frames: [Frame],
 }
 
+export struct RecordRow {
+    time: string,
+    protocol: string,
+    source: string,
+    size: int,
+    topic: string,
+    submessages: string,
+    known: bool,
+}
+
 export struct TopicRow {
     name: string,
     known: bool,
@@ -139,7 +149,7 @@ export component MainWindow inherits Window {
     in-out property <string> group: "ff02::ffff:239.255.0.1";
     in-out property <string> ports: "7400, 7401";
 
-    in-out property <[Record]> records: [];
+    in-out property <[RecordRow]> records: [];
     in-out property <[TopicRow]> known-topics: [];
     in-out property <[TopicRow]> unknown-topics: [];
     in-out property <int> known-total: 0;
@@ -287,26 +297,24 @@ export component MainWindow inherits Window {
                         Text { text: "Size"; color: #9a9a9a; width: 50px; }
                         Text { text: "Submessages"; color: #9a9a9a; horizontal-stretch: 1; }
                     }
-                    list := ScrollView {
+                    list := ListView {
                         content-y <=> root.list-content-y;
                         scrolled => { root.list-scrolled(); }
                         vertical-stretch: 1;
-                        VerticalLayout {
-                            for r[i] in root.records : Rectangle {
-                                height: 22px;
-                                background: i == root.selected-index ? #333a44 : transparent;
-                                HorizontalLayout {
-                                    spacing: 8px;
-                                    Text { text: r.time; color: #d0d0d0; width: 70px; vertical-alignment: center; }
-                                    Text { text: r.protocol; color: #9aa0b0; width: 80px; vertical-alignment: center; }
-                                    Text { text: r.source; color: #d0d0d0; width: 300px; vertical-alignment: center; }
-                                    Text { text: r.topic; color: r.known ? #8fd18f : #c9a26a; width: 130px; vertical-alignment: center; }
-                                    Text { text: "" + r.size; color: #d0d0d0; width: 50px; vertical-alignment: center; }
-                                    Text { text: r.submessages; color: #9a9a9a; horizontal-stretch: 1; vertical-alignment: center; }
-                                }
-                                TouchArea {
-                                    clicked => { root.select(i); }
-                                }
+                        for r[i] in root.records : Rectangle {
+                            height: 22px;
+                            background: i == root.selected-index ? #333a44 : transparent;
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text { text: r.time; color: #d0d0d0; width: 70px; vertical-alignment: center; }
+                                Text { text: r.protocol; color: #9aa0b0; width: 80px; vertical-alignment: center; }
+                                Text { text: r.source; color: #d0d0d0; width: 300px; vertical-alignment: center; }
+                                Text { text: r.topic; color: r.known ? #8fd18f : #c9a26a; width: 130px; vertical-alignment: center; }
+                                Text { text: "" + r.size; color: #d0d0d0; width: 50px; vertical-alignment: center; }
+                                Text { text: r.submessages; color: #9a9a9a; horizontal-stretch: 1; vertical-alignment: center; }
+                            }
+                            TouchArea {
+                                clicked => { root.select(i); }
                             }
                         }
                     }

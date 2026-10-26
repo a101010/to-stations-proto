@@ -374,10 +374,18 @@ fn recv_loop(udp: UdpSocket, port: u16, queue: Arc<CaptureQueue>, stop: Arc<Atom
     let epoch = Instant::now();
     let mut buf = vec![0u8; BUF_SIZE];
     loop {
+        // Check before receiving: under continuous traffic recv_from keeps
+        // returning Ok, so the timeout branch alone would never observe stop.
+        if stop.load(Ordering::Relaxed) {
+            break;
+        }
         match udp.recv_from(&mut buf) {
             Ok((n, src)) => {
                 let elapsed = epoch.elapsed().as_millis() as u64;
                 queue.push(record_from(&buf[..n], src, port, elapsed));
+                if stop.load(Ordering::Relaxed) {
+                    break;
+                }
             }
             Err(e)
                 if e.kind() == std::io::ErrorKind::WouldBlock
@@ -915,5 +923,47 @@ mod tests {
         queue.clear();
         assert_eq!(queue.len(), 0);
         assert_eq!(queue.dropped(), 0);
+    }
+
+    #[test]
+    fn stop_returns_while_traffic_is_continuous() {
+        let config = CaptureConfig {
+            interfaces: Vec::new(),
+            groups: Vec::new(),
+            ports: vec![0],
+            broadcast: false,
+        };
+        let queue = Arc::new(CaptureQueue::default());
+        let capture = Capture::start(&config, queue).expect("start capture");
+        let port = capture.local_ports()[0];
+
+        let sender_stop = Arc::new(AtomicBool::new(false));
+        let sender_stop_for_thread = sender_stop.clone();
+        let sender = std::thread::spawn(move || {
+            let sock = UdpSocket::bind("127.0.0.1:0").unwrap();
+            let dest: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
+            while !sender_stop_for_thread.load(Ordering::Relaxed) {
+                let _ = sock.send_to(b"RTPS\x02\x04hello", dest);
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        });
+        // Give the receive loop a continuous stream before asking it to stop.
+        std::thread::sleep(Duration::from_millis(50));
+
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let stopper = std::thread::spawn(move || {
+            capture.stop();
+            let _ = done_tx.send(());
+        });
+
+        let stopped = done_rx.recv_timeout(Duration::from_secs(2));
+        sender_stop.store(true, Ordering::Relaxed);
+        sender.join().unwrap();
+        stopper.join().unwrap();
+
+        assert!(
+            stopped.is_ok(),
+            "Capture::stop did not return while traffic was continuous"
+        );
     }
 }
