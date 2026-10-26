@@ -36,7 +36,7 @@ The existing pieces are in place:
 
 1. Create a discovery-only `Node` at app startup, not on Start, so endpoints are learned before capture. Keep it alive for the app lifetime.
 2. Add `--dds-config` and `--no-discovery`. Resolve the config from an explicit path, then `CYCLONEDDS_URI`, then `<exe_dir>/../config/cyclonedds-config.xml`, then `REPO_ROOT/DDS/cyclonedds-config.xml`; set `CYCLONEDDS_URI` if unset.
-3. Use builtin publication and subscription readers only; skip the builtin participant reader to avoid counting `dds-echo`'s own participant. Skip endpoints with empty topic names.
+3. Use builtin publication and subscription readers only; skip the builtin participant reader to avoid counting `dds-echo`'s own participant. Skip endpoints with empty topic names or built-in `DCPS*` topics.
 4. Poll on the UI thread every `DISCOVERY_POLL_MS = 500`. Revisit a background thread only if the types prove `Send` and polling shows measurable cost.
 5. Keep passive SEDP parsing as a fallback.
 6. Attribute new records from the discovery map; re-attribute retained history and adjust `TopicCounts` when new endpoints are learned.
@@ -67,7 +67,7 @@ struct DiscoverySource {
 
 impl DiscoverySource {
     fn new(domain: u32, registry: TopicRegistry) -> Result<Self, String>;
-    fn poll(&mut self, now_ms: u64, discovery: &mut Discovery) -> usize;
+    fn poll(&mut self, now_ms: u64, discovery: &mut Discovery, force: bool) -> usize;
 }
 ```
 
@@ -77,7 +77,7 @@ impl DiscoverySource {
   - `prefix = hex(participant_key().v[..12])`
   - `kind = Writer` for publications, `Reader` for subscriptions
   - `topic = topic_name()`, `type_name = type_name_value()`
-  - skip empty topic names
+  - skip empty topic names and built-in `DCPS*` topics
 - Feed `Discovery::learn_endpoint`; return the number of newly inserted endpoints.
 - Log read errors; capture continues.
 
@@ -108,7 +108,7 @@ In `model.rs`:
 
 - Add `discovery_source: RefCell<Option<DiscoverySource>>` to `State`, initialized at startup.
 - In `tick`, poll discovery before draining new records so new data uses the latest map.
-- Start/Clear do not recreate or stop the discovery participant. Clear may reset `Discovery`; the next poll repopulates it from current builtin samples.
+- Start/Clear do not recreate or stop the discovery participant. The learned endpoint map persists across Start/Clear; Start resets the poll clock, so the first tick polls immediately. Clear resets capture counters and history, and the next tick repopulates the displayed participant/endpoint counts.
 - Stop performs the final poll/re-attribution/refresh described above.
 - `--no-discovery` leaves the passive path as it is today.
 
@@ -119,7 +119,7 @@ Unit tests:
 - `Discovery::learn_endpoint`, `topic_for_writer`, deduplication, and the passive SEDP path.
 - `History::reattribute`: only unattributed records change; attributed records are untouched; returned changes are correct.
 - `TopicCounts::reattribute`: `unidentified` decreases, the topic increases, zero buckets are removed, and there is no underflow.
-- Existing 61 `dds-echo` tests continue to pass.
+- Existing 64 `dds-echo` tests continue to pass.
 
 Manual verification:
 
@@ -146,6 +146,12 @@ Then launch the services and `build\deploy\bin\dds-echo.exe` in both start order
 - Polling on the UI thread is chosen because the binding types are not `Send`; keep the interval low-frequency and the work small.
 - A wrong or missing `CYCLONEDDS_URI` means the participant will not use the StationsDDS IPv6 configuration; log a clear diagnostic and allow `--dds-config`.
 - No contract or topic changes are required; `stations-dds` already exposes the participant needed for the builtin readers.
+
+## Implementation status
+
+- The discovery participant, config resolution, builtin readers, re-attribution, and Stop finalization are implemented.
+- Services-first launch verified: `HelloWorldViewTopic` rows are categorized, retained rows stay categorized after Stop, and the window remains responsive.
+- The reverse start order (dds-echo first, then services) uses the same participant path and should be rechecked during testing.
 
 ## Bookkeeping
 

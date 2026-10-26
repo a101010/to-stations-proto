@@ -292,6 +292,30 @@ impl TopicCounts {
         rows
     }
 
+    /// Move one observed record from `old` to `new` after discovery learns its
+    /// endpoint. `None` means the `unidentified` bucket.
+    pub fn reattribute(&mut self, old: Option<&str>, new: &str) {
+        if new.is_empty() {
+            return;
+        }
+        match old {
+            Some(name) => {
+                let remove = match self.counts.get_mut(name) {
+                    Some(count) => {
+                        *count = count.saturating_sub(1);
+                        *count == 0
+                    }
+                    None => false,
+                };
+                if remove {
+                    self.counts.remove(name);
+                }
+            }
+            None => self.unidentified = self.unidentified.saturating_sub(1),
+        }
+        *self.counts.entry(new.to_string()).or_insert(0) += 1;
+    }
+
     pub fn reset(&mut self) {
         self.counts.clear();
         self.unidentified = 0;
@@ -318,11 +342,10 @@ impl Discovery {
         for frame in &record.frames {
             match &frame.announcement {
                 Some(Announcement::Participant { prefix }) => {
-                    self.participants.insert(prefix.clone());
+                    self.learn_participant(prefix.clone());
                 }
                 Some(Announcement::Endpoint(endpoint)) => {
-                    self.participants.insert(endpoint.prefix.clone());
-                    self.endpoints.insert(endpoint.guid.clone(), endpoint.clone());
+                    self.learn_endpoint(endpoint.clone());
                 }
                 None => {}
             }
@@ -330,13 +353,32 @@ impl Discovery {
 
         if record.topic.is_none() {
             if let Some(guid) = record.writer_guid() {
-                if let Some(endpoint) = self.endpoints.get(&guid) {
-                    if !endpoint.topic.is_empty() {
-                        record.topic = Some(endpoint.topic.clone());
-                    }
+                if let Some(topic) = self.topic_for_writer(&guid) {
+                    record.topic = Some(topic.to_string());
                 }
             }
         }
+    }
+
+    /// Learn a participant prefix; returns false when already known.
+    pub fn learn_participant(&mut self, prefix: String) -> bool {
+        self.participants.insert(prefix)
+    }
+
+    /// Learn an endpoint; returns true when it was not already present.
+    pub fn learn_endpoint(&mut self, endpoint: Endpoint) -> bool {
+        let is_new = !self.endpoints.contains_key(&endpoint.guid);
+        self.participants.insert(endpoint.prefix.clone());
+        self.endpoints.insert(endpoint.guid.clone(), endpoint);
+        is_new
+    }
+
+    /// The topic a writer GUID is known to use, when it has one.
+    pub fn topic_for_writer(&self, guid: &str) -> Option<&str> {
+        self.endpoints
+            .get(guid)
+            .map(|endpoint| endpoint.topic.as_str())
+            .filter(|topic| !topic.is_empty())
     }
 
     /// The number of distinct participants observed.
@@ -347,11 +389,6 @@ impl Discovery {
     /// The number of distinct endpoints observed.
     pub fn endpoints(&self) -> usize {
         self.endpoints.len()
-    }
-
-    pub fn reset(&mut self) {
-        self.participants.clear();
-        self.endpoints.clear();
     }
 }
 
@@ -575,6 +612,28 @@ impl History {
 
     pub fn find(&self, id: u64) -> Option<&Record> {
         self.buffer.find(id)
+    }
+
+    /// Attribute retained records whose writer is now known. Returns the
+    /// `(old, new)` topic changes so the caller can adjust `TopicCounts`.
+    pub fn reattribute(&mut self, discovery: &Discovery) -> Vec<(Option<String>, String)> {
+        let mut changes = Vec::new();
+        for slot in self.buffer.entries.values_mut() {
+            let record = &mut slot.value;
+            if record.topic.is_some() {
+                continue;
+            }
+            let Some(guid) = record.writer_guid() else {
+                continue;
+            };
+            let Some(topic) = discovery.topic_for_writer(&guid) else {
+                continue;
+            };
+            let new_topic = topic.to_string();
+            record.topic = Some(new_topic.clone());
+            changes.push((None, new_topic));
+        }
+        changes
     }
 
     pub fn clear(&mut self) {
@@ -809,10 +868,6 @@ mod tests {
         d.observe_and_attr(&mut ann.clone());
         assert_eq!(d.participants(), 1);
         assert_eq!(d.endpoints(), 1);
-
-        d.reset();
-        assert_eq!(d.participants(), 0);
-        assert_eq!(d.endpoints(), 0);
     }
 
     #[test]
@@ -961,5 +1016,72 @@ mod tests {
             .collect();
         assert_eq!(topics, vec![Some("A".to_string())]);
         assert_eq!(history.len(), 3);
+    }
+
+    fn view_endpoint() -> Endpoint {
+        Endpoint {
+            guid: "aaaaaaaaaaaaaaaaaaaaaaaa00000102".to_string(),
+            prefix: "aaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
+            kind: EndpointKind::Writer,
+            topic: "HelloWorldViewTopic".to_string(),
+            type_name: "hello_world::HelloWorldViewTopic".to_string(),
+        }
+    }
+
+    #[test]
+    fn discovery_learns_builtin_endpoints_and_looks_up_writers() {
+        let mut discovery = Discovery::default();
+        assert!(discovery.learn_endpoint(view_endpoint()));
+        assert!(!discovery.learn_endpoint(view_endpoint()));
+        assert_eq!(discovery.endpoints(), 1);
+        assert_eq!(discovery.participants(), 1);
+        assert_eq!(
+            discovery.topic_for_writer("aaaaaaaaaaaaaaaaaaaaaaaa00000102"),
+            Some("HelloWorldViewTopic")
+        );
+        assert_eq!(discovery.topic_for_writer("missing"), None);
+    }
+
+    #[test]
+    fn history_reattributes_unattributed_records() {
+        let mut history = History::default();
+        let mut unattributed = record(Class::Rtps, 0, None);
+        unattributed.guid_prefix = Some("aaaaaaaaaaaaaaaaaaaaaaaa".to_string());
+        unattributed.entity_id = Some("00000102".to_string());
+        history.push(unattributed);
+
+        let mut discovery = Discovery::default();
+        discovery.learn_endpoint(view_endpoint());
+        let changes = history.reattribute(&discovery);
+        assert_eq!(
+            changes,
+            vec![(None, "HelloWorldViewTopic".to_string())]
+        );
+
+        let selection = TopicSelection::default();
+        let records: Vec<_> = history.matching(&selection).collect();
+        assert_eq!(
+            records[0].1.topic.as_deref(),
+            Some("HelloWorldViewTopic")
+        );
+        assert!(history.reattribute(&discovery).is_empty());
+    }
+
+    #[test]
+    fn topic_counts_reattribute_moves_records_between_buckets() {
+        let mut counts = TopicCounts::default();
+        let known = KnownTopics::default();
+
+        counts.observe(&record(Class::Rtps, 0, None));
+        counts.reattribute(None, "A");
+        let rows = counts.rows(&known);
+        assert!(rows.iter().any(|r| r.name == "A" && r.packets == 1));
+        assert!(!rows.iter().any(|r| r.name == "unidentified"));
+
+        counts.observe(&record(Class::Known, 0, Some("B")));
+        counts.reattribute(Some("B"), "C");
+        let rows = counts.rows(&known);
+        assert!(!rows.iter().any(|r| r.name == "B"));
+        assert!(rows.iter().any(|r| r.name == "C" && r.packets == 1));
     }
 }

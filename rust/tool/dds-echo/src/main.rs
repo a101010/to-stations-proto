@@ -19,6 +19,7 @@ mod ui {
 }
 
 use std::cell::{Cell, RefCell};
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -32,10 +33,16 @@ use crate::model::{
 };
 use crate::ui::MainWindow;
 
+use stations_dds::contract::TopicRegistry;
+use stations_dds::cyclonedds::{BuiltinEndpointSample, DataReader};
+use stations_dds::dds::Node;
+
 /// The UI refresh / capture-drain tick.
 const TICK: Duration = Duration::from_millis(100);
 /// Minimum interval between full table rebuilds.
 const VIEW_REBUILD_MS: u64 = 250;
+/// Minimum interval between discovery-reader polls.
+const DISCOVERY_POLL_MS: u64 = 500;
 
 #[derive(Parser, Debug)]
 #[command(name = "dds-echo", about = "DDSI-RTPS multicast/UDP traffic inspector")]
@@ -59,12 +66,111 @@ struct Args {
     /// Topic registry (`contracts/topics.toml`).
     #[arg(long, default_value = concat!(env!("REPO_ROOT"), "/contracts/topics.toml"))]
     registry: String,
+
+    /// CycloneDDS configuration XML for the discovery participant.
+    #[arg(long)]
+    dds_config: Option<PathBuf>,
+
+    /// Disable the discovery participant and use passive capture only.
+    #[arg(long)]
+    no_discovery: bool,
+}
+
+/// A discovery-only participant and the builtin readers that identify writers.
+struct DiscoverySource {
+    // Declared before the node so the readers drop before the participant.
+    publications: DataReader<BuiltinEndpointSample>,
+    subscriptions: DataReader<BuiltinEndpointSample>,
+    _node: Node,
+    last_poll_ms: u64,
+}
+
+impl DiscoverySource {
+    fn new(domain: u32, registry: TopicRegistry) -> Result<Self, String> {
+        let node = Node::new(domain, registry).map_err(|e| e.to_string())?;
+        let participant = node.participant();
+        let publications = participant
+            .create_builtin_publication_reader()
+            .map_err(|e| e.to_string())?;
+        let subscriptions = participant
+            .create_builtin_subscription_reader()
+            .map_err(|e| e.to_string())?;
+        Ok(Self {
+            _node: node,
+            publications,
+            subscriptions,
+            last_poll_ms: 0,
+        })
+    }
+
+    fn poll(&mut self, now_ms: u64, discovery: &mut Discovery, force: bool) -> usize {
+        if !force
+            && self.last_poll_ms != 0
+            && now_ms.saturating_sub(self.last_poll_ms) < DISCOVERY_POLL_MS
+        {
+            return 0;
+        }
+        self.last_poll_ms = now_ms.max(1);
+
+        let mut learned = 0;
+        match self.publications.read() {
+            Ok(samples) => {
+                for sample in &samples {
+                    learned += learn_builtin_endpoint(
+                        discovery,
+                        sample,
+                        model::EndpointKind::Writer,
+                    );
+                }
+            }
+            Err(e) => eprintln!("dds-echo discovery: publications read failed: {e}"),
+        }
+        match self.subscriptions.read() {
+            Ok(samples) => {
+                for sample in &samples {
+                    learned += learn_builtin_endpoint(
+                        discovery,
+                        sample,
+                        model::EndpointKind::Reader,
+                    );
+                }
+            }
+            Err(e) => eprintln!("dds-echo discovery: subscriptions read failed: {e}"),
+        }
+        learned
+    }
+
+    fn reset_poll_clock(&mut self) {
+        self.last_poll_ms = 0;
+    }
+}
+
+fn learn_builtin_endpoint(
+    discovery: &mut Discovery,
+    sample: &BuiltinEndpointSample,
+    kind: model::EndpointKind,
+) -> usize {
+    let topic = sample.topic_name();
+    if topic.is_empty() || topic.starts_with("DCPS") {
+        return 0;
+    }
+    let key = sample.key();
+    let participant_key = sample.participant_key();
+    let endpoint = model::Endpoint {
+        guid: rtps::hex(&key.v),
+        prefix: rtps::hex(&participant_key.v[..12]),
+        kind,
+        topic,
+        type_name: sample.type_name_value(),
+    };
+    usize::from(discovery.learn_endpoint(endpoint))
 }
 
 /// Shared state behind the UI.
 struct State {
     capture: RefCell<Option<Capture>>,
     queue: RefCell<Option<Arc<CaptureQueue>>>,
+    discovery_source: RefCell<Option<DiscoverySource>>,
     stats: RefCell<Stats>,
     counts: RefCell<TopicCounts>,
     discovery: RefCell<Discovery>,
@@ -278,6 +384,55 @@ fn refresh_topics(
     app.set_unknown_total(unknown_total);
 }
 
+/// Poll the discovery readers and re-attribute retained records when new
+/// endpoints are learned. Returns true when topic counts changed.
+fn poll_discovery(
+    app: &MainWindow,
+    state: &State,
+    known: &VecModel<ui::TopicRow>,
+    unknown: &VecModel<ui::TopicRow>,
+    force: bool,
+) -> bool {
+    let now_ms = state.start.get().elapsed().as_millis() as u64;
+    let learned = {
+        let mut source = state.discovery_source.borrow_mut();
+        match source.as_mut() {
+            Some(source) => {
+                let mut discovery = state.discovery.borrow_mut();
+                source.poll(now_ms, &mut discovery, force)
+            }
+            None => 0,
+        }
+    };
+    if learned == 0 {
+        return false;
+    }
+
+    let changes = {
+        let discovery = state.discovery.borrow();
+        state.history.borrow_mut().reattribute(&discovery)
+    };
+    if changes.is_empty() {
+        return false;
+    }
+
+    {
+        let mut counts = state.counts.borrow_mut();
+        for (old, new) in &changes {
+            counts.reattribute(old.as_deref(), new);
+        }
+    }
+    state.pending_view.set(true);
+    refresh_topics(
+        app,
+        &state.counts.borrow().rows(&state.known_topics),
+        &state.selection.borrow(),
+        known,
+        unknown,
+    );
+    true
+}
+
 fn tick(
     app: &MainWindow,
     state: &State,
@@ -286,6 +441,8 @@ fn tick(
     unknown: &VecModel<ui::TopicRow>,
 ) {
     let now_ms = state.start.get().elapsed().as_millis() as u64;
+
+    poll_discovery(app, state, known, unknown, false);
 
     // Drain a bounded batch from the capture queue and append it to the
     // frequency-ranked history.
@@ -346,25 +503,91 @@ fn tick(
     app.set_trimmed(state.trimmed.get().min(i32::MAX as u64) as i32);
 }
 
-/// Load the topic registry into `KnownTopics`; on failure, log and return an
-/// empty set (everything then shows as Unknown/hex).
-fn load_known(path: &str) -> KnownTopics {
-    let mut known = KnownTopics::default();
-    match stations_dds::contract::TopicRegistry::load(std::path::Path::new(path)) {
-        Ok(registry) => {
-            for topic in &registry.topics {
-                known.insert(&topic.name, &topic.idl_type);
-            }
+/// Load the topic registry; on failure, log and return `None` so capture can
+/// still run with an empty known-topic set.
+fn load_registry(path: &str) -> Option<TopicRegistry> {
+    match TopicRegistry::load(Path::new(path)) {
+        Ok(registry) => Some(registry),
+        Err(e) => {
+            eprintln!("dds-echo: failed to load registry {path}: {e}");
+            None
         }
-        Err(e) => eprintln!("dds-echo: failed to load registry {path}: {e}"),
+    }
+}
+
+fn known_from_registry(registry: &TopicRegistry) -> KnownTopics {
+    let mut known = KnownTopics::default();
+    for topic in &registry.topics {
+        known.insert(&topic.name, &topic.idl_type);
     }
     known
 }
 
+/// Point CycloneDDS at the shared StationsDDS configuration before creating the
+/// discovery participant. An explicit path wins; otherwise an existing
+/// `CYCLONEDDS_URI` is respected, then the deployed or source configuration.
+fn install_dds_config(explicit: Option<&Path>) {
+    let path = if let Some(path) = explicit {
+        Some(path.to_path_buf())
+    } else if std::env::var_os("CYCLONEDDS_URI").is_some() {
+        None
+    } else {
+        default_dds_config()
+    };
+
+    if let Some(path) = path {
+        let path = path.to_string_lossy().replace('\\', "/");
+        std::env::set_var("CYCLONEDDS_URI", format!("file://{path}"));
+    } else if std::env::var_os("CYCLONEDDS_URI").is_none() {
+        eprintln!("dds-echo: no CycloneDDS config found; discovery uses defaults");
+    }
+}
+
+fn default_dds_config() -> Option<PathBuf> {
+    let deployed = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf))
+        .and_then(|bin| bin.parent().map(|deploy| deploy.join("config")))
+        .map(|config| config.join("cyclonedds-config.xml"));
+    if deployed.as_ref().is_some_and(|path| path.is_file()) {
+        return deployed;
+    }
+
+    let source = PathBuf::from(env!("REPO_ROOT"))
+        .join("DDS")
+        .join("cyclonedds-config.xml");
+    source.is_file().then_some(source)
+}
+
 fn main() -> Result<(), slint::PlatformError> {
     let args = Args::parse();
+    let registry = load_registry(&args.registry);
+    let known_topics = registry
+        .as_ref()
+        .map(known_from_registry)
+        .unwrap_or_default();
+    let discovery_source = if args.no_discovery {
+        None
+    } else {
+        match registry {
+            Some(registry) => {
+                install_dds_config(args.dds_config.as_deref());
+                match DiscoverySource::new(args.domain, registry) {
+                    Ok(source) => Some(source),
+                    Err(e) => {
+                        eprintln!("dds-echo: discovery participant disabled: {e}");
+                        None
+                    }
+                }
+            }
+            None => {
+                eprintln!("dds-echo: discovery participant disabled: registry unavailable");
+                None
+            }
+        }
+    };
+
     let app = MainWindow::new()?;
-    let known_topics = load_known(&args.registry);
 
     // Seed the toolbar fields from the CLI (group/ports default from --domain).
     let defaults = CaptureConfig::for_domain(args.domain);
@@ -395,6 +618,7 @@ fn main() -> Result<(), slint::PlatformError> {
     let state = Rc::new(State {
         capture: RefCell::new(None),
         queue: RefCell::new(None),
+        discovery_source: RefCell::new(discovery_source),
         stats: RefCell::new(Stats::default()),
         counts: RefCell::new(TopicCounts::default()),
         discovery: RefCell::new(Discovery::default()),
@@ -460,10 +684,12 @@ fn main() -> Result<(), slint::PlatformError> {
                     *state.rates.borrow_mut() = RateTracker::default();
                     state.pending_view.set(false);
                     app.set_follow(true);
+                    if let Some(source) = state.discovery_source.borrow_mut().as_mut() {
+                        source.reset_poll_clock();
+                    }
 
                     state.stats.borrow_mut().reset();
                     state.counts.borrow_mut().reset();
-                    state.discovery.borrow_mut().reset();
                     state.history.borrow_mut().clear();
                     state.displayed_ids.borrow_mut().clear();
                     state.selected_id.set(None);
@@ -511,6 +737,9 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let app_weak = app.as_weak();
         let state = state.clone();
+        let records = records.clone();
+        let known = known.clone();
+        let unknown = unknown.clone();
         let timer = timer.clone();
         app.on_stop(move || {
             if let Some(app) = app_weak.upgrade() {
@@ -524,6 +753,20 @@ fn main() -> Result<(), slint::PlatformError> {
                 state.dropped.set(queue.dropped());
             }
             if let Some(app) = app_weak.upgrade() {
+                poll_discovery(&app, &state, &known, &unknown, true);
+                refresh_topics(
+                    &app,
+                    &state.counts.borrow().rows(&state.known_topics),
+                    &state.selection.borrow(),
+                    &known,
+                    &unknown,
+                );
+                rebuild_view(&app, &state, &records);
+                {
+                    let discovery = state.discovery.borrow();
+                    app.set_participants(discovery.participants() as i32);
+                    app.set_endpoints(discovery.endpoints() as i32);
+                }
                 app.set_dropped(state.dropped.get().min(i32::MAX as u64) as i32);
                 app.set_trimmed(state.trimmed.get().min(i32::MAX as u64) as i32);
             }
@@ -548,7 +791,6 @@ fn main() -> Result<(), slint::PlatformError> {
                 state.selection.borrow_mut().clear();
                 state.stats.borrow_mut().reset();
                 state.counts.borrow_mut().reset();
-                state.discovery.borrow_mut().reset();
                 *state.rates.borrow_mut() = RateTracker::default();
                 state.selected_id.set(None);
                 state.dropped.set(0);
