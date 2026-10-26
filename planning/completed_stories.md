@@ -171,9 +171,3 @@ Fix the problems seen when running the Rust configuration after `hello-view-serv
 - **Completed:** 2026-10-26 12:51:14.
 - **Depends on:** none.
 - **Minimal test:** after `cleanup.ps1` and a single `launch-rust.ps1`, `lil-d` opens in front; exactly one `hello-view-service` and one `lil-d` run; the earth spins about a fixed tilted pole; view samples are categorized (or their non-categorization is understood).
-
-### robust-dds-echo
-Make `dds-echo` survive many concurrent high-rate streams (for example several 100 Hz topics), not just one: a bounded capture queue with frequency-first eviction that protects low-frequency and one-shot topics; separate visible `dropped` (capture-queue evictions) and `trimmed` (history evictions) counters; lazy hex/decoded formatting on selection rather than per record; a bounded history with a throttled view rebuild instead of per-record O(n) `remove(0)`; and no formatting of records the topic filter excludes.
-- **Completed:** 2026-10-26 13:53:06.
-- **Depends on:** none.
-- **Minimal test:** with N concurrent 100 Hz writers plus a one-shot topic, the UI stays responsive, memory stays bounded, `dropped` and `trimmed` are reported, and the one-shot topic's records survive while high-frequency records are trimmed.

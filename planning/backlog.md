@@ -37,10 +37,16 @@ Third-party libraries are built/installed to an external prefix (for example `C:
 
 **Done when.** `launch-rust.ps1` brings up the model service, the view service, and `lil-d` from `build/deploy`; `lil-d` shows the tilted, cube-mapped earth lit from the upper right with the greeting text rendered in the loaded font, its power button works, and the format manager switches between the default and hello-world formats. `dds-echo` observes every topic in the registry, `--topics` and `build/topics.md` match `contracts/`, and `cleanup.ps1` stops everything.
 
-### dds-echo-discovery-attribution
-Give `dds-echo` a discovery-only CycloneDDS participant and use the fork's builtin publication/subscription readers to learn writer GUID -> topic, independent of passive SEDP capture; keep raw UDP capture for the datagram list. Split out of `hello-view-service-fixes`, where the `unidentified` view samples were accepted as a passive-capture limitation.
+### robust-dds-echo
+Make `dds-echo` survive many concurrent high-rate streams (for example several 100 Hz topics), not just one: a bounded capture queue with frequency-first eviction that protects low-frequency and one-shot topics; separate visible `dropped` (capture-queue evictions) and `trimmed` (history evictions) counters; lazy hex/decoded formatting on selection rather than per record; a bounded history with a throttled view rebuild instead of per-record O(n) `remove(0)`; and no formatting of records the topic filter excludes. Reopened after real-world testing: the receive loop must observe stop during continuous traffic, and the table must be virtualized with its rebuild throttled so Stop does not block the UI.
 - **Depends on:** none.
-- **Minimal test:** start `dds-echo` after the services; `HelloWorldViewTopic` samples are categorized.
+- **Minimal test:** with N concurrent 100 Hz writers plus a one-shot topic, the UI stays responsive, memory stays bounded, `dropped` and `trimmed` are reported, and the one-shot topic's records survive while high-frequency records are trimmed; pressing Stop under live traffic returns immediately.
+- **Status:** in progress.
+
+### dds-echo-discovery-attribution
+Give `dds-echo` a discovery-only CycloneDDS participant and use the fork's builtin publication/subscription readers to learn writer GUID -> topic, independent of passive SEDP capture; keep raw UDP capture for the datagram list. Starting `dds-echo` first does not fix attribution: SEDP is not visible to a non-participant sniffer. Re-attribute retained records and topic counts when endpoints are learned, including on Stop. Split out of `hello-view-service-fixes`, where the `unidentified` view samples were accepted as a passive-capture limitation.
+- **Depends on:** none.
+- **Minimal test:** with `dds-echo` started before or after the services, `HelloWorldViewTopic` samples are categorized; pressing Stop leaves retained rows attributed.
 - **Status:** todo.
 
 ### hello-service
