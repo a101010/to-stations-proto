@@ -134,6 +134,8 @@ export component MainWindow inherits Window {
     background: #1a1a1a;
 
     in-out property <bool> running: false;
+    // Follow the live tail; cleared when the user scrolls up.
+    in-out property <bool> follow: true;
 
     in-out property <int> packets: 0;
     in-out property <int> bytes: 0;
@@ -154,11 +156,6 @@ export component MainWindow inherits Window {
     in-out property <[TopicRow]> unknown-topics: [];
     in-out property <int> known-total: 0;
     in-out property <int> unknown-total: 0;
-
-    // The records list's scroll position, for follow-the-tail.
-    in-out property <length> list-content-y: 0px;
-    out property <length> list-content-height: list.content-height;
-    out property <length> list-visible-height: list.visible-height;
 
     in-out property <Record> selected: {
         time: "",
@@ -181,7 +178,6 @@ export component MainWindow inherits Window {
     callback stop();
     callback clear();
     callback select(int);
-    callback list-scrolled();
     callback dismiss-error();
 
     // Topic selection (the center filter) and its context menu.
@@ -298,8 +294,9 @@ export component MainWindow inherits Window {
                         Text { text: "Submessages"; color: #9a9a9a; horizontal-stretch: 1; }
                     }
                     list := ListView {
-                        content-y <=> root.list-content-y;
-                        scrolled => { root.list-scrolled(); }
+                        scrolled => {
+                            root.follow = list.content-y <= (list.visible-height - list.content-height) + 1px;
+                        }
                         vertical-stretch: 1;
                         for r[i] in root.records : Rectangle {
                             height: 22px;
@@ -413,6 +410,17 @@ export component MainWindow inherits Window {
                     Rectangle { horizontal-stretch: 1; }
                     Button { text: "OK"; clicked => { root.dismiss-error(); } }
                 }
+            }
+        }
+    }
+
+    // Keep the live tail pinned to the bottom while following.
+    Timer {
+        interval: 100ms;
+        running: root.follow;
+        triggered => {
+            if (root.follow) {
+                list.content-y = min(0px, list.visible-height - list.content-height);
             }
         }
     }

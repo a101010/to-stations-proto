@@ -71,7 +71,7 @@ struct State {
     rates: RefCell<RateTracker>,
     start: Cell<Instant>,
     last_view_ms: Cell<u64>,
-    following: Cell<bool>,
+    pending_view: Cell<bool>,
     /// The topic rows selected in the topics pane (the center filter).
     selection: RefCell<TopicSelection>,
     /// The retained raw records, evicted frequency-first.
@@ -241,6 +241,7 @@ fn apply_selection(
         unknown,
     );
     rebuild_view(app, state, records);
+    state.pending_view.set(false);
     state
         .last_view_ms
         .set(state.start.get().elapsed().as_millis() as u64);
@@ -308,8 +309,15 @@ fn tick(
     if trimmed > 0 {
         state.trimmed.set(state.trimmed.get() + trimmed as u64);
     }
-    if dirty && now_ms.saturating_sub(state.last_view_ms.get()) >= VIEW_REBUILD_MS {
+    if dirty {
+        state.pending_view.set(true);
+    }
+    if app.get_follow()
+        && state.pending_view.get()
+        && now_ms.saturating_sub(state.last_view_ms.get()) >= VIEW_REBUILD_MS
+    {
         rebuild_view(app, state, records);
+        state.pending_view.set(false);
         state.last_view_ms.set(now_ms);
     }
 
@@ -336,13 +344,6 @@ fn tick(
     app.set_bps(rates.bps as i32);
     app.set_dropped(state.dropped.get().min(i32::MAX as u64) as i32);
     app.set_trimmed(state.trimmed.get().min(i32::MAX as u64) as i32);
-
-    // Follow the tail while the user has not scrolled up.
-    let visible_h = app.get_list_visible_height();
-    if state.following.get() && visible_h > 0.0 {
-        let max_scroll = (app.get_list_content_height() - visible_h).max(0.0);
-        app.set_list_content_y(-max_scroll);
-    }
 }
 
 /// Load the topic registry into `KnownTopics`; on failure, log and return an
@@ -400,7 +401,7 @@ fn main() -> Result<(), slint::PlatformError> {
         rates: RefCell::new(RateTracker::default()),
         start: Cell::new(Instant::now()),
         last_view_ms: Cell::new(0),
-        following: Cell::new(true),
+        pending_view: Cell::new(false),
         selection: RefCell::new(TopicSelection::default()),
         history: RefCell::new(History::default()),
         displayed_ids: RefCell::new(Vec::new()),
@@ -457,7 +458,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     app.set_running(true);
                     state.start.set(Instant::now());
                     *state.rates.borrow_mut() = RateTracker::default();
-                    state.following.set(true);
+                    state.pending_view.set(false);
+                    app.set_follow(true);
 
                     state.stats.borrow_mut().reset();
                     state.counts.borrow_mut().reset();
@@ -552,6 +554,8 @@ fn main() -> Result<(), slint::PlatformError> {
                 state.dropped.set(0);
                 state.trimmed.set(0);
                 state.last_view_ms.set(0);
+                state.pending_view.set(false);
+                app.set_follow(true);
                 app.set_selected(empty_record());
                 refresh_topics(
                     &app,
@@ -666,20 +670,6 @@ fn main() -> Result<(), slint::PlatformError> {
                 state.selection.borrow_mut().clear();
                 app.set_topic_menu_visible(false);
                 apply_selection(&app, &state, &records, &known, &unknown);
-            }
-        });
-    }
-
-    // Follow-the-tail: the ScrollView's `scrolled` fires only on user scroll.
-    {
-        let app_weak = app.as_weak();
-        let state = state.clone();
-        app.on_list_scrolled(move || {
-            if let Some(app) = app_weak.upgrade() {
-                let cy = app.get_list_content_y();
-                let ch = app.get_list_content_height();
-                let vh = app.get_list_visible_height();
-                state.following.set(cy <= -(ch - vh) + 1.0);
             }
         });
     }
