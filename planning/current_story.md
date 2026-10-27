@@ -1,151 +1,224 @@
-# Current story: dds-echo-discovery-attribution
+# Current story: hello-service
 
 This file is the detailed, living plan for the one active story. It is rewritten for each story. The backlog in `backlog.md` holds all work and the per-story status.
 
 ## Story
 
-Give `dds-echo` a discovery-only CycloneDDS participant and use the fork's builtin publication/subscription readers to learn writer GUID -> topic, independent of passive SEDP capture; keep raw UDP capture for the datagram list. Re-attribute retained records and topic counts when endpoints are learned, including on Stop. Resolve the registry and CycloneDDS configuration relative to the deployed executable, ignore inherited `CYCLONEDDS_URI`, and remove runtime `REPO_ROOT` defaults from the deployed executables and libraries.
+Create the hello_world model service (`hello-service`): publish `HelloWorldTopic` at 10 Hz with a greeting that cycles through Latin-script languages every 15-60 seconds, and with the earth attitude moved from the view service (23.5 degree tilt, 12-minute spin). The view service subscribes to `HelloWorldTopic` and relays `HelloWorldViewTopic` at 100 Hz. Add a validity flag to the view topic; after 2 seconds without model data, mark it invalid and show `Disconnected hh:mm:ss` with the last received earth position. Before the service first connects, show the disconnected greeting after 2 seconds but no earth. Add the service to build/deploy, launch, and cleanup; update the view service contract.
 
 - **Depends on:** none.
-- **Minimal test:** double-click `build\deploy\bin\dds-echo.exe` with the services running and no shell environment; `endpoints` is greater than zero, `HelloWorldViewTopic` samples are categorized under Known, and pressing Stop leaves retained rows attributed. The same holds with `dds-echo` started before or after the services and from an unrelated working directory.
+- **Minimal test:** `launch-rust.ps1` starts the model service, view service, and display; `dds-echo` shows `HelloWorldTopic` and `HelloWorldViewTopic`; the display renders the model-driven world; stopping `hello-service` shows the last earth and a counting `Disconnected hh:mm:ss`; restarting resumes valid data; the greeting changes within 15-60 seconds; `cleanup.ps1` stops all three.
 
 ## Context
 
-`dds-echo` captures UDP datagrams and parses RTPS/SEDP passively. A non-participant never receives the SEDP directed to the view service's matched reader, so passive capture alone cannot attribute `HelloWorldViewTopic`. The first discovery-participant attempt is committed but failed when the deploy exe was double-clicked: the screenshot shows the Known group loaded but `endpoints: 0` and all rows `unidentified`.
+`hello-view-service` currently owns the greeting and the complete attitude (initial 23.5-degree tilt and existing 12-minute spin) and publishes `HelloWorldViewTopic` at 100 Hz. The display library subscribes to that topic and renders the earth and greeting; it stays black until the first view sample.
 
-The existing pieces are in place:
+The model/view split moves the model data to `hello-service`:
 
-- `stations-dds::dds::Node` wraps a participant and exposes `participant()`.
-- The pinned `cyclonedds` fork provides `create_builtin_publication_reader` and `create_builtin_subscription_reader`.
-- `Discovery` learns endpoints from captured SEDP and attributes records by writer GUID.
-- `History` retains up to 1000 records; `TopicCounts` aggregates observed topics and the `unidentified` bucket.
-- `dropped`/`trimmed`, the virtualized `ListView`, the 250 ms rebuild throttle, the stop fix, and follow-tail pause/resume are in place.
+- `hello-service` publishes `HelloWorldTopic` (greeting + `math::Quaternion attitude`).
+- `hello-view-service` subscribes to `HelloWorldTopic` and relays `HelloWorldViewTopic`.
+- The display library continues to subscribe to `HelloWorldViewTopic`; it does not know about the model service.
 
-## Findings
-
-- **The exe-relative config is not authoritative.** `install_dds_config` currently prefers an inherited `CYCLONEDDS_URI` over the exe-relative configuration. Double-clicking inherits any user/system environment value, so a stale or wrong value can silently make the discovery participant use different interfaces while capture still works.
-- **Runtime `REPO_ROOT` paths are embedded.** `dds-echo` defaults its registry to a compile-time `REPO_ROOT/contracts/topics.toml` and its config fallback to `REPO_ROOT/DDS/cyclonedds-config.xml`. `hello-view-service` and `display-lib` also fall back to `REPO_ROOT/contracts`. These violate the self-contained deploy rule.
-- **Registry currently gates discovery.** The discovery participant is created with `Node::new(domain, registry)`, so a registry failure disables attribution. Discovery does not need the registry.
-- `BuiltinEndpointSample` exposes `key()` (full writer/reader GUID), `participant_key()`, `topic_name()`, and `type_name_value()`. Publication samples are writers; subscription samples are readers.
-- `DomainParticipant` and `DataReader` have no `Send` implementation in the pinned binding, so polling on the UI thread is the safe first implementation. A 500 ms poll of two builtin readers is cheap.
-- `read()` returns the current samples on every poll; `Discovery` deduplicates by GUID.
-- Records trimmed from history before an endpoint is learned cannot be re-attributed; their counts may remain `unidentified`.
-- The release GUI has no console, so discovery failures are currently invisible when the exe is double-clicked.
+The view payload gains a `valid` flag so consumers can distinguish live data from stale data. The model payload does not need a validity flag.
 
 ## Decisions
 
-1. **Config is exe-relative.** Explicit `--dds-config` wins; otherwise use `<exe_dir>/../config/cyclonedds-config.xml`; otherwise a development CWD fallback `<cwd>/DDS/cyclonedds-config.xml`. Ignore and remove any inherited `CYCLONEDDS_URI`. Create the DDS domain explicitly with the resolved XML through `dds_create_domain`, so CycloneDDS never has to read configuration from the environment.
-2. **Registry is exe-relative.** Explicit `--registry` wins; otherwise `<exe_dir>/../config/topics.toml`; otherwise `<cwd>/contracts/topics.toml` for development. No `REPO_ROOT` default.
-3. **Discovery is independent of the registry.** Create the participant and builtin readers from a raw `DomainParticipant`, not `Node::new`. The registry is only for Known/Unknown grouping.
-4. Use builtin publication and subscription readers only; skip endpoints with empty topic names and built-in `DCPS*` topics.
-5. Poll on the UI thread every `DISCOVERY_POLL_MS = 500`.
-6. Keep passive SEDP parsing as a fallback.
-7. Attribute new records from the discovery map; re-attribute retained history and adjust `TopicCounts` when new endpoints are learned.
-8. While the table is paused, update stats/topics counts but defer table rebuilds; on Stop, force one final refresh.
-9. **Self-contained deploy artifacts.** Remove runtime `REPO_ROOT` defaults from `hello-view-service` and `display-lib`; use exe-relative deploy paths and development CWD fallbacks. No deployed binary may require `REPO_ROOT` or a repository checkout.
-10. Add a discovery log file because the release GUI has no console.
+1. **Move the attitude.** The initial tilt and 12-minute spin move from `hello-view-service/src/view.rs` to `hello-service/src/attitude.rs`. Behavior is preserved.
+2. **Rates.** Model publishes at 10 Hz (`--rate-ms 100`). The view service relays the latest model sample at 100 Hz (`--rate-ms 10`).
+3. **Greeting cycle.** The model cycles sequentially through a fixed Latin-script list, starting with English. It advances after a random interval uniformly in 15-60 seconds. Use a small in-crate PRNG; introduce no new dependency.
+4. **View validity.** Add `boolean valid` to `HelloWorldViewTopic`. The view service sets it true only while the latest model sample is younger than 2 seconds.
+5. **Timeout baseline.** The timeout reference is the receive time of the last model sample, or the view-service start time when no sample has ever arrived.
+6. **View output.**
+   - Before 2 seconds and before any model sample: publish nothing (display stays black).
+   - After 2 seconds with no model sample: publish `valid=false`, greeting `Disconnected hh:mm:ss`, identity attitude.
+   - While fresh: publish `valid=true`, latest model greeting/attitude.
+   - After a disconnect: publish `valid=false`, `Disconnected hh:mm:ss`, last model attitude.
+   - The disconnected greeting counts from the last model receive (or view start if none) and updates every second.
+7. **Display behavior.**
+   - No view sample: black.
+   - View with no valid attitude yet: background plus the disconnected greeting, no earth.
+   - Valid view: earth plus greeting.
+   - Invalid view after a connection: last valid earth plus the disconnected greeting.
+   - The display remembers the last valid attitude locally so a later invalid/identity sample cannot erase the last received position.
+8. **Greeting source.** The greeting constant moves out of the view service. The view service only relays.
+9. **Contracts/build.** `hello-service` already publishes `HelloWorldTopic`; add the subscription to `hello-view-service.toml`. Add the model service to build, deploy, launch, and cleanup.
 
-## Implementation
+## Greeting cycle
 
-### 1. Path resolution
+Sequential order, wrapping:
 
-Add helpers that derive the deploy root from `current_exe()` using parent-directory composition:
+```text
+Hello, world!          English
+Hola, mundo!           Spanish
+Bonjour le monde!      French
+Hallo, Welt!           German
+Ciao, mondo!           Italian
+Olá, mundo!            Portuguese
+Hallo, wereld!         Dutch
+Hej, världen!          Swedish
+Hei, maailma!          Finnish
+Witaj, świecie!        Polish
+Merhaba dünya!         Turkish
+Salut, lume!           Romanian
+Salve, munde!          Latin
+toki, ma o!            Toki Pona
+Halo, wol!             Tok Pisin
+Habari, dunia!         Swahili
+Pẹlẹ o, ayé!           Yoruba
+```
 
-- Config: explicit `--dds-config`, else `<deploy>/config/cyclonedds-config.xml`, else `<cwd>/DDS/cyclonedds-config.xml` for development.
-- Registry: explicit `--registry`, else `<deploy>/config/topics.toml`, else `<cwd>/contracts/topics.toml` for development.
-- Log the chosen path and whether it exists.
-- Ignore and remove an inherited `CYCLONEDDS_URI`; log it. Create the domain explicitly with the resolved XML through `dds_create_domain` before creating the participant.
+All are written in the Latin alphabet; Toki Pona is lowercase by convention. Verify that FiraSans/HarfBuzz renders the accented Yoruba text; if a glyph is missing, use a supported Latin transliteration (for example `Pele o, aye!`) and record the choice.
 
-Do not use `REPO_ROOT` or embed absolute repository paths in deployed code.
+## Interfaces
 
-### 2. Discovery participant
+### IDL
 
-Replace `Node`/`TopicRegistry` ownership in `DiscoverySource` with a raw `DomainParticipant`:
+`DDS/hello_world.idl`:
+
+```idl
+module hello_world {
+  struct HelloWorldTopic {
+    string greeting;
+    math::Quaternion attitude;
+  };
+  struct HelloWorldViewTopic {
+    string greeting;
+    math::Quaternion attitude;
+    boolean valid;
+  };
+};
+```
+
+`HelloWorldTopic` and its contract entry are unchanged. The type name of the view topic is unchanged, so the registry needs no new type.
+
+### Contracts
+
+`contracts/services/hello-view-service.toml`:
+
+```toml
+[service]
+name = "hello-view-service"
+
+[[publish]]
+topic = "HelloWorldViewTopic"
+
+[[subscribe]]
+topic = "HelloWorldTopic"
+```
+
+`contracts/services/hello-service.toml` remains publish-only.
+
+### `rust/service/hello-service`
+
+New crate `rust/service/hello-service`:
+
+- `main.rs`
+  - Args: `--domain` (0), `--rate-ms` (100), `--config`, `--topics`.
+  - Load/validate the registry and `services/hello-service.toml`.
+  - `Node::new`, `writer::<HelloWorldTopic>("HelloWorldTopic")`.
+  - Loop: advance the greeting cycle using `Instant`, build `HelloWorldTopic { greeting, attitude: attitude::attitude_at(start.elapsed()) }`, write it, sleep for the period.
+- `greeting.rs`
+  - `GREETINGS` ordered list.
+  - `GreetingCycle` with current index, next change time, and a small SplitMix64/xorshift PRNG.
+  - Random interval uniformly in 15-60 seconds. Advance sequentially and wrap.
+  - Unit tests for interval bounds, advancement, wrap, and deterministic test seeding.
+- `attitude.rs`
+  - Move `hello-view-service/src/view.rs` here; update module docs; keep the existing tests.
+- Add the crate to the workspace and its dependencies (`stations-dds`, `clap`).
+
+### `hello-view-service`
+
+- Remove `mod view`, `src/view.rs`, the greeting constant, and attitude generation.
+- Keep `--rate-ms` as the relay period.
+- Create a `HelloWorldTopic` reader and a `HelloWorldViewTopic` writer.
+- Add `relay.rs` with a testable state machine:
 
 ```rust
-struct DiscoverySource {
-    publications: DataReader<BuiltinEndpointSample>,
-    subscriptions: DataReader<BuiltinEndpointSample>,
-    _participant: DomainParticipant,
-    _domain: Option<DomainGuard>,
-    last_poll_ms: u64,
+struct ViewRelay {
+    started: Instant,
+    latest: Option<HelloWorldTopic>,
+    last_received: Option<Instant>,
+}
+
+impl ViewRelay {
+    fn update(&mut self, sample: HelloWorldTopic, now: Instant);
+    fn view(&self, now: Instant) -> Option<HelloWorldViewTopic>;
 }
 ```
 
-- Create the DDS domain explicitly with the resolved XML through `dds_create_domain`, then create the participant in that domain.
-- Keep the domain in a `DomainGuard` that deletes it after the participant on drop.
-- Create the builtin readers from the participant.
-- Keep readers declared before the participant so they drop first.
-- Poll every 500 ms; map samples as before; return the number of newly learned endpoints.
+- `view()`:
+  - If no sample has arrived and `now - started < 2s`: `None`.
+  - If no sample and `now - started >= 2s`: invalid view with `Disconnected hh:mm:ss` and identity attitude.
+  - If a sample arrived less than 2s ago: valid view with the model greeting/attitude.
+  - If a sample arrived 2s or more ago: invalid view with the last attitude and `Disconnected hh:mm:ss`.
+- Format the elapsed time as `Disconnected {:02}:{:02}:{:02}` (hours, minutes, seconds).
+- Main loop drains `reader.take()`, keeps the last sample, publishes `relay.view(now)` if present, and sleeps for the relay period.
+- Unit tests for no-data startup, first valid sample, timeout at 2 seconds, elapsed-time formatting, last-attitude retention, and recovery.
 
-### 3. Attribution and re-attribution
+### Display library
 
-- Keep `Discovery::learn_endpoint`, `topic_for_writer`, and the passive SEDP path.
-- Keep `History::reattribute` and `TopicCounts::reattribute`.
-- Poll before draining new records; on new endpoints, re-attribute retained history and counts, mark `pending_view`, and refresh the topic pane.
-- If paused, defer the table rebuild; on Stop force a rebuild.
+- `display-lib/src/view.rs`:
+  - `View { greeting: String, attitude: Option<[f32; 4]>, valid: bool }`.
+  - `ViewSource` keeps a `Cell<Option<[f32; 4]>>` of the last valid attitude.
+  - On a valid sample, update the last valid attitude.
+  - Every published view carries `valid` from the sample and attitude `last_valid` (`None` until the first valid sample).
+- `display-lib/src/formats/hello_world.rs`:
+  - No view: clear black.
+  - View: clear background, render the earth only when `attitude` is `Some`, and always draw the greeting.
+  - This yields no earth before the first connection, a frozen last earth after a disconnect, and live earth while valid.
+- Keep the `valid` flag available for future format styling.
 
-### 4. Discovery diagnostics
+### `dds-echo`
 
-Write a log (default `<deploy>/dds-echo-discovery.log`, with an optional `--discovery-log <path>`):
+- Update the `HelloWorldViewTopic` decode test for the new `valid` field.
+- No registry change; decode already reads the generated struct.
 
-- resolved registry and config paths, and whether they exist;
-- whether an inherited `CYCLONEDDS_URI` was ignored;
-- domain and discovery enabled/disabled;
-- participant creation success/error;
-- each poll’s publication/subscription sample counts;
-- learned endpoint GUIDs, topics, and types;
-- re-attribution changes.
+## Build and launch
 
-If the log path is not writable, fall back to the temporary directory. Log a clear diagnostic if discovery cannot be created.
+- `scripts/build.ps1`:
+  - Deploy `build\rust\release\hello-service.exe` to `build\deploy\bin`.
+  - Add `rust\service\hello-service\src` to the DDS bypass-scan roots.
+- `scripts/launch-rust.ps1`:
+  - Require `hello-service.exe`.
+  - Start `hello-service` first, then `hello-view-service`, then `lil-d`.
+  - Update the description and final message.
+- `scripts/cleanup.ps1`:
+  - Add `hello-service` to the process list.
+- `build/topics.md` will list `hello-service` as publisher of `HelloWorldTopic` and `hello-view-service` as subscriber.
 
-### 5. Remove runtime `REPO_ROOT` defaults
+## Tests
 
-- `hello-view-service`: explicit `--config`, then `<exe_dir>/../config`, then `<cwd>/contracts`; remove the `REPO_ROOT` fallback.
-- `display-lib`: exe-relative `config` directory, then `<cwd>/contracts`; remove the `REPO_ROOT` fallback.
-- Keep tests and build-time code generation on `REPO_ROOT`; they are not deployed.
+- Greeting cycle: intervals in [15, 60] seconds, sequential advancement, wrapping, deterministic seeded behavior.
+- Attitude tests moved from the view service.
+- View relay: no data before 2s, disconnected at 2s, elapsed time increments, last attitude retained, recovery on a new sample.
+- Display mapping: no earth before the first valid sample; last valid attitude retained across invalid samples.
+- `dds-echo` view decode includes `valid`.
+- Existing workspace tests continue to pass.
 
-## Tests and verification
+## Verification
 
-Unit tests:
+```powershell
+.\scripts\build.ps1 -Test
+.\scripts\build.ps1
+.\scripts\cleanup.ps1
+.\scripts\launch-rust.ps1
+```
 
-- Discovery/re-attribution tests continue to pass.
-- Existing 64 `dds-echo` tests continue to pass.
+1. `dds-echo` shows `HelloWorldTopic` from `hello-service` and `HelloWorldViewTopic` from the relay.
+2. The display renders the model-driven tilted earth and greeting.
+3. Stop `hello-service`: after 2 seconds the display keeps the last earth and shows `Disconnected 00:00:02`, then counts upward.
+4. Restart `hello-service`: the display resumes valid data.
+5. Start only the view service/display without `hello-service`: after 2 seconds the disconnected greeting appears on the background, with no earth.
+6. Observe at least one greeting change and confirm the new Latin-script text renders correctly.
+7. `cleanup.ps1` stops `hello-service`, `hello-view-service`, and `lil-d`.
 
-Manual verification:
+## Assumptions / open checks
 
-1. Double-click `T:\build\deploy\bin\dds-echo.exe` from Explorer with the services running and no shell environment.
-2. Confirm `endpoints > 0` and `HelloWorldViewTopic` under **Known**.
-3. Repeat with a deliberately bad user/system `CYCLONEDDS_URI`; it must be ignored.
-4. Run from an unrelated working directory.
-5. Test both start orders and only `hello-view-service`.
-6. Press Stop; retained rows stay categorized and the UI stays responsive.
-7. Confirm `lil-d` and `hello-view-service` still work from the deploy layout after removing their `REPO_ROOT` fallbacks.
-8. Check that the deployed binaries no longer contain the repository path as a runtime default.
-9. If endpoints remain zero, use the discovery log to distinguish participant creation, config/domain, reader samples, and GUID mapping.
-
-## Risks and limitations
-
-- Records trimmed before an endpoint is learned cannot be re-attributed; their counts may remain `unidentified`.
-- The discovery participant adds SPDP/SEDP traffic; its own builtin endpoints are filtered, and passive capture may count its SPDP.
-- Polling on the UI thread avoids `Send` requirements; keep the interval low-frequency.
-- A custom deployment can override the exe-relative config with `--dds-config`.
-- Development CWD fallbacks are not part of the deploy contract; the deploy layout is exe-relative only.
-- If no config is found, dds-echo creates a default DDS domain and logs a diagnostic; discovery may then see no StationsDDS endpoints.
-
-## Implementation status
-
-- The first discovery-participant attempt failed because setting `CYCLONEDDS_URI` inside the process does not make CycloneDDS use the config; a double-clicked deploy exe therefore used default settings and saw `endpoints: 0`.
-- Implemented: authoritative exe-relative config and registry paths, explicit `dds_create_domain` with the config XML, raw `DomainParticipant` discovery independent of the registry, inherited environment removal, discovery logging, and removal of runtime `REPO_ROOT` defaults from `dds-echo`, `hello-view-service`, and `display-lib`.
-- Added `--remap-path-prefix` to the release Rust build so deployed binaries do not carry repository paths in source/panic metadata.
-- Verified with the `T:\` deploy exe, no shell environment, from an unrelated working directory:
-  - both start orders learn the `HelloWorldViewTopic` writer/reader;
-  - `total_endpoints` becomes 2 and the first data record is attributed to `HelloWorldViewTopic`;
-  - a deliberately bad inherited `CYCLONEDDS_URI` is ignored;
-  - Stop remains responsive.
-- The 64 `dds-echo` tests pass; deployed binaries no longer contain the repository path.
-- The story remains **in progress** pending the user's own test.
+- The interpretation of "don't show it unless the service connects" is: **no earth before the first connection**, while the disconnected greeting still appears after the 2-second timeout.
+- The Yoruba wording is `Pẹlẹ o, ayé!`; verify font coverage and fall back to a plain-Latin transliteration only if necessary.
+- Model greeting changes are sequential with random intervals; no language is skipped.
 
 ## Bookkeeping
 
-This story stays `in progress` until the user asks to plan the next story. Do not move it to `completed_stories.md` before then.
+- `dds-echo-discovery-attribution` has been moved to `completed_stories.md` with its completion timestamp.
+- This story is `in progress`; do not move it to `completed_stories.md` until the user asks to plan the next story.

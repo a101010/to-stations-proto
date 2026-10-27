@@ -177,3 +177,9 @@ Make `dds-echo` survive many concurrent high-rate streams (for example several 1
 - **Completed:** 2026-10-26 15:33:17.
 - **Depends on:** none.
 - **Minimal test:** with N concurrent 100 Hz writers plus a one-shot topic, the UI stays responsive, memory stays bounded, `dropped` and `trimmed` are reported, and the one-shot topic's records survive while high-frequency records are trimmed; pressing Stop under live traffic returns immediately; scrolling up freezes the table while stats continue, selecting a row is responsive, and scrolling to the bottom resumes live updates.
+
+### dds-echo-discovery-attribution
+Give `dds-echo` a discovery-only CycloneDDS participant and use the fork's builtin publication/subscription readers to learn writer GUID -> topic, independent of passive SEDP capture; keep raw UDP capture for the datagram list. Re-attribute retained records and topic counts when endpoints are learned, including on Stop. Make deployed artifacts self-contained: resolve registry and CycloneDDS configuration relative to the executable, create the domain explicitly with the config XML, ignore inherited `CYCLONEDDS_URI`, remove runtime `REPO_ROOT` defaults from deployed executables and libraries, and remap repository paths out of release binaries.
+- **Completed:** 2026-10-27 07:48:08.
+- **Depends on:** none.
+- **Minimal test:** double-click `build\deploy\bin\dds-echo.exe` with the services running and no shell environment; `endpoints` is greater than zero, `HelloWorldViewTopic` samples are categorized under Known, and pressing Stop leaves retained rows attributed. The same holds with `dds-echo` started before or after the services, from an unrelated working directory, and with an invalid inherited `CYCLONEDDS_URI`; deployed binaries contain no repository path.

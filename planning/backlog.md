@@ -37,17 +37,11 @@ Third-party libraries are built/installed to an external prefix (for example `C:
 
 **Done when.** `launch-rust.ps1` brings up the model service, the view service, and `lil-d` from `build/deploy`; `lil-d` shows the tilted, cube-mapped earth lit from the upper right with the greeting text rendered in the loaded font, its power button works, and the format manager switches between the default and hello-world formats. `dds-echo` observes every topic in the registry, `--topics` and `build/topics.md` match `contracts/`, and `cleanup.ps1` stops everything.
 
-### dds-echo-discovery-attribution
-Give `dds-echo` a discovery-only CycloneDDS participant and use the fork's builtin publication/subscription readers to learn writer GUID -> topic, independent of passive SEDP capture; keep raw UDP capture for the datagram list. Starting `dds-echo` first does not fix attribution: SEDP is not visible to a non-participant sniffer. Re-attribute retained records and topic counts when endpoints are learned, including on Stop. Resolve the registry and CycloneDDS configuration relative to the deployed executable, ignore inherited `CYCLONEDDS_URI`, and remove runtime `REPO_ROOT` defaults from the deployed executables and libraries. The active plan lives in `current_story.md`. Split out of `hello-view-service-fixes`, where the `unidentified` view samples were accepted as a passive-capture limitation.
-- **Depends on:** none.
-- **Minimal test:** double-click `build\deploy\bin\dds-echo.exe` with the services running and no shell environment; `endpoints` is greater than zero, `HelloWorldViewTopic` samples are categorized under Known, and pressing Stop leaves retained rows attributed. The same holds with `dds-echo` started before or after the services and from an unrelated working directory.
-- **Status:** in progress.
-
 ### hello-service
-Create the hello_world model service (`hello-service`): publish `HelloWorldTopic` (greeting text and quaternion attitude) at a fixed rate, a 23.5 degree tilt. The model data moves out of the view service to this service, and the view service now subscribes to it and relays. One revolution every twelve minutes is added later.
+Create the hello_world model service (`hello-service`): publish `HelloWorldTopic` at 10 Hz with a greeting that cycles through Latin-script languages every 15-60 seconds, and with the earth attitude moved from the view service (23.5 degree tilt, 12-minute spin). The view service subscribes to `HelloWorldTopic` and relays `HelloWorldViewTopic` at 100 Hz. Add a validity flag to the view topic; after 2 seconds without model data, mark it invalid and show `Disconnected hh:mm:ss` with the last received earth position. Before the service first connects, show the disconnected greeting after 2 seconds but no earth. Add the service to build/deploy, launch, and cleanup; update the view service contract.
 - **Depends on:** none.
-- **Minimal test:** `dds-echo` shows `HelloWorldTopic` samples and the display shows the model-driven world.
-- **Status:** todo.
+- **Minimal test:** `launch-rust.ps1` starts the model service, view service, and display; `dds-echo` shows `HelloWorldTopic` and `HelloWorldViewTopic`; the display renders the model-driven world; stopping `hello-service` shows the last earth and a counting `Disconnected hh:mm:ss`; restarting resumes valid data; the greeting changes within 15-60 seconds; `cleanup.ps1` stops all three.
+- **Status:** in progress.
 
 ### topic-field-metadata
 Extend the fork's code generation (the `cyclonedds-build` codegen or `cyclonedds-derive`) to emit a per-struct field schema (reusing the generated `DynamicTypeSchema`/`DynamicValue` shapes) plus field get/set, so tools can build generic field views for display and editing without runtime reflection (Rust has none). Consumed by `dds-echo`'s detail pane and send form and by `tentacles-injector`.
