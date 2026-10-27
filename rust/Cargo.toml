@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["lib/stations-dds", "lib/display-lib", "lib/harfbuzz", "service/hello-view-service", "tool/dds-contracts", "tool/dds-echo", "tool/equirect-to-cubemap", "ui/lil-d"]
+members = ["lib/stations-dds", "lib/display-lib", "lib/harfbuzz", "service/hello-service", "service/hello-view-service", "tool/dds-contracts", "tool/dds-echo", "tool/equirect-to-cubemap", "ui/lil-d"]
 
 [workspace.dependencies]
 cyclonedds = { git = "https://github.com/a101010/cyclonedds-rust", rev = "acef68438ef3c8eae56c45afbecdbb89f3d3e115", default-features = false, features = ["native"] }

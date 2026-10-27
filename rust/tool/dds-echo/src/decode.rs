@@ -107,6 +107,7 @@ mod tests {
                 z: 0.0,
                 w: 1.0,
             },
+            valid: true,
         };
         let cdr = CdrSerializer::serialize(&sample, CdrEncoding::Xcdr1).unwrap();
         let mut payload = vec![0x00, 0x01, 0x00, 0x00];

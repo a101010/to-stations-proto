@@ -1,4 +1,4 @@
-//! The hello_world view attitude.
+//! The hello_world attitude model.
 //!
 //! The earth's polar axis is placed in view space by two angles: its angle from
 //! the camera axis (how much of the far side of the arctic circle is visible)

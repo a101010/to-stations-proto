@@ -1,0 +1,13 @@
+[package]
+name = "hello-service"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "hello-service"
+path = "src/main.rs"
+
+[dependencies]
+stations-dds = { workspace = true }
+clap = { workspace = true }

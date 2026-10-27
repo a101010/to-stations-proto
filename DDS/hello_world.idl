@@ -8,5 +8,6 @@ module hello_world {
   struct HelloWorldViewTopic {
     string greeting;
     math::Quaternion attitude;
+    boolean valid;
   };
 };

@@ -264,6 +264,13 @@ impl TextRenderer {
         }
     }
 
+    /// The font size, no larger than `max_size`, at which `text` fits within
+    /// `max_width` pixels.
+    pub(crate) fn font_size_for(&self, text: &str, max_width: f32, max_size: f32) -> f32 {
+        let advance: f32 = self.font.shape(text).iter().map(|g| g.x_advance).sum();
+        font_size_for_advance(advance, self.font.upem, max_width, max_size)
+    }
+
     /// Make sure the atlas holds `gid`, encoding and uploading it on first use.
     fn ensure_glyph(&mut self, gl: &glow::Context, gid: u32) {
         if self.glyphs.contains_key(&gid) {
@@ -305,6 +312,18 @@ impl TextRenderer {
             },
         );
     }
+}
+
+/// The largest font size that fits `advance` font units into `max_width`
+/// pixels, capped at `max_size`.
+fn font_size_for_advance(advance: f32, upem: f32, max_width: f32, max_size: f32) -> f32 {
+    if max_size <= 0.0 {
+        return 0.0;
+    }
+    if advance <= 0.0 || upem <= 0.0 || max_width <= 0.0 {
+        return max_size;
+    }
+    (max_width * upem / advance).min(max_size)
 }
 
 /// Lay out `glyphs` centered in the region and emit their quad vertices.
@@ -491,6 +510,14 @@ mod tests {
         // total advance = (500 + 200 + 500) * (100/1000) = 120; pen starts at
         // (1000 - 120) / 2 = 440; the first glyph has min_x 0 and no offset.
         assert!((vertices[0].pos[0] - 440.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn font_size_for_advance_fits_width() {
+        // 20 * 1000 units at 100 px / 1000 upem = 2000 px wide.
+        let fit = font_size_for_advance(20000.0, 1000.0, 900.0, 100.0);
+        assert!((fit - 45.0).abs() < 1e-3);
+        assert!((font_size_for_advance(20000.0, 1000.0, 900.0, 40.0) - 40.0).abs() < 1e-3);
     }
 
     #[test]

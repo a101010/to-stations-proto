@@ -1,8 +1,9 @@
-//! The hello_world view service: publishes `HelloWorldViewTopic` (the greeting
-//! and the earth attitude) at a fixed rate, for the display library to render.
+//! The hello_world view service: subscribes to `HelloWorldTopic` and relays it
+//! as `HelloWorldViewTopic` for the display library to render.
 //!
-//! The data is hardcoded here for now; `hello-service` becomes its source in a
-//! later story.
+//! The relay republishes the latest model sample at a fixed rate. If no model
+//! sample arrives for two seconds, the view data is marked invalid and the
+//! greeting reports the time since the last model transmission.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -11,12 +12,9 @@ use std::time::{Duration, Instant};
 use clap::Parser;
 use stations_dds::contract::{ServiceContract, TopicRegistry};
 use stations_dds::dds::Node;
-use stations_dds::hello_world::HelloWorldViewTopic;
+use stations_dds::hello_world::{HelloWorldTopic, HelloWorldViewTopic};
 
-mod view;
-
-/// The greeting, until `hello-service` becomes its source.
-const GREETING: &str = "Hello, world!";
+mod relay;
 
 #[derive(Parser, Debug)]
 #[command(name = "hello-view-service", about = "hello_world view service")]
@@ -25,7 +23,7 @@ struct Args {
     #[arg(long, default_value_t = 0)]
     domain: u32,
 
-    /// Publish period, in milliseconds.
+    /// Relay publish period, in milliseconds.
     #[arg(long, default_value_t = 10)]
     rate_ms: u64,
 
@@ -66,15 +64,25 @@ fn run(args: &Args) -> Result<(), String> {
     let writer = node
         .writer::<HelloWorldViewTopic>("HelloWorldViewTopic")
         .map_err(|e| e.to_string())?;
+    let reader = node
+        .reader::<HelloWorldTopic>("HelloWorldTopic")
+        .map_err(|e| e.to_string())?;
 
     let period = Duration::from_millis(args.rate_ms.max(1));
-    let start = Instant::now();
+    let mut relay = relay::ViewRelay::new(Instant::now());
     loop {
-        let sample = HelloWorldViewTopic {
-            greeting: GREETING.to_string(),
-            attitude: view::attitude_at(start.elapsed()),
-        };
-        writer.write(&sample).map_err(|e| e.to_string())?;
+        let now = Instant::now();
+        match reader.take() {
+            Ok(samples) => {
+                if let Some(sample) = samples.into_iter().last() {
+                    relay.update(sample, now);
+                }
+            }
+            Err(e) => eprintln!("hello-view-service: model reader: {e}"),
+        }
+        if let Some(view) = relay.view(now) {
+            writer.write(&view).map_err(|e| e.to_string())?;
+        }
         std::thread::sleep(period);
     }
 }

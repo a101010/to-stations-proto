@@ -4,8 +4,7 @@ Launches the Rust configuration.
 
 .DESCRIPTION
 Starts the applications of the Rust configuration from build/deploy: the
-hello_world view service and the small display (lil-d). Later stories add the
-model service and the other displays.
+hello_world model service, the view service, and the small display (lil-d).
 
 All participants read the shared DDS configuration; this script sets
 CYCLONEDDS_URI before starting them.
@@ -30,9 +29,10 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $bin = Join-Path $repoRoot 'build\deploy\bin'
 $config = Join-Path $repoRoot 'build\deploy\config\cyclonedds-config.xml'
 
-$service = Join-Path $bin 'hello-view-service.exe'
+$model = Join-Path $bin 'hello-service.exe'
+$view = Join-Path $bin 'hello-view-service.exe'
 $display = Join-Path $bin 'lil-d.exe'
-if (-not (Test-Path $service) -or -not (Test-Path $display) -or -not (Test-Path $config)) {
+if (-not (Test-Path $model) -or -not (Test-Path $view) -or -not (Test-Path $display) -or -not (Test-Path $config)) {
     throw "Not built: run scripts\build.ps1 first."
 }
 
@@ -40,7 +40,9 @@ if (-not (Test-Path $service) -or -not (Test-Path $display) -or -not (Test-Path 
 # configuration from CYCLONEDDS_URI; child processes inherit it.
 $env:CYCLONEDDS_URI = 'file://' + ($config -replace '\\', '/')
 
-Start-Process -FilePath $service
+Start-Process -FilePath $model
+Start-Sleep -Milliseconds 500
+Start-Process -FilePath $view
 Start-Sleep -Milliseconds 500
 Start-Process -FilePath $display -ArgumentList '--station', $Station
-Write-Host "Started hello-view-service and lil-d (station $Station)"
+Write-Host "Started hello-service, hello-view-service, and lil-d (station $Station)"

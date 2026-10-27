@@ -28,6 +28,12 @@
 - Deployed executables must not depend on an externally set environment variable to find their configuration. If a library requires an environment variable internally (for example CycloneDDS's `CYCLONEDDS_URI`), the executable sets it itself from its deploy-relative configuration before initialization. An explicit command-line option may override the deploy-relative default.
 - `REPO_ROOT` is permitted only at build/test time (code generation, tests, tooling) and must not be a runtime default in a deployed crate. Runtime code composes parent directories rather than using `..` strings.
 
+## Verification and iteration
+
+- Do not iterate on screenshots or test builds. They are expensive and time-consuming.
+- Run the minimum verification needed once.
+- If a problem appears, or user input is needed, ask and stop rather than looping.
+
 ## Documentation
 
 - Do not duplicate `planning/architecture.md` in this file. It is the single source for the technology stack, design, folder structure, and file/path conventions; refer to it instead of restating its content here.

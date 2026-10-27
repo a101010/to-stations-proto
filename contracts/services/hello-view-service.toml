@@ -3,3 +3,6 @@ name = "hello-view-service"
 
 [[publish]]
 topic = "HelloWorldViewTopic"
+
+[[subscribe]]
+topic = "HelloWorldTopic"

@@ -24,6 +24,11 @@ const LIGHT_DIR: [f32; 3] = [0.6, 0.8, 0.7];
 const FONT_FILE: &str = "fonts/FiraSans-Regular.ttf";
 /// Text size as a fraction of the region height.
 const FONT_SIZE_FRACTION: f32 = 0.15;
+/// Fraction of the region width available to centered text.
+const TEXT_WIDTH_FRACTION: f32 = 0.9;
+/// The widest view string: all greetings and `NoConn hh:mm:ss` fit within it.
+/// Keep this in sync when adding a greeting.
+const MAX_TEXT: &str = "Bonjour le monde!";
 
 /// The hello-world format.
 pub(crate) struct HelloWorld {
@@ -87,19 +92,46 @@ impl crate::formats::Format for HelloWorld {
         let Some(View {
             greeting,
             attitude,
+            valid,
         }) = view
         else {
-            return; // black until the first sample arrives
+            return; // black until the first view sample arrives
         };
+        let _valid = valid;
 
-        self.earth.render(gl, width, height, attitude, LIGHT_DIR);
+        if let Some(attitude) = attitude {
+            self.earth.render(gl, width, height, attitude, LIGHT_DIR);
+        }
+        let font_size_px = self.text.font_size_for(
+            MAX_TEXT,
+            width as f32 * TEXT_WIDTH_FRACTION,
+            height as f32 * FONT_SIZE_FRACTION,
+        );
         self.text.draw(
             gl,
             width,
             height,
             &greeting,
             TEXT_COLOR,
-            height as f32 * FONT_SIZE_FRACTION,
+            font_size_px,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn max_text_is_at_least_as_wide_as_no_conn() {
+        let root = std::env::var("REPO_ROOT").expect("REPO_ROOT is set by .cargo/config.toml");
+        let font = crate::text::Font::load(
+            &std::path::PathBuf::from(root).join("assets/fonts/FiraSans-Regular.ttf"),
+        )
+        .expect("load font");
+        let advance = |text: &str| -> f32 {
+            font.shape(text).iter().map(|glyph| glyph.x_advance).sum()
+        };
+        assert!(advance(MAX_TEXT) >= advance("NoConn 00:00:00"));
     }
 }

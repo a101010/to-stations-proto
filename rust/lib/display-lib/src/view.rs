@@ -4,7 +4,7 @@
 //! the latest received greeting and attitude in shared state. A format that
 //! needs view data renders black until the first sample arrives.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::Path;
 use std::rc::Rc;
 
@@ -17,7 +17,9 @@ use stations_dds::hello_world::HelloWorldViewTopic;
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct View {
     pub greeting: String,
-    pub attitude: [f32; 4],
+    /// The last valid attitude; `None` until the first valid sample.
+    pub attitude: Option<[f32; 4]>,
+    pub valid: bool,
 }
 
 /// Shared latest view; `None` until the first sample arrives.
@@ -33,6 +35,7 @@ pub(crate) struct ViewSource {
     // Kept alive for the reader's lifetime.
     _node: Node,
     reader: DataReader<HelloWorldViewTopic>,
+    last_attitude: Cell<Option<[f32; 4]>>,
 }
 
 impl ViewSource {
@@ -48,17 +51,25 @@ impl ViewSource {
         Ok(Self {
             _node: node,
             reader,
+            last_attitude: Cell::new(None),
         })
     }
 
-    /// Drain the reader and store the latest sample.
+    /// Drain the reader and store the latest sample. The attitude is retained
+    /// from the last valid sample so an invalid sample cannot erase the last
+    /// received position.
     pub(crate) fn poll(&self, state: &ViewState) {
         if let Ok(samples) = self.reader.take() {
             if let Some(sample) = samples.into_iter().last() {
                 let q = sample.attitude;
+                let attitude = [q.x as f32, q.y as f32, q.z as f32, q.w as f32];
+                if sample.valid {
+                    self.last_attitude.set(Some(attitude));
+                }
                 *state.borrow_mut() = Some(View {
                     greeting: sample.greeting,
-                    attitude: [q.x as f32, q.y as f32, q.z as f32, q.w as f32],
+                    attitude: self.last_attitude.get(),
+                    valid: sample.valid,
                 });
             }
         }

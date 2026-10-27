@@ -90,7 +90,7 @@ finally {
 # uses DDS yet, so the scan currently passes vacuously.
 $ddsContracts = Join-Path $repoRoot "$toolDir\dds-contracts.exe"
 $scanArgs = @()
-foreach ($src in @('rust\ui\lil-d\src', 'rust\tool\equirect-to-cubemap\src', 'rust\tool\dds-echo\src', 'rust\service\hello-view-service\src')) {
+foreach ($src in @('rust\ui\lil-d\src', 'rust\tool\equirect-to-cubemap\src', 'rust\tool\dds-echo\src', 'rust\service\hello-service\src', 'rust\service\hello-view-service\src')) {
     $scanArgs += @('--scan', (Join-Path $repoRoot $src))
 }
 & $ddsContracts '--contracts' (Join-Path $repoRoot 'contracts') @scanArgs '--summary' (Join-Path $repoRoot 'build\topics.md')
@@ -109,6 +109,7 @@ if (-not $Test) {
     Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\lil-d.exe') -Destination $deployBin -Force
     Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\display_lib.dll') -Destination $deployBin -Force
     Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\dds-echo.exe') -Destination $deployBin -Force
+    Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\hello-service.exe') -Destination $deployBin -Force
     Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\hello-view-service.exe') -Destination $deployBin -Force
 
     # The display library loads its font and (later) the earth cube map from
@@ -122,5 +123,5 @@ if (-not $Test) {
     Copy-Item -Path (Join-Path $repoRoot 'DDS\cyclonedds-config.xml') -Destination $deployConfig -Force
     Copy-Item -Path (Join-Path $repoRoot 'contracts\topics.toml') -Destination $deployConfig -Force
     Copy-Item -Path (Join-Path $repoRoot 'contracts\services') -Destination $deployConfig -Recurse -Force
-    Write-Host "Deployed lil-d.exe, hello-view-service.exe, dds-echo.exe, display_lib.dll, assets, the HarfBuzz runtime, and the DDS config + contracts"
+    Write-Host "Deployed lil-d.exe, hello-service.exe, hello-view-service.exe, dds-echo.exe, display_lib.dll, assets, the HarfBuzz runtime, and the DDS config + contracts"
 }
