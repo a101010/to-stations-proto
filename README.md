@@ -108,7 +108,7 @@ Like the C install, the prefix (`EXT_PATH_PREFIX`, default `C:\Libraries`) is us
 
 ### Rust DDS binding
 
-The Rust DDS binding uses the `cyclonedds` crate from the to-stations fork of `cyclonedds-rust` (`https://github.com/a101010/cyclonedds-rust`, branch `multifile`, rev `acef68438ef3c8eae56c45afbecdbb89f3d3e115`), pinned as a git dependency in `rust/Cargo.toml`. The fork adds nested `module` support, `#include`/`import`, scoped type references, `@optional` members, and `#[dds_typename]` for C++/IDL parity.
+The Rust DDS binding uses the `cyclonedds` crate from the to-stations fork of `cyclonedds-rust` (`https://github.com/a101010/cyclonedds-rust`, branch `multifile`, rev `952906b5018831683c0863cd11001bdac427ee10`), pinned as a git dependency in `rust/Cargo.toml`. The fork adds nested `module` support, `#include`/`import`, scoped type references, `@optional` members, `#[dds_typename]` for C++/IDL parity, and generated `DdsFieldMetadata` schemas/conversions for tooling.
 
 IDL code generation uses the fork's `cyclonedds-idlc`, a **Rust** CLI that wraps the fork's `cyclonedds-build` library. It is built from the same pinned rev by `scripts/build.ps1` and run with `--no-idlc`. Do not confuse it with the C `idlc.exe` installed with CycloneDDS (see "Cyclone DDS (C)" above): the C tool emits C/C++, not Rust.
 

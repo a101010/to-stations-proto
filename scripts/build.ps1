@@ -29,9 +29,12 @@ if (Test-Path $harfbuzzBin) {
 # The fork's cyclonedds-idlc is Rust codegen (it wraps cyclonedds-build). The C
 # idlc.exe emits C/C++, not Rust.
 $forkUrl = 'https://github.com/a101010/cyclonedds-rust'
-$forkRev = 'acef68438ef3c8eae56c45afbecdbb89f3d3e115'
+$forkRev = '952906b5018831683c0863cd11001bdac427ee10'
 
-$codegenTargetDir = Join-Path $repoRoot 'build\rust\codegen'
+# Key the cargo install target by revision: Cargo otherwise can reuse a cached
+# cyclonedds-idlc binary when the git rev changes but the package version does
+# not, producing code with the old generator.
+$codegenTargetDir = Join-Path $repoRoot "build\rust\codegen\$($forkRev.Substring(0, 8))"
 $installRoot      = Join-Path $repoRoot 'build'
 $genDir           = Join-Path $repoRoot 'build\gen\rust'
 $ddsDir           = Join-Path $repoRoot 'DDS'

@@ -1,232 +1,128 @@
-# Current story: hello-service
+# Current story: topic-field-metadata
 
 This file is the detailed, living plan for the one active story. It is rewritten for each story. The backlog in `backlog.md` holds all work and the per-story status.
 
 ## Story
 
-Create the hello_world model service (`hello-service`): publish `HelloWorldTopic` at 10 Hz with a greeting that cycles through Latin-script languages every 15-60 seconds, and with the earth attitude moved from the view service (23.5 degree tilt, 12-minute spin). The view service subscribes to `HelloWorldTopic` and relays `HelloWorldViewTopic` at 100 Hz. Add a validity flag to the view topic; after 2 seconds without model data, mark it invalid and show `NoConn hh:mm:ss` with the last received earth position. Before the service first connects, show the NoConn greeting after 2 seconds but no earth. Add the service to build/deploy, launch, and cleanup; update the view service contract.
+Consume the fork's `DdsFieldMetadata` implementation by re-pinning `cyclonedds-rust` from `acef684` to `952906b`, regenerate the hello_world types, and add a `stations-dds` acceptance test that enumerates a generated topic's fields and round-trips a value through the typed sample. Do not change `dds-echo` in this story.
 
-- **Depends on:** none.
-- **Minimal test:** `launch-rust.ps1` starts the model service, view service, and display; `dds-echo` shows `HelloWorldTopic` and `HelloWorldViewTopic`; the display renders the model-driven world; stopping `hello-service` shows the last earth and a counting `NoConn hh:mm:ss`; restarting resumes valid data; the greeting changes within 15-60 seconds; `cleanup.ps1` stops all three.
+- **Depends on:** none; the fork implementation is available at `952906b`.
+- **Minimal test:** `stations-dds/tests/field_metadata.rs` enumerates the fields of `HelloWorldTopic`/`HelloWorldViewTopic` from `DdsFieldMetadata::field_schema` and round-trips typed values through `to_dynamic_value`/`from_dynamic_value`.
 
 ## Context
 
-`hello-view-service` currently owns the greeting and the complete attitude (initial 23.5-degree tilt and existing 12-minute spin) and publishes `HelloWorldViewTopic` at 100 Hz. The display library subscribes to that topic and renders the earth and greeting; it stays black until the first view sample.
+The to-stations tool `dds-echo` (and the future `tentacles-injector`) needs generic field views for any topic registered in `contracts/topics.toml`. Rust has no runtime reflection, so the field knowledge must be generated at compile time.
 
-The model/view split moves the model data to `hello-service`:
+The fork already implements this work on branch `multifile` at rev `952906b`:
 
-- `hello-service` publishes `HelloWorldTopic` (greeting + `math::Quaternion attitude`).
-- `hello-view-service` subscribes to `HelloWorldTopic` and relays `HelloWorldViewTopic`.
-- The display library continues to subscribe to `HelloWorldViewTopic`; it does not know about the model service.
+- `cyclonedds/src/field_metadata.rs` defines `DdsFieldMetadata`.
+- `cyclonedds-build` emits `field_schema`, `to_dynamic_value`, `from_dynamic_value`, and the field get/set helpers for generated structs, enums, bitmasks, and unions.
+- The fork's test suite covers schema enumeration and round-tripping for primitives, strings, bounds, typedefs, nested structs, sequences, arrays, optionals, enums, bitmasks, and unions.
 
-The view payload gains a `valid` flag so consumers can distinguish live data from stale data. The model payload does not need a validity flag.
+`to-stations-proto` still pins `acef684`, which predates the trait, so the generated hello_world types have no field metadata. This story is therefore an integration and verification story, not a second implementation of the fork feature.
+
+The fork plan explicitly leaves `dds-echo` UI work to the later `dds-echo-send` story. The detail pane will continue to use its interim pretty-print for now.
 
 ## Decisions
 
-1. **Move the attitude.** The initial tilt and 12-minute spin move from `hello-view-service/src/view.rs` to `hello-service/src/attitude.rs`. Behavior is preserved.
-2. **Rates.** Model publishes at 10 Hz (`--rate-ms 100`). The view service relays the latest model sample at 100 Hz (`--rate-ms 10`).
-3. **Greeting cycle.** The model cycles sequentially through a fixed Latin-script list, starting with English. It advances after a random interval uniformly in 15-60 seconds. Use a small in-crate PRNG; introduce no new dependency.
-4. **View validity.** Add `boolean valid` to `HelloWorldViewTopic`. The view service sets it true only while the latest model sample is younger than 2 seconds.
-5. **Timeout baseline.** The timeout reference is the receive time of the last model sample, or the view-service start time when no sample has ever arrived.
-6. **View output.**
-   - Before 2 seconds and before any model sample: publish nothing (display stays black).
-   - After 2 seconds with no model sample: publish `valid=false`, greeting `NoConn hh:mm:ss`, identity attitude.
-   - While fresh: publish `valid=true`, latest model greeting/attitude.
-   - After a disconnect: publish `valid=false`, `NoConn hh:mm:ss`, last model attitude.
-   - The NoConn greeting counts from the last model receive (or view start if none) and updates every second.
-7. **Display behavior.**
-   - No view sample: black.
-   - View with no valid attitude yet: background plus the NoConn greeting, no earth.
-   - Valid view: earth plus greeting.
-   - Invalid view after a connection: last valid earth plus the NoConn greeting.
-   - The display remembers the last valid attitude locally so a later invalid/identity sample cannot erase the last received position.
-8. **Fixed text size.** The widest supported view string is `Bonjour le monde!` (Fira Sans measurement; `NoConn 00:00:00` is narrower). Compute one font size that fits that maximum string and render every greeting and NoConn string at that size. Do not change font size based on the displayed text.
-9. **Greeting source.** The greeting constant moves out of the view service. The view service only relays.
-10. **Contracts/build.** `hello-service` already publishes `HelloWorldTopic`; add the subscription to `hello-view-service.toml`. Add the model service to build, deploy, launch, and cleanup.
-
-## Greeting cycle
-
-Sequential order, wrapping:
-
-```text
-Hello, world!          English
-Hola, mundo!           Spanish
-Bonjour le monde!      French
-Hallo, Welt!           German
-Ciao, mondo!           Italian
-Olá, mundo!            Portuguese
-Hallo, wereld!         Dutch
-Hej, världen!          Swedish
-Hei, maailma!          Finnish
-Witaj, świecie!        Polish
-Merhaba dünya!         Turkish
-Salut, lume!           Romanian
-Salve, munde!          Latin
-toki, ma o!            Toki Pona
-Halo, wol!             Tok Pisin
-Habari, dunia!         Swahili
-Pẹlẹ o, ayé!           Yoruba
-```
-
-All are written in the Latin alphabet; Toki Pona is lowercase by convention. Verify that FiraSans/HarfBuzz renders the accented Yoruba text; if a glyph is missing, use a supported Latin transliteration (for example `Pele o, aye!`) and record the choice.
+1. **Consume the fork; do not duplicate it.** Re-pin to `952906b5018831683c0863cd11001bdac427ee10`. Do not copy the fork's source into this repository.
+2. **Update both pins.** `rust/Cargo.toml` and `scripts/build.ps1` carry independent revision strings; both must use the new rev. Regenerate `rust/Cargo.lock` for `cyclonedds`, `cyclonedds-derive`, `cyclonedds-rust-sys`, and `cyclonedds-src`. Key the codegen install target directory by rev so Cargo cannot reuse the previous `cyclonedds-idlc` binary when the package version is unchanged.
+3. **No `dds-echo` changes.** This story exposes and verifies the generated metadata. `dds-echo`'s detail pane and send form remain for `dds-echo-send`/the detail-pane follow-up.
+4. **No new dependencies.** The fork feature uses `std::sync::OnceLock`, `DynamicTypeSchema`, and `DynamicValue`; to-stations gains only the pinned revision.
+5. **Test the actual generated types.** The fork tests cover the full type matrix. The to-stations test uses the hello_world IDL types that this repository actually builds and consumes.
 
 ## Interfaces
 
-### IDL
-
-`DDS/hello_world.idl`:
-
-```idl
-module hello_world {
-  struct HelloWorldTopic {
-    string greeting;
-    math::Quaternion attitude;
-  };
-  struct HelloWorldViewTopic {
-    string greeting;
-    math::Quaternion attitude;
-    boolean valid;
-  };
-};
-```
-
-`HelloWorldTopic` and its contract entry are unchanged. The type name of the view topic is unchanged, so the registry needs no new type.
-
-### Contracts
-
-`contracts/services/hello-view-service.toml`:
-
-```toml
-[service]
-name = "hello-view-service"
-
-[[publish]]
-topic = "HelloWorldViewTopic"
-
-[[subscribe]]
-topic = "HelloWorldTopic"
-```
-
-`contracts/services/hello-service.toml` remains publish-only.
-
-### `rust/service/hello-service`
-
-New crate `rust/service/hello-service`:
-
-- `main.rs`
-  - Args: `--domain` (0), `--rate-ms` (100), `--config`, `--topics`.
-  - Load/validate the registry and `services/hello-service.toml`.
-  - `Node::new`, `writer::<HelloWorldTopic>("HelloWorldTopic")`.
-  - Loop: advance the greeting cycle using `Instant`, build `HelloWorldTopic { greeting, attitude: attitude::attitude_at(start.elapsed()) }`, write it, sleep for the period.
-- `greeting.rs`
-  - `GREETINGS` ordered list.
-  - `GreetingCycle` with current index, next change time, and a small SplitMix64/xorshift PRNG.
-  - Random interval uniformly in 15-60 seconds. Advance sequentially and wrap.
-  - Unit tests for interval bounds, advancement, wrap, and deterministic test seeding.
-- `attitude.rs`
-  - Move `hello-view-service/src/view.rs` here; update module docs; keep the existing tests.
-- Add the crate to the workspace and its dependencies (`stations-dds`, `clap`).
-
-### `hello-view-service`
-
-- Remove `mod view`, `src/view.rs`, the greeting constant, and attitude generation.
-- Keep `--rate-ms` as the relay period.
-- Create a `HelloWorldTopic` reader and a `HelloWorldViewTopic` writer.
-- Add `relay.rs` with a testable state machine:
+`cyclonedds::DdsFieldMetadata` (native feature) provides:
 
 ```rust
-struct ViewRelay {
-    started: Instant,
-    latest: Option<HelloWorldTopic>,
-    last_received: Option<Instant>,
-}
-
-impl ViewRelay {
-    fn update(&mut self, sample: HelloWorldTopic, now: Instant);
-    fn view(&self, now: Instant) -> Option<HelloWorldViewTopic>;
+pub trait DdsFieldMetadata: Sized + 'static {
+    fn field_schema() -> &'static DynamicTypeSchema;
+    fn to_dynamic_value(&self) -> DynamicValue;
+    fn from_dynamic_value(value: &DynamicValue) -> DdsResult<Self>;
+    fn field_names() -> Vec<String>;
+    fn get_field(&self, name: &str) -> DdsResult<DynamicValue>;
+    fn set_field(&mut self, name: &str, value: DynamicValue) -> DdsResult<()>;
 }
 ```
 
-- `view()`:
-  - If no sample has arrived and `now - started < 2s`: `None`.
-  - If no sample and `now - started >= 2s`: invalid view with `NoConn hh:mm:ss` and identity attitude.
-  - If a sample arrived less than 2s ago: valid view with the model greeting/attitude.
-  - If a sample arrived 2s or more ago: invalid view with the last attitude and `NoConn hh:mm:ss`.
-- Format the elapsed time as `NoConn {:02}:{:02}:{:02}` (hours, minutes, seconds).
-- Main loop drains `reader.take()`, keeps the last sample, publishes `relay.view(now)` if present, and sleeps for the relay period.
-- Unit tests for no-data startup, first valid sample, timeout at 2 seconds, elapsed-time formatting, last-attitude retention, and recovery.
+For the current IDL, codegen should emit impls for:
 
-### Display library
+- `math::Quaternion`
+- `hello_world::HelloWorldTopic`
+- `hello_world::HelloWorldViewTopic`
 
-- `display-lib/src/view.rs`:
-  - `View { greeting: String, attitude: Option<[f32; 4]>, valid: bool }`.
-  - `ViewSource` keeps a `Cell<Option<[f32; 4]>>` of the last valid attitude.
-  - On a valid sample, update the last valid attitude.
-  - Every published view carries `valid` from the sample and attitude `last_valid` (`None` until the first valid sample).
-- `display-lib/src/formats/hello_world.rs`:
-  - No view: clear black.
-  - View: clear background, render the earth only when `attitude` is `Some`, and always draw the greeting.
-  - This yields no earth before the first connection, a frozen last earth after a disconnect, and live earth while valid.
-  - `MAX_TEXT` is `Bonjour le monde!`; compute one font size from it and draw every string at that size.
-- `display-lib/src/text.rs`:
-  - `draw` renders at the supplied size and no longer shrinks text per string.
-  - Add a sizing helper used only with `MAX_TEXT` to compute the fixed size.
-- Keep the `valid` flag available for future format styling.
+The generated `HelloWorldTopic` schema is a struct with `greeting: string` and `attitude: math::Quaternion`. The view schema adds `valid: boolean`.
 
-### `dds-echo`
+## Implementation steps
 
-- Update the `HelloWorldViewTopic` decode test for the new `valid` field.
-- No registry change; decode already reads the generated struct.
+1. **Planning bookkeeping.** The completed `hello-service` story has been moved to `completed_stories.md` with completion time `2026-10-27 10:08:01` and removed from `backlog.md`; `topic-field-metadata` is now the active story.
+2. **Re-pin.** Change the fork revision in:
+   - `rust/Cargo.toml` (`cyclonedds`, `cyclonedds-rust-sys`)
+   - `scripts/build.ps1` (`$forkRev`)
+3. **Update the lock file.**
+   ```powershell
+   cargo update -p cyclonedds -p cyclonedds-derive -p cyclonedds-rust-sys -p cyclonedds-src
+   ```
+   Confirm all four packages resolve to `952906b5018831683c0863cd11001bdac427ee10`.
+4. **Regenerate.** Run `.\scripts\build.ps1 -Test`; it reinstalls the codegen tool from the new rev and regenerates `build/gen/rust/hello_world.rs`. Confirm the generated file contains `impl cyclonedds::DdsFieldMetadata` for all three types and nested `Quaternion` schema references.
+5. **Add the acceptance test** at `rust/lib/stations-dds/tests/field_metadata.rs`.
+6. **Update living documentation**:
+   - `docs/versions.md`: new fork revision and the field-metadata feature.
+   - `README.md`: new revision and feature list.
+   - `planning/backlog.md`: external-component revision.
+   - `planning/cyclonedds-build-plan.md`: record the metadata increment.
+7. **Verify once** with `.\scripts\build.ps1 -Test`; if it passes, run `.\scripts\build.ps1` once to refresh deploy artifacts. Do not take screenshots; there is no UI change.
+8. **Record completion** in `current_story.md` while leaving the backlog status `in progress` until the user asks to plan the next story.
 
-## Build and launch
+## Acceptance test
 
-- `scripts/build.ps1`:
-  - Deploy `build\rust\release\hello-service.exe` to `build\deploy\bin`.
-  - Add `rust\service\hello-service\src` to the DDS bypass-scan roots.
-- `scripts/launch-rust.ps1`:
-  - Require `hello-service.exe`.
-  - Start `hello-service` first, then `hello-view-service`, then `lil-d`.
-  - Update the description and final message.
-- `scripts/cleanup.ps1`:
-  - Add `hello-service` to the process list.
-- `build/topics.md` will list `hello-service` as publisher of `HelloWorldTopic` and `hello-view-service` as subscriber.
+`rust/lib/stations-dds/tests/field_metadata.rs`:
 
-## Tests
-
-- Greeting cycle: intervals in [15, 60] seconds, sequential advancement, wrapping, deterministic seeded behavior.
-- Attitude tests moved from the view service.
-- View relay: no data before 2s, NoConn at 2s, elapsed time increments, last attitude retained, recovery on a new sample.
-- Display mapping: no earth before the first valid sample; last valid attitude retained across invalid samples.
-- Text sizing: all view strings use one size derived from `MAX_TEXT`; `NoConn 00:00:00` is no wider than `MAX_TEXT`.
-- `dds-echo` view decode includes `valid`.
-- Existing workspace tests continue to pass.
+- Import `DdsFieldMetadata`, `DynamicPrimitiveKind`, `DynamicTypeSchema`, and `DynamicValue` through `stations_dds::cyclonedds`.
+- Build a `HelloWorldTopic` with a greeting and a non-default `Quaternion`.
+- Assert `HelloWorldTopic::field_names() == ["greeting", "attitude"]`.
+- Assert the schema name is `hello_world::HelloWorldTopic`.
+- Assert `greeting` is `DynamicTypeSchema::String { bound: None }`.
+- Assert `attitude` is the same schema as `math::Quaternion`.
+- Round-trip `HelloWorldTopic` through `to_dynamic_value`/`from_dynamic_value`.
+- Use `get_field`/`set_field` and assert the typed value changes.
+- Assert a wrong-type field value is rejected.
+- Assert a missing required field is rejected.
+- Repeat schema/round-trip coverage for `HelloWorldViewTopic`, including `valid: Boolean`.
 
 ## Verification
 
 ```powershell
 .\scripts\build.ps1 -Test
 .\scripts\build.ps1
-.\scripts\cleanup.ps1
-.\scripts\launch-rust.ps1
 ```
 
-1. `dds-echo` shows `HelloWorldTopic` from `hello-service` and `HelloWorldViewTopic` from the relay.
-2. The display renders the model-driven tilted earth and greeting.
-3. Stop `hello-service`: after 2 seconds the display keeps the last earth and shows `NoConn 00:00:02`, then counts upward.
-4. Restart `hello-service`: the display resumes valid data.
-5. Start only the view service/display without `hello-service`: after 2 seconds the NoConn greeting appears on the background, with no earth.
-6. Observe at least one greeting change and confirm the new Latin-script text renders correctly.
-7. `cleanup.ps1` stops `hello-service`, `hello-view-service`, and `lil-d`.
+- `build.ps1 -Test` must pass once; the new test is included in the workspace test run.
+- `build.ps1` must deploy successfully once.
+- No screenshots and no repeated UI runs.
+- If the new fork revision fails to compile or the generated metadata is incorrect, stop after the allowed iterations and report the failure.
 
-Do not iterate on screenshots or test builds; run the minimum verification once. If a problem appears or user input is needed, ask and stop.
+## Risks
 
-## Assumptions / open checks
+- **Revision drift:** two independent pins plus `Cargo.lock` must agree.
+- **Fork compatibility:** generated metadata is emitted unconditionally; a compile failure means the fork integration needs attention, not a local copy of the fork.
+- **Generated code visibility:** the generated file is temporary and not committed; verify it after regeneration.
+- **Scope:** `dds-echo` remains unchanged by design; its detail pane/send form are follow-up work.
 
-- The interpretation of "don't show it unless the service connects" is: **no earth before the first connection**, while the NoConn greeting still appears after the 2-second timeout.
-- The Yoruba wording is `Pẹlẹ o, ayé!`; verify font coverage and fall back to a plain-Latin transliteration only if necessary.
-- Model greeting changes are sequential with random intervals; no language is skipped.
+## Result
+
+Implementation complete and verified:
+
+- The fork is pinned to `952906b` in `rust/Cargo.toml` and `scripts/build.ps1`; `rust/Cargo.lock` resolves all fork packages at that rev.
+- Code generation emits `DdsFieldMetadata` for `math::Quaternion`, `hello_world::HelloWorldTopic`, and `hello_world::HelloWorldViewTopic`.
+- `stations-dds/tests/field_metadata.rs` passes five tests covering field enumeration, nested schemas, round-trips, get/set, invalid values, missing fields, and the view topic.
+- `.\scripts\build.ps1 -Test` passed and `.\scripts\build.ps1` deployed successfully.
+- The codegen install target is rev-keyed; without that, Cargo reused the old generator binary.
+- No `dds-echo` UI changes were made.
 
 ## Bookkeeping
 
-- `dds-echo-discovery-attribution` has been moved to `completed_stories.md` with its completion timestamp.
-- Implementation is complete: `build.ps1 -Test` passes and `build.ps1` deployed successfully. The story remains `in progress` pending user review; do not move it to `completed_stories.md` until the user asks to plan the next story.
+- `hello-service` was completed at `2026-10-27 10:08:01` and moved to `completed_stories.md`.
+- `topic-field-metadata` is `in progress` in `backlog.md`.
+- Do not move `topic-field-metadata` to `completed_stories.md` until the user asks to plan the next story.

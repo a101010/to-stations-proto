@@ -30,9 +30,10 @@
 
 ## Verification and iteration
 
-- Do not iterate on screenshots or test builds. They are expensive and time-consuming.
-- Run the minimum verification needed once.
-- If a problem appears, or user input is needed, ask and stop rather than looping.
+- Avoid unnecessary iteration on screenshots or test builds; they are expensive and time-consuming.
+- Run the minimum verification needed.
+- Up to three iterations are allowed before user input is required.
+- If a problem remains after three iterations, or user input is needed, ask and stop.
 
 ## Documentation
 

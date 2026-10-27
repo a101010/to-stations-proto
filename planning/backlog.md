@@ -30,24 +30,18 @@ Conventions:
 * Rust toolchain `stable-x86_64-pc-windows-msvc`.
 * A short repository path on Windows (`scripts/subst-repo.ps1`; see `architecture.md`, "Path length").
 * Eclipse Cyclone DDS C core (11.x) and the Microsoft loopback adapter named `StationsDDS` with IPv6 multicast.
-* The to-stations fork of `cyclonedds-rust` (`https://github.com/a101010/cyclonedds-rust`, branch `multifile`, rev `acef684`), consumed as a pinned git dependency (`planning/cyclonedds-build-plan.md`).
+* The to-stations fork of `cyclonedds-rust` (`https://github.com/a101010/cyclonedds-rust`, branch `multifile`, rev `952906b`), consumed as a pinned git dependency (`planning/cyclonedds-build-plan.md`).
 * HarfBuzz 14.6.0 with the experimental GPU library (`libharfbuzz-gpu`), installed to the external prefix (see the `harfbuzz` story).
 
 Third-party libraries are built/installed to an external prefix (for example `C:\Libraries`), never committed. Each install story records its component in `docs/versions.md`.
 
 **Done when.** `launch-rust.ps1` brings up the model service, the view service, and `lil-d` from `build/deploy`; `lil-d` shows the tilted, cube-mapped earth lit from the upper right with the greeting text rendered in the loaded font, its power button works, and the format manager switches between the default and hello-world formats. `dds-echo` observes every topic in the registry, `--topics` and `build/topics.md` match `contracts/`, and `cleanup.ps1` stops everything.
 
-### hello-service
-Create the hello_world model service (`hello-service`): publish `HelloWorldTopic` at 10 Hz with a greeting that cycles through Latin-script languages every 15-60 seconds, and with the earth attitude moved from the view service (23.5 degree tilt, 12-minute spin). The view service subscribes to `HelloWorldTopic` and relays `HelloWorldViewTopic` at 100 Hz. Add a validity flag to the view topic; after 2 seconds without model data, mark it invalid and show `NoConn hh:mm:ss` with the last received earth position. Before the service first connects, show the NoConn greeting after 2 seconds but no earth. Add the service to build/deploy, launch, and cleanup; update the view service contract.
-- **Depends on:** none.
-- **Minimal test:** `launch-rust.ps1` starts the model service, view service, and display; `dds-echo` shows `HelloWorldTopic` and `HelloWorldViewTopic`; the display renders the model-driven world; stopping `hello-service` shows the last earth and a counting `NoConn hh:mm:ss`; restarting resumes valid data; the greeting changes within 15-60 seconds; `cleanup.ps1` stops all three.
-- **Status:** in progress.
-
 ### topic-field-metadata
-Extend the fork's code generation (the `cyclonedds-build` codegen or `cyclonedds-derive`) to emit a per-struct field schema (reusing the generated `DynamicTypeSchema`/`DynamicValue` shapes) plus field get/set, so tools can build generic field views for display and editing without runtime reflection (Rust has none). Consumed by `dds-echo`'s detail pane and send form and by `tentacles-injector`.
-- **Depends on:** none (a fork change; re-pin the fork rev).
+Consume the fork's `DdsFieldMetadata` implementation (fork rev `952906b`): re-pin the Rust dependencies and codegen rev, regenerate the hello_world types, and add a `stations-dds` test that enumerates a generated topic's fields and round-trips a value through the typed sample. Do not change `dds-echo` in this story; the send form and detail-pane integration come later.
+- **Depends on:** none; the fork implementation is available at `952906b`.
 - **Minimal test:** enumerate a generated topic's fields from the metadata and round-trip a value to and from the typed sample.
-- **Status:** todo.
+- **Status:** in progress.
 
 ### dds-echo-send
 Add a send screen to `dds-echo`: the window becomes two tabs, **Capture** (the current UI) and **Send**. In the Send tab, choose a registered topic from `contracts/topics.toml`, fill in its fields, and publish the sample **once or periodically** at a chosen rate. Publishing uses `stations-dds` (a `Node` typed writer); per-type field forms come from `topic-field-metadata`.

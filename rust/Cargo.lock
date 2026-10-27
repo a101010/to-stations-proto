@@ -1009,7 +1009,7 @@ checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 [[package]]
 name = "cyclonedds"
 version = "3.0.0"
-source = "git+https://github.com/a101010/cyclonedds-rust?rev=acef68438ef3c8eae56c45afbecdbb89f3d3e115#acef68438ef3c8eae56c45afbecdbb89f3d3e115"
+source = "git+https://github.com/a101010/cyclonedds-rust?rev=952906b5018831683c0863cd11001bdac427ee10#952906b5018831683c0863cd11001bdac427ee10"
 dependencies = [
  "cyclonedds-derive",
  "cyclonedds-rust-sys",
@@ -1019,7 +1019,7 @@ dependencies = [
 [[package]]
 name = "cyclonedds-derive"
 version = "3.0.0"
-source = "git+https://github.com/a101010/cyclonedds-rust?rev=acef68438ef3c8eae56c45afbecdbb89f3d3e115#acef68438ef3c8eae56c45afbecdbb89f3d3e115"
+source = "git+https://github.com/a101010/cyclonedds-rust?rev=952906b5018831683c0863cd11001bdac427ee10#952906b5018831683c0863cd11001bdac427ee10"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1029,7 +1029,7 @@ dependencies = [
 [[package]]
 name = "cyclonedds-rust-sys"
 version = "1.2.0"
-source = "git+https://github.com/a101010/cyclonedds-rust?rev=acef68438ef3c8eae56c45afbecdbb89f3d3e115#acef68438ef3c8eae56c45afbecdbb89f3d3e115"
+source = "git+https://github.com/a101010/cyclonedds-rust?rev=952906b5018831683c0863cd11001bdac427ee10#952906b5018831683c0863cd11001bdac427ee10"
 dependencies = [
  "cyclonedds-src",
 ]
@@ -1037,7 +1037,7 @@ dependencies = [
 [[package]]
 name = "cyclonedds-src"
 version = "1.0.2"
-source = "git+https://github.com/a101010/cyclonedds-rust?rev=acef68438ef3c8eae56c45afbecdbb89f3d3e115#acef68438ef3c8eae56c45afbecdbb89f3d3e115"
+source = "git+https://github.com/a101010/cyclonedds-rust?rev=952906b5018831683c0863cd11001bdac427ee10#952906b5018831683c0863cd11001bdac427ee10"
 
 [[package]]
 name = "data-url"

@@ -183,3 +183,9 @@ Give `dds-echo` a discovery-only CycloneDDS participant and use the fork's built
 - **Completed:** 2026-10-27 07:48:08.
 - **Depends on:** none.
 - **Minimal test:** double-click `build\deploy\bin\dds-echo.exe` with the services running and no shell environment; `endpoints` is greater than zero, `HelloWorldViewTopic` samples are categorized under Known, and pressing Stop leaves retained rows attributed. The same holds with `dds-echo` started before or after the services, from an unrelated working directory, and with an invalid inherited `CYCLONEDDS_URI`; deployed binaries contain no repository path.
+
+### hello-service
+Create the hello_world model service (`hello-service`): publish `HelloWorldTopic` at 10 Hz with a greeting that cycles through Latin-script languages every 15-60 seconds, and with the earth attitude moved from the view service (23.5 degree tilt, 12-minute spin). The view service subscribes to `HelloWorldTopic` and relays `HelloWorldViewTopic` at 100 Hz. Add a validity flag to the view topic; after 2 seconds without model data, mark it invalid and show `NoConn hh:mm:ss` with the last received earth position. Before the service first connects, show the NoConn greeting after 2 seconds but no earth. Add the service to build/deploy, launch, and cleanup; update the view service contract.
+- **Completed:** 2026-10-27 10:08:01.
+- **Depends on:** none.
+- **Minimal test:** `launch-rust.ps1` starts the model service, view service, and display; `dds-echo` shows `HelloWorldTopic` and `HelloWorldViewTopic`; the display renders the model-driven world; stopping `hello-service` shows the last earth and a counting `NoConn hh:mm:ss`; restarting resumes valid data; the greeting changes within 15-60 seconds; `cleanup.ps1` stops all three.

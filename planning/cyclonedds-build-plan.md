@@ -4,7 +4,7 @@ Work described here is done in a separate repository (the fork). This document i
 
 ## Status
 
-Increment 1 (milestones 1-5) is implemented and tested in the fork, which lives at `https://github.com/a101010/cyclonedds-rust` on branch `multifile`, rev `acef68438ef3c8eae56c45afbecdbb89f3d3e115` (base upstream `mzet97/cyclonedds-rust` at `feb7e7d`). All stories in the fork's own `planning/backlog.md` are `done`. to-stations now consumes the fork; see "Consumption in to-stations" below and `planning/current_story.md`.
+Increment 1 (milestones 1-5) is implemented and tested in the fork, which lives at `https://github.com/a101010/cyclonedds-rust` on branch `multifile`, rev `952906b5018831683c0863cd11001bdac427ee10` (base upstream `mzet97/cyclonedds-rust` at `feb7e7d`). Increment 2 adds the generated `DdsFieldMetadata` trait and implementations on the same rev; the fork's metadata story remains in progress pending review. to-stations now consumes the fork; see "Consumption in to-stations" below and `planning/current_story.md`.
 
 ## Purpose
 
@@ -100,8 +100,9 @@ pub struct CompileOptions {
 
 ## Consumption in to-stations
 
-- Chosen mechanism: a git dependency on the fork workspace pinned to `rev = acef68438ef3c8eae56c45afbecdbb89f3d3e115`, added in `rust/Cargo.toml` `[workspace.dependencies]`. Cargo resolves `cyclonedds`, `cyclonedds-derive`, `cyclonedds-rust-sys`, and `cyclonedds-src` from that same rev.
+- Chosen mechanism: a git dependency on the fork workspace pinned to `rev = 952906b5018831683c0863cd11001bdac427ee10`, added in `rust/Cargo.toml` `[workspace.dependencies]`. Cargo resolves `cyclonedds`, `cyclonedds-derive`, `cyclonedds-rust-sys`, and `cyclonedds-src` from that same rev.
 - The `rust-dds-binding` story wires the `cyclonedds` crate into `stations-dds` and proves a `DdsType` round-trip; the `hello-world-idl` story runs the fork's `cyclonedds-idlc` CLI (`--no-idlc`) from `scripts/build.ps1` to generate Rust into `build/gen/rust`, and the crate `include!`s it. IDL uses top-level modules (no vendor root), one top-level module per file (a module is not reopened across files), and a single root compiled with `#include`s inlined.
+- Increment 2 makes codegen emit `cyclonedds::DdsFieldMetadata` impls for generated types. `stations-dds` consumes the generated schemas and conversions; `dds-echo`-side UI use is deferred.
 - The pinned rev and its base (`main` @ `feb7e7d`) are recorded in `docs/versions.md`.
 
 ## Milestones
