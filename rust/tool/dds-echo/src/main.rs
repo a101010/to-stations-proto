@@ -19,6 +19,9 @@ mod ui {
 }
 
 use std::cell::{Cell, RefCell};
+use std::ffi::CString;
+use std::fs::{File, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -34,8 +37,9 @@ use crate::model::{
 use crate::ui::MainWindow;
 
 use stations_dds::contract::TopicRegistry;
-use stations_dds::cyclonedds::{BuiltinEndpointSample, DataReader};
-use stations_dds::dds::Node;
+use stations_dds::cyclonedds::{BuiltinEndpointSample, DataReader, DomainParticipant};
+
+use cyclonedds_rust_sys as cdds;
 
 /// The UI refresh / capture-drain tick.
 const TICK: Duration = Duration::from_millis(100);
@@ -63,9 +67,9 @@ struct Args {
     #[arg(long, default_value_t = 0)]
     domain: u32,
 
-    /// Topic registry (`contracts/topics.toml`).
-    #[arg(long, default_value = concat!(env!("REPO_ROOT"), "/contracts/topics.toml"))]
-    registry: String,
+    /// Topic registry (`topics.toml`); defaults to the deploy config directory.
+    #[arg(long)]
+    registry: Option<PathBuf>,
 
     /// CycloneDDS configuration XML for the discovery participant.
     #[arg(long)]
@@ -74,21 +78,173 @@ struct Args {
     /// Disable the discovery participant and use passive capture only.
     #[arg(long)]
     no_discovery: bool,
+
+    /// Discovery diagnostic log path.
+    #[arg(long)]
+    discovery_log: Option<PathBuf>,
+}
+
+/// Append-only discovery diagnostics. dds-echo is a GUI app in release builds,
+/// so double-click runs have no stderr to inspect.
+struct DiscoveryLog {
+    file: RefCell<Option<File>>,
+}
+
+impl DiscoveryLog {
+    fn open(explicit: Option<&Path>) -> Self {
+        let path = explicit
+            .map(Path::to_path_buf)
+            .or_else(default_log_path);
+        let mut file = None;
+        if let Some(path) = path {
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            if let Ok(opened) = OpenOptions::new().create(true).append(true).open(&path) {
+                file = Some(opened);
+                eprintln!("dds-echo discovery log: {}", path.display());
+            }
+        }
+        if file.is_none() {
+            let path = std::env::temp_dir().join("dds-echo-discovery.log");
+            if let Ok(opened) = OpenOptions::new().create(true).append(true).open(&path) {
+                file = Some(opened);
+                eprintln!("dds-echo discovery log: {}", path.display());
+            }
+        }
+        Self {
+            file: RefCell::new(file),
+        }
+    }
+
+    fn log(&self, message: impl std::fmt::Display) {
+        if let Some(file) = self.file.borrow_mut().as_mut() {
+            let _ = writeln!(file, "{message}");
+            let _ = file.flush();
+        }
+    }
+}
+
+/// The deploy root derived from the executable location: `<exe_dir>/..`.
+fn deploy_root() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let bin = exe.parent()?;
+    bin.parent().map(Path::to_path_buf)
+}
+
+fn default_log_path() -> Option<PathBuf> {
+    deploy_root()
+        .or_else(|| {
+            std::env::current_exe()
+                .ok()
+                .and_then(|exe| exe.parent().map(Path::to_path_buf))
+        })
+        .map(|dir| dir.join("dds-echo-discovery.log"))
+}
+
+fn resolve_config(explicit: Option<&Path>, log: &DiscoveryLog) -> Option<PathBuf> {
+    if let Some(path) = explicit {
+        if path.is_file() {
+            return Some(path.to_path_buf());
+        }
+        log.log(format!(
+            "explicit CycloneDDS config not found: {}",
+            path.display()
+        ));
+    }
+    if let Some(deploy) = deploy_root() {
+        let path = deploy.join("config").join("cyclonedds-config.xml");
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        let path = cwd.join("DDS").join("cyclonedds-config.xml");
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    None
+}
+
+fn resolve_registry(explicit: Option<&Path>, log: &DiscoveryLog) -> Option<PathBuf> {
+    if let Some(path) = explicit {
+        if path.is_file() {
+            return Some(path.to_path_buf());
+        }
+        log.log(format!("explicit registry not found: {}", path.display()));
+    }
+    if let Some(deploy) = deploy_root() {
+        let path = deploy.join("config").join("topics.toml");
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        let path = cwd.join("contracts").join("topics.toml");
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    None
+}
+
+fn ignore_inherited_dds_env(log: &DiscoveryLog) {
+    if let Some(inherited) = std::env::var_os("CYCLONEDDS_URI") {
+        log.log(format!("ignoring inherited CYCLONEDDS_URI={inherited:?}"));
+        std::env::remove_var("CYCLONEDDS_URI");
+    }
+}
+
+/// Owns an explicitly created DDS domain so the participant uses the supplied
+/// configuration without relying on `CYCLONEDDS_URI`.
+struct DomainGuard(cdds::dds_entity_t);
+
+impl Drop for DomainGuard {
+    fn drop(&mut self) {
+        unsafe {
+            cdds::dds_delete(self.0);
+        }
+    }
 }
 
 /// A discovery-only participant and the builtin readers that identify writers.
 struct DiscoverySource {
-    // Declared before the node so the readers drop before the participant.
+    // Declared before the participant so the readers drop first; the domain is
+    // deleted after its participant.
     publications: DataReader<BuiltinEndpointSample>,
     subscriptions: DataReader<BuiltinEndpointSample>,
-    _node: Node,
+    _participant: DomainParticipant,
+    _domain: Option<DomainGuard>,
     last_poll_ms: u64,
 }
 
 impl DiscoverySource {
-    fn new(domain: u32, registry: TopicRegistry) -> Result<Self, String> {
-        let node = Node::new(domain, registry).map_err(|e| e.to_string())?;
-        let participant = node.participant();
+    fn new(domain: u32, config: Option<&Path>, log: &DiscoveryLog) -> Result<Self, String> {
+        let domain_guard = match config {
+            Some(path) => {
+                let xml = std::fs::read_to_string(path)
+                    .map_err(|e| format!("read {}: {e}", path.display()))?;
+                let xml = CString::new(xml).map_err(|e| format!("config contains NUL: {e}"))?;
+                let handle = unsafe {
+                    cdds::dds_create_domain(domain as cdds::dds_domainid_t, xml.as_ptr())
+                };
+                if handle <= 0 {
+                    return Err(format!("dds_create_domain failed: {handle}"));
+                }
+                log.log(format!(
+                    "created domain {domain} with config {}",
+                    path.display()
+                ));
+                Some(DomainGuard(handle))
+            }
+            None => {
+                log.log("no CycloneDDS config found; creating a default domain");
+                None
+            }
+        };
+
+        let participant = DomainParticipant::new(domain).map_err(|e| e.to_string())?;
         let publications = participant
             .create_builtin_publication_reader()
             .map_err(|e| e.to_string())?;
@@ -96,14 +252,21 @@ impl DiscoverySource {
             .create_builtin_subscription_reader()
             .map_err(|e| e.to_string())?;
         Ok(Self {
-            _node: node,
             publications,
             subscriptions,
+            _participant: participant,
+            _domain: domain_guard,
             last_poll_ms: 0,
         })
     }
 
-    fn poll(&mut self, now_ms: u64, discovery: &mut Discovery, force: bool) -> usize {
+    fn poll(
+        &mut self,
+        now_ms: u64,
+        discovery: &mut Discovery,
+        force: bool,
+        log: &DiscoveryLog,
+    ) -> usize {
         if !force
             && self.last_poll_ms != 0
             && now_ms.saturating_sub(self.last_poll_ms) < DISCOVERY_POLL_MS
@@ -115,28 +278,42 @@ impl DiscoverySource {
         let mut learned = 0;
         match self.publications.read() {
             Ok(samples) => {
+                log.log(format!(
+                    "poll t={now_ms}ms publications={}",
+                    samples.len()
+                ));
                 for sample in &samples {
                     learned += learn_builtin_endpoint(
                         discovery,
                         sample,
                         model::EndpointKind::Writer,
+                        log,
                     );
                 }
             }
-            Err(e) => eprintln!("dds-echo discovery: publications read failed: {e}"),
+            Err(e) => log.log(format!("publications read failed: {e}")),
         }
         match self.subscriptions.read() {
             Ok(samples) => {
+                log.log(format!(
+                    "poll t={now_ms}ms subscriptions={}",
+                    samples.len()
+                ));
                 for sample in &samples {
                     learned += learn_builtin_endpoint(
                         discovery,
                         sample,
                         model::EndpointKind::Reader,
+                        log,
                     );
                 }
             }
-            Err(e) => eprintln!("dds-echo discovery: subscriptions read failed: {e}"),
+            Err(e) => log.log(format!("subscriptions read failed: {e}")),
         }
+        log.log(format!(
+            "poll learned={learned} total_endpoints={}",
+            discovery.endpoints()
+        ));
         learned
     }
 
@@ -149,21 +326,34 @@ fn learn_builtin_endpoint(
     discovery: &mut Discovery,
     sample: &BuiltinEndpointSample,
     kind: model::EndpointKind,
+    log: &DiscoveryLog,
 ) -> usize {
     let topic = sample.topic_name();
+    let type_name = sample.type_name_value();
+    let key = sample.key();
+    let participant_key = sample.participant_key();
     if topic.is_empty() || topic.starts_with("DCPS") {
         return 0;
     }
-    let key = sample.key();
-    let participant_key = sample.participant_key();
     let endpoint = model::Endpoint {
         guid: rtps::hex(&key.v),
         prefix: rtps::hex(&participant_key.v[..12]),
         kind,
         topic,
-        type_name: sample.type_name_value(),
+        type_name,
     };
-    usize::from(discovery.learn_endpoint(endpoint))
+    let is_new = discovery.learn_endpoint(endpoint.clone());
+    if is_new {
+        log.log(format!(
+            "learned {} topic={} type={} guid={} prefix={}",
+            endpoint.kind.label(),
+            endpoint.topic,
+            endpoint.type_name,
+            endpoint.guid,
+            endpoint.prefix
+        ));
+    }
+    usize::from(is_new)
 }
 
 /// Shared state behind the UI.
@@ -190,6 +380,8 @@ struct State {
     dropped: Cell<u64>,
     /// Records evicted from the history (observed, then trimmed from the table).
     trimmed: Cell<u64>,
+    /// Discovery diagnostics file.
+    log: DiscoveryLog,
     /// The registry's topics (name -> IDL type), loaded at startup.
     known_topics: KnownTopics,
 }
@@ -399,7 +591,7 @@ fn poll_discovery(
         match source.as_mut() {
             Some(source) => {
                 let mut discovery = state.discovery.borrow_mut();
-                source.poll(now_ms, &mut discovery, force)
+                source.poll(now_ms, &mut discovery, force, &state.log)
             }
             None => 0,
         }
@@ -456,8 +648,17 @@ fn tick(
             let mut history = state.history.borrow_mut();
             for mut record in batch {
                 state.discovery.borrow_mut().observe_and_attr(&mut record);
+                let topic = record.topic.clone();
+                let first_for_topic = topic
+                    .as_deref()
+                    .is_some_and(|topic| state.counts.borrow().count(topic) == 0);
                 state.stats.borrow_mut().observe(&record);
                 state.counts.borrow_mut().observe(&record);
+                if first_for_topic {
+                    if let Some(topic) = &topic {
+                        state.log.log(format!("first record attributed to topic {topic}"));
+                    }
+                }
                 trimmed += history.push(record).len();
             }
             state.dropped.set(queue.dropped());
@@ -505,11 +706,18 @@ fn tick(
 
 /// Load the topic registry; on failure, log and return `None` so capture can
 /// still run with an empty known-topic set.
-fn load_registry(path: &str) -> Option<TopicRegistry> {
-    match TopicRegistry::load(Path::new(path)) {
-        Ok(registry) => Some(registry),
+fn load_registry(path: &Path, log: &DiscoveryLog) -> Option<TopicRegistry> {
+    match TopicRegistry::load(path) {
+        Ok(registry) => {
+            log.log(format!("loaded registry {}", path.display()));
+            Some(registry)
+        }
         Err(e) => {
-            eprintln!("dds-echo: failed to load registry {path}: {e}");
+            log.log(format!(
+                "failed to load registry {}: {e}",
+                path.display()
+            ));
+            eprintln!("dds-echo: failed to load registry {}: {e}", path.display());
             None
         }
     }
@@ -523,65 +731,39 @@ fn known_from_registry(registry: &TopicRegistry) -> KnownTopics {
     known
 }
 
-/// Point CycloneDDS at the shared StationsDDS configuration before creating the
-/// discovery participant. An explicit path wins; otherwise an existing
-/// `CYCLONEDDS_URI` is respected, then the deployed or source configuration.
-fn install_dds_config(explicit: Option<&Path>) {
-    let path = if let Some(path) = explicit {
-        Some(path.to_path_buf())
-    } else if std::env::var_os("CYCLONEDDS_URI").is_some() {
-        None
-    } else {
-        default_dds_config()
-    };
-
-    if let Some(path) = path {
-        let path = path.to_string_lossy().replace('\\', "/");
-        std::env::set_var("CYCLONEDDS_URI", format!("file://{path}"));
-    } else if std::env::var_os("CYCLONEDDS_URI").is_none() {
-        eprintln!("dds-echo: no CycloneDDS config found; discovery uses defaults");
-    }
-}
-
-fn default_dds_config() -> Option<PathBuf> {
-    let deployed = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(Path::to_path_buf))
-        .and_then(|bin| bin.parent().map(|deploy| deploy.join("config")))
-        .map(|config| config.join("cyclonedds-config.xml"));
-    if deployed.as_ref().is_some_and(|path| path.is_file()) {
-        return deployed;
-    }
-
-    let source = PathBuf::from(env!("REPO_ROOT"))
-        .join("DDS")
-        .join("cyclonedds-config.xml");
-    source.is_file().then_some(source)
-}
-
 fn main() -> Result<(), slint::PlatformError> {
     let args = Args::parse();
-    let registry = load_registry(&args.registry);
+    let log = DiscoveryLog::open(args.discovery_log.as_deref());
+    log.log(format!("dds-echo starting; domain={}", args.domain));
+
+    ignore_inherited_dds_env(&log);
+    let config = resolve_config(args.dds_config.as_deref(), &log);
+    match &config {
+        Some(path) => log.log(format!("using CycloneDDS config {}", path.display())),
+        None => log.log("no CycloneDDS config found; discovery uses defaults"),
+    }
+
+    let registry_path = resolve_registry(args.registry.as_deref(), &log);
+    let registry = registry_path
+        .as_deref()
+        .and_then(|path| load_registry(path, &log));
     let known_topics = registry
         .as_ref()
         .map(known_from_registry)
         .unwrap_or_default();
+
     let discovery_source = if args.no_discovery {
+        log.log("discovery disabled by --no-discovery");
         None
     } else {
-        match registry {
-            Some(registry) => {
-                install_dds_config(args.dds_config.as_deref());
-                match DiscoverySource::new(args.domain, registry) {
-                    Ok(source) => Some(source),
-                    Err(e) => {
-                        eprintln!("dds-echo: discovery participant disabled: {e}");
-                        None
-                    }
-                }
+        match DiscoverySource::new(args.domain, config.as_deref(), &log) {
+            Ok(source) => {
+                log.log("discovery participant created");
+                Some(source)
             }
-            None => {
-                eprintln!("dds-echo: discovery participant disabled: registry unavailable");
+            Err(e) => {
+                log.log(format!("discovery participant creation failed: {e}"));
+                eprintln!("dds-echo: discovery participant disabled: {e}");
                 None
             }
         }
@@ -632,6 +814,7 @@ fn main() -> Result<(), slint::PlatformError> {
         selected_id: Cell::new(None),
         dropped: Cell::new(0),
         trimmed: Cell::new(0),
+        log,
         known_topics,
     });
 

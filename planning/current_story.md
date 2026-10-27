@@ -34,7 +34,7 @@ The existing pieces are in place:
 
 ## Decisions
 
-1. **Config is exe-relative.** Explicit `--dds-config` wins; otherwise use `<exe_dir>/../config/cyclonedds-config.xml`; otherwise a development CWD fallback `<cwd>/DDS/cyclonedds-config.xml`. Ignore any inherited `CYCLONEDDS_URI`; log if one was overridden. Set `CYCLONEDDS_URI` internally from the resolved path before creating the participant.
+1. **Config is exe-relative.** Explicit `--dds-config` wins; otherwise use `<exe_dir>/../config/cyclonedds-config.xml`; otherwise a development CWD fallback `<cwd>/DDS/cyclonedds-config.xml`. Ignore and remove any inherited `CYCLONEDDS_URI`. Create the DDS domain explicitly with the resolved XML through `dds_create_domain`, so CycloneDDS never has to read configuration from the environment.
 2. **Registry is exe-relative.** Explicit `--registry` wins; otherwise `<exe_dir>/../config/topics.toml`; otherwise `<cwd>/contracts/topics.toml` for development. No `REPO_ROOT` default.
 3. **Discovery is independent of the registry.** Create the participant and builtin readers from a raw `DomainParticipant`, not `Node::new`. The registry is only for Known/Unknown grouping.
 4. Use builtin publication and subscription readers only; skip endpoints with empty topic names and built-in `DCPS*` topics.
@@ -54,7 +54,7 @@ Add helpers that derive the deploy root from `current_exe()` using parent-direct
 - Config: explicit `--dds-config`, else `<deploy>/config/cyclonedds-config.xml`, else `<cwd>/DDS/cyclonedds-config.xml` for development.
 - Registry: explicit `--registry`, else `<deploy>/config/topics.toml`, else `<cwd>/contracts/topics.toml` for development.
 - Log the chosen path and whether it exists.
-- Override `CYCLONEDDS_URI` with the resolved config; log if an inherited value was ignored.
+- Ignore and remove an inherited `CYCLONEDDS_URI`; log it. Create the domain explicitly with the resolved XML through `dds_create_domain` before creating the participant.
 
 Do not use `REPO_ROOT` or embed absolute repository paths in deployed code.
 
@@ -66,12 +66,14 @@ Replace `Node`/`TopicRegistry` ownership in `DiscoverySource` with a raw `Domain
 struct DiscoverySource {
     publications: DataReader<BuiltinEndpointSample>,
     subscriptions: DataReader<BuiltinEndpointSample>,
-    participant: DomainParticipant,
+    _participant: DomainParticipant,
+    _domain: Option<DomainGuard>,
     last_poll_ms: u64,
 }
 ```
 
-- Create the participant with the resolved config/domain at app startup.
+- Create the DDS domain explicitly with the resolved XML through `dds_create_domain`, then create the participant in that domain.
+- Keep the domain in a `DomainGuard` that deletes it after the participant on drop.
 - Create the builtin readers from the participant.
 - Keep readers declared before the participant so they drop first.
 - Poll every 500 ms; map samples as before; return the number of newly learned endpoints.
@@ -129,12 +131,20 @@ Manual verification:
 - Polling on the UI thread avoids `Send` requirements; keep the interval low-frequency.
 - A custom deployment can override the exe-relative config with `--dds-config`.
 - Development CWD fallbacks are not part of the deploy contract; the deploy layout is exe-relative only.
+- If no config is found, dds-echo creates a default DDS domain and logs a diagnostic; discovery may then see no StationsDDS endpoints.
 
 ## Implementation status
 
-- The first discovery-participant attempt is committed but failed from a double-clicked deploy exe: Known topics loaded, `endpoints: 0`, all rows `unidentified`.
-- The current plan replaces environment/`REPO_ROOT` resolution with authoritative exe-relative config and registry paths, decouples discovery from the registry, and adds diagnostics.
-- The story remains **in progress**.
+- The first discovery-participant attempt failed because setting `CYCLONEDDS_URI` inside the process does not make CycloneDDS use the config; a double-clicked deploy exe therefore used default settings and saw `endpoints: 0`.
+- Implemented: authoritative exe-relative config and registry paths, explicit `dds_create_domain` with the config XML, raw `DomainParticipant` discovery independent of the registry, inherited environment removal, discovery logging, and removal of runtime `REPO_ROOT` defaults from `dds-echo`, `hello-view-service`, and `display-lib`.
+- Added `--remap-path-prefix` to the release Rust build so deployed binaries do not carry repository paths in source/panic metadata.
+- Verified with the `T:\` deploy exe, no shell environment, from an unrelated working directory:
+  - both start orders learn the `HelloWorldViewTopic` writer/reader;
+  - `total_endpoints` becomes 2 and the first data record is attributed to `HelloWorldViewTopic`;
+  - a deliberately bad inherited `CYCLONEDDS_URI` is ignored;
+  - Stop remains responsive.
+- The 64 `dds-echo` tests pass; deployed binaries no longer contain the repository path.
+- The story remains **in progress** pending the user's own test.
 
 ## Bookkeeping
 

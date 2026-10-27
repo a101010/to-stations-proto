@@ -261,6 +261,11 @@ impl TopicCounts {
         }
     }
 
+    /// Number of observed records attributed to `topic`.
+    pub fn count(&self, topic: &str) -> usize {
+        self.counts.get(topic).copied().unwrap_or(0)
+    }
+
     /// Known topics (0 if unseen), then unregistered topics seen and an
     /// `unidentified` row when there are unattributed datagrams, sorted.
     pub fn rows(&self, known: &KnownTopics) -> Vec<TopicRow> {

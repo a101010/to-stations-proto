@@ -60,6 +60,10 @@ Write-Host "Generated $(Join-Path $genDir 'hello_world.rs')"
 
 # Build the Rust workspace. Cargo reads .cargo/config.toml at the repository root
 # (target-dir and REPO_ROOT), so it must be invoked from there.
+#
+# Deployed binaries must not carry the repository path in panic/source metadata.
+$remap = "--remap-path-prefix=$repoRoot=/app"
+if ($env:RUSTFLAGS) { $env:RUSTFLAGS = "$env:RUSTFLAGS $remap" } else { $env:RUSTFLAGS = $remap }
 Push-Location $repoRoot
 try {
     if ($Test) {

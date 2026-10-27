@@ -103,8 +103,8 @@ fn assets_root() -> std::path::PathBuf {
         .unwrap_or_else(|| std::path::PathBuf::from("assets"))
 }
 
-/// The contracts directory: the deploy root's `config/`, else the repository's
-/// `contracts/` (so a debug build run from the repository still finds it).
+/// The contracts directory: the deploy root's `config/`, else the current
+/// working directory's `contracts/` for a development build.
 fn config_root() -> std::path::PathBuf {
     let deployed = std::env::current_exe()
         .ok()
@@ -115,7 +115,9 @@ fn config_root() -> std::path::PathBuf {
             return dir.clone();
         }
     }
-    std::path::PathBuf::from(env!("REPO_ROOT")).join("contracts")
+    std::env::current_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .join("contracts")
 }
 
 thread_local! {

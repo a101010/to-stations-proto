@@ -4,6 +4,7 @@ members = ["lib/stations-dds", "lib/display-lib", "lib/harfbuzz", "service/hello
 
 [workspace.dependencies]
 cyclonedds = { git = "https://github.com/a101010/cyclonedds-rust", rev = "acef68438ef3c8eae56c45afbecdbb89f3d3e115", default-features = false, features = ["native"] }
+cyclonedds-rust-sys = { git = "https://github.com/a101010/cyclonedds-rust", rev = "acef68438ef3c8eae56c45afbecdbb89f3d3e115", default-features = false }
 harfbuzz = { path = "lib/harfbuzz" }
 stations-dds = { path = "lib/stations-dds" }
 libloading = "0.8"

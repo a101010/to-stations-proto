@@ -29,7 +29,7 @@ struct Args {
     #[arg(long, default_value_t = 10)]
     rate_ms: u64,
 
-    /// Contracts directory (default: `<exe_dir>/../config`, else `REPO_ROOT/contracts`).
+    /// Contracts directory (default: `<exe_dir>/../config`, else `./contracts`).
     #[arg(long)]
     config: Option<PathBuf>,
 
@@ -80,7 +80,7 @@ fn run(args: &Args) -> Result<(), String> {
 }
 
 /// The contracts directory: an explicit `--config`, else `<exe_dir>/../config`,
-/// else `REPO_ROOT/contracts` (so `cargo run` works from the repository).
+/// else `./contracts` for a development build.
 fn contracts_dir(explicit: Option<&Path>) -> PathBuf {
     if let Some(path) = explicit {
         return path.to_path_buf();
@@ -94,5 +94,7 @@ fn contracts_dir(explicit: Option<&Path>) -> PathBuf {
             return dir.clone();
         }
     }
-    PathBuf::from(env!("REPO_ROOT")).join("contracts")
+    std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join("contracts")
 }

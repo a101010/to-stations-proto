@@ -1058,6 +1058,7 @@ name = "dds-echo"
 version = "0.0.0"
 dependencies = [
  "clap",
+ "cyclonedds-rust-sys",
  "if-addrs",
  "slint",
  "slint-build",
