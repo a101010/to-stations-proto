@@ -195,3 +195,9 @@ Consume the fork's `DdsFieldMetadata` implementation (fork rev `952906b`): re-pi
 - **Completed:** 2026-10-27 15:31:10.
 - **Depends on:** none.
 - **Minimal test:** `rust/lib/stations-dds/tests/field_metadata.rs` enumerates `HelloWorldTopic`/`HelloWorldViewTopic` fields from the metadata and round-trips typed values through the dynamic value conversions.
+
+### dds-echo-send
+Add a send screen to `dds-echo`: the window becomes two tabs, **Capture** (the current UI) and **Send**. In the Send tab, choose a registered topic from `contracts/topics.toml`, fill in its fields, and publish the sample **once or periodically** at a chosen rate. Publishing uses `stations-dds` (a `Node` typed writer); per-type field forms come from `topic-field-metadata`. Send reports matched subscribers and does not claim success when nothing is transmitted. Label dds-echo's own SPDP/SEDP as `self` discovery and make it filterable.
+- **Completed:** 2026-11-04 13:23:16.
+- **Depends on:** none.
+- **Minimal test:** with the fleet running, fill the hello-world fields and press Send; subscribers receive the sample and it appears on Capture with sender `self`; with no subscriber, Send reports that it was not transmitted. The tool's own periodic discovery is labeled `self`/`discovery` and can be hidden.

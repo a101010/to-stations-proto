@@ -178,6 +178,11 @@ The repository is therefore required to live at a short path on Windows. `script
 
 Each configuration has a launch script; all configurations share `cleanup.ps1`. `scripts/verify-loopback.ps1` verifies the loopback adapter and its IPv6 prerequisites; creating the adapter is a documented manual step (see `docs/`). Launch and cleanup scripts operate only on `build/deploy/`.
 
+### Single-instance guard for manually launched GUI tools
+Manually launched singleton GUI tools use a Windows named-mutex guard from the shared `single-instance` library (`rust/lib/single-instance`). `dds-echo` is the first user; future manually launched singleton tools opt in. The mutex name is `Local\to-stations-<tool>`, scoped to the Windows session. A second launch finds the existing window by its stable title, restores and foregrounds it, then exits without creating DDS participants, logging a second startup, or creating another window. `--help` and `--version` still work because argument parsing happens before the guard.
+
+The guard is not used by fleet-launched applications or by per-station/per-display windows (`lil-d`, `big-d`, `paws`, the services, or the launch scripts), because multiple instances are legitimate there. Window titles are the activation key, so every tool opting in must keep a stable title.
+
 ## Deferred decisions
 * displayLib internal architecture: its top-level modules are `formats` (one submodule per format), the rendering capabilities `text`, `earth`, and `shader`, and `format_manager`; `mesh` is added later. `shader` holds the shader compile/link helpers shared by `text` and `earth`; `mesh` is extracted when a second mesh user appears. `format_manager` owns the format registry (the default and hello-world formats) and the active format, and hit-tests forwarded pointer input against the region it was last asked to render. A format's unique details (colors, geometry, strings, its mesh and shaders) live in its own submodule; shared code is extracted only when a second format needs it. The default format is retained at `formats/default.rs` and reactivated by the format manager. It may still split into smaller libraries. The format manager has a view service, a control service, and one or more displayLib modules.
 * `test/` layout.
