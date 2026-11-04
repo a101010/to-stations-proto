@@ -147,6 +147,8 @@ export component MainWindow inherits Window {
     in-out property <bool> running: false;
     // Follow the live tail; cleared when the user scrolls up.
     in-out property <bool> follow: true;
+    // Hide records originating from dds-echo's own participant.
+    in-out property <bool> hide-self: false;
 
     in-out property <int> packets: 0;
     in-out property <int> bytes: 0;
@@ -190,6 +192,7 @@ export component MainWindow inherits Window {
     callback clear();
     callback select(int);
     callback dismiss-error();
+    callback hide-self-changed(bool);
 
     // Topic selection (the center filter) and its context menu.
     callback toggle-topic(string);
@@ -271,6 +274,11 @@ export component MainWindow inherits Window {
             Button { text: "Start"; enabled: !root.running; clicked => { root.start(); } }
             Button { text: "Stop"; enabled: root.running; clicked => { root.stop(); } }
             Button { text: "Clear"; clicked => { root.clear(); } }
+            CheckBox {
+                text: "Hide self";
+                checked: root.hide-self;
+                toggled => { root.hide-self-changed(self.checked); }
+            }
             Rectangle { width: 12px; }
             Text { text: "iface"; color: #9a9a9a; vertical-alignment: center; }
             LineEdit { text: root.iface; read-only: root.running; min-width: 110px; }

@@ -207,6 +207,20 @@ impl TopicWriter {
         }
     }
 
+    /// The number of matched DDS readers for this writer.
+    pub fn matched_readers(&self) -> Result<usize, String> {
+        match self {
+            TopicWriter::HelloWorld(writer) => writer
+                .matched_subscriptions()
+                .map(|handles| handles.len())
+                .map_err(|e| e.to_string()),
+            TopicWriter::HelloWorldView(writer) => writer
+                .matched_subscriptions()
+                .map(|handles| handles.len())
+                .map_err(|e| e.to_string()),
+        }
+    }
+
     pub fn write_dynamic(&self, value: &DynamicValue) -> Result<(), String> {
         match self {
             TopicWriter::HelloWorld(writer) => {
@@ -417,7 +431,14 @@ fn set_path_parts(
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use std::sync::Mutex;
     use std::time::{Duration, Instant};
+
+    static DDS_LOCK: Mutex<()> = Mutex::new(());
+
+    fn dds_guard() -> std::sync::MutexGuard<'static, ()> {
+        DDS_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
 
     fn repo_root() -> PathBuf {
         PathBuf::from(env!("REPO_ROOT"))
@@ -514,6 +535,7 @@ mod tests {
 
     #[test]
     fn sends_a_form_through_the_typed_writer() {
+        let _guard = dds_guard();
         std::env::set_var(
             "CYCLONEDDS_URI",
             format!("file://{}/DDS/cyclonedds-config.xml", repo_root().display()),
@@ -540,6 +562,32 @@ mod tests {
                 return;
             }
             assert!(Instant::now() < deadline, "no sample received");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    #[test]
+    fn matched_readers_tracks_a_subscriber() {
+        let _guard = dds_guard();
+        std::env::set_var(
+            "CYCLONEDDS_URI",
+            format!("file://{}/DDS/cyclonedds-config.xml", repo_root().display()),
+        );
+        let registry =
+            stations_dds::contract::TopicRegistry::load(&repo_root().join("contracts/topics.toml"))
+                .unwrap();
+        let node = Node::new(0, registry).unwrap();
+        let writer =
+            TopicWriter::new(&node, "HelloWorldTopic", "hello_world::HelloWorldTopic").unwrap();
+        assert_eq!(writer.matched_readers().unwrap(), 0);
+
+        let _reader = node.reader::<HelloWorldTopic>("HelloWorldTopic").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if writer.matched_readers().unwrap() > 0 {
+                return;
+            }
+            assert!(Instant::now() < deadline, "writer did not match the reader");
             std::thread::sleep(Duration::from_millis(50));
         }
     }

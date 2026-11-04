@@ -159,6 +159,8 @@ $env:CYCLONEDDS_URI = 'file://T:/DDS/cyclonedds-config.xml'
 
 `dds-echo` captures DDSI-RTPS multicast so traffic can be inspected. Its **Send** tab publishes any topic registered in `contracts/topics.toml`: choose the topic, fill in the generated fields, then send once or periodically at the chosen interval. Publishing uses `stations-dds` and the same DDS configuration as capture, so a sent sample appears on the Capture tab; a unique greeting makes it easy to identify.
 
+DDS writers transmit user data only to matched readers. Send shows the number of matched subscribers and reports that nothing was transmitted when there are none; start the fleet (or another subscriber for the topic) before sending. `dds-echo`'s own discovery participant emits an SPDP announcement roughly every 8 seconds (the default 10-second lease); Capture labels it `self`/`discovery`, and the **Hide self** checkbox removes it from the view.
+
 To generate traffic while it is capturing, use the committed wrappers under `scripts/` (each points the source at `DDS/cyclonedds-config.xml` and makes `ddsc.dll` available):
 
 ```

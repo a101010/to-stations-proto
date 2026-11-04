@@ -39,7 +39,9 @@ use crate::send::{schema_for, SendForm, TopicWriter};
 use crate::ui::MainWindow;
 
 use stations_dds::contract::{TopicDef, TopicRegistry};
-use stations_dds::cyclonedds::{BuiltinEndpointSample, DataReader, DomainParticipant};
+use stations_dds::cyclonedds::{
+    BuiltinEndpointSample, DataReader, DdsEntity, DomainParticipant,
+};
 use stations_dds::dds::Node;
 
 use cyclonedds_rust_sys as cdds;
@@ -244,6 +246,7 @@ fn create_domain(
 struct DdsResources {
     participant: DomainParticipant,
     node: Option<Node>,
+    self_prefix: Option<String>,
     _domain: Option<DomainGuard>,
 }
 
@@ -256,22 +259,41 @@ impl DdsResources {
     ) -> Result<Self, String> {
         let domain_guard = create_domain(domain, config, log)?;
         let participant = DomainParticipant::new(domain).map_err(|e| e.to_string())?;
+        let self_prefix = participant_prefix(&participant);
         let node = match registry {
             Some(registry) => Some(
                 Node::from_participant(participant.clone(), registry).map_err(|e| e.to_string())?,
             ),
             None => None,
         };
-        log.log("shared DDS participant created");
+        log.log(format!(
+            "shared DDS participant created; self prefix {}",
+            self_prefix.as_deref().unwrap_or("<unknown>")
+        ));
         Ok(Self {
             participant,
             node,
+            self_prefix,
             _domain: domain_guard,
         })
     }
 
     fn node(&self) -> Option<&Node> {
         self.node.as_ref()
+    }
+
+    fn self_prefix(&self) -> Option<&str> {
+        self.self_prefix.as_deref()
+    }
+}
+
+fn participant_prefix(participant: &DomainParticipant) -> Option<String> {
+    let mut guid = cdds::dds_guid_t { v: [0; 16] };
+    let rc = unsafe { cdds::dds_get_guid(participant.entity(), &mut guid) };
+    if rc < 0 {
+        None
+    } else {
+        Some(rtps::hex(&guid.v[..12]))
     }
 }
 
@@ -437,6 +459,8 @@ struct State {
     dropped: Cell<u64>,
     /// Records evicted from the history (observed, then trimmed from the table).
     trimmed: Cell<u64>,
+    /// Hide records originating from dds-echo's own participant.
+    hide_self: Cell<bool>,
     /// Discovery diagnostics file.
     log: DiscoveryLog,
     /// The registry's topics (name -> IDL type), loaded at startup.
@@ -564,10 +588,15 @@ fn select_send_topic(app: &MainWindow, state: &Rc<State>, index: i32) {
     send.form = Some(form);
     match writer_result {
         Some((resources, Ok(writer))) => {
+            let matched = writer.matched_readers().unwrap_or(0);
             send.resources = Some(resources);
             send.writer = Some(writer);
-            send.status = format!("Ready: {}", topic.name);
-            send.error = false;
+            send.status = if matched > 0 {
+                format!("Ready: {} ({matched} matched subscriber(s))", topic.name)
+            } else {
+                format!("Ready: {}; no matched subscribers", topic.name)
+            };
+            send.error = matched == 0;
         }
         Some((resources, Err(error))) => {
             send.resources = Some(resources);
@@ -610,13 +639,23 @@ fn ensure_writer(state: &Rc<State>) -> Result<(), String> {
         .node()
         .ok_or_else(|| "the topic registry was not loaded; sending is unavailable".to_string())?;
     let writer = TopicWriter::new(node, &topic.name, &topic.idl_type)?;
+    let matched = writer.matched_readers().unwrap_or(0);
+    if let Some(prefix) = resources.self_prefix() {
+        state
+            .discovery
+            .borrow_mut()
+            .set_self_prefix(Some(prefix.to_string()));
+    }
 
     let mut send = state.send.borrow_mut();
     send.resources = Some(resources);
     send.writer = Some(writer);
-    if !send.error {
-        send.status = format!("Ready: {}", topic.name);
-    }
+    send.status = if matched > 0 {
+        format!("Ready: {} ({matched} matched subscriber(s))", topic.name)
+    } else {
+        format!("Ready: {}; no matched subscribers", topic.name)
+    };
+    send.error = matched == 0;
     Ok(())
 }
 
@@ -633,20 +672,28 @@ fn send_now(app: &MainWindow, state: &Rc<State>, timer: &Weak<Timer>) {
         return;
     }
 
-    let result: Result<(), String> = (|| {
+    let result: Result<usize, String> = (|| {
         let send = state.send.borrow();
         let form = send.form.as_ref().ok_or("no topic selected")?;
         let writer = send.writer.as_ref().ok_or("no writer available")?;
+        let matched = writer.matched_readers()?;
+        if matched == 0 {
+            return Err("No matching subscriber; sample not transmitted".to_string());
+        }
         let value = form.to_dynamic_value()?;
-        writer.write_dynamic(&value)
+        writer.write_dynamic(&value)?;
+        Ok(matched)
     })();
 
     match result {
-        Ok(()) => {
+        Ok(matched) => {
             let mut send = state.send.borrow_mut();
             send.sent += 1;
             send.error = false;
-            send.status = format!("Sent {} sample(s)", send.sent);
+            send.status = format!(
+                "Sent {} sample(s) to {} subscriber(s)",
+                send.sent, matched
+            );
             update_send_props(app, &send);
         }
         Err(error) => {
@@ -656,7 +703,7 @@ fn send_now(app: &MainWindow, state: &Rc<State>, timer: &Weak<Timer>) {
             let mut send = state.send.borrow_mut();
             send.repeating = false;
             send.error = true;
-            send.status = format!("Error: {error}");
+            send.status = error;
             update_send_props(app, &send);
         }
     }
@@ -672,12 +719,28 @@ fn start_sending(app: &MainWindow, state: &Rc<State>) {
         return;
     }
 
-    let ready = state.send.borrow().ready();
+    let (ready, matched) = {
+        let send = state.send.borrow();
+        let matched = send
+            .writer
+            .as_ref()
+            .and_then(|writer| writer.matched_readers().ok())
+            .unwrap_or(0);
+        (send.ready(), matched)
+    };
     if !ready {
         let mut send = state.send.borrow_mut();
         send.repeating = false;
         send.error = true;
         send.status = "Select a supported topic before sending".to_string();
+        update_send_props(app, &send);
+        return;
+    }
+    if matched == 0 {
+        let mut send = state.send.borrow_mut();
+        send.repeating = false;
+        send.error = true;
+        send.status = "No matching subscriber; sample not transmitted".to_string();
         update_send_props(app, &send);
         return;
     }
@@ -694,7 +757,11 @@ fn start_sending(app: &MainWindow, state: &Rc<State>) {
         let mut send = state.send.borrow_mut();
         send.repeating = true;
         send.error = false;
-        send.status = format!("Sending every {} ms", interval.as_millis());
+        send.status = format!(
+            "Sending every {} ms to {} subscriber(s)",
+            interval.as_millis(),
+            matched
+        );
         update_send_props(app, &send);
     }
 
@@ -774,7 +841,11 @@ fn to_row(r: &model::Record, known: &KnownTopics) -> ui::RecordRow {
     ui::RecordRow {
         time: r.time_label().into(),
         protocol: r.protocol().into(),
-        source: r.src_addr.clone().into(),
+        source: if r.self_origin {
+            "self".into()
+        } else {
+            r.src_addr.clone().into()
+        },
         size: r.size as i32,
         topic: r.topic.clone().unwrap_or_default().into(),
         submessages: r.submessages.clone().into(),
@@ -795,7 +866,11 @@ fn to_detail(r: &model::Record, known: &KnownTopics) -> ui::Record {
     ui::Record {
         time: r.time_label().into(),
         protocol: r.protocol().into(),
-        source: r.src_addr.clone().into(),
+        source: if r.self_origin {
+            format!("self ({})", r.src_addr).into()
+        } else {
+            r.src_addr.clone().into()
+        },
         size: r.size as i32,
         topic: r.topic.clone().unwrap_or_default().into(),
         submessages: r.submessages.clone().into(),
@@ -838,7 +913,7 @@ fn rebuild_view(app: &MainWindow, state: &State, records: &VecModel<ui::RecordRo
     let mut rows = Vec::new();
     let mut ids = Vec::new();
     let mut selected_index = -1i32;
-    for (id, record) in history.matching(&selection) {
+    for (id, record) in history.matching(&selection, state.hide_self.get()) {
         if Some(id) == selected {
             selected_index = rows.len() as i32;
         }
@@ -865,7 +940,10 @@ fn apply_selection(
 ) {
     refresh_topics(
         app,
-        &state.counts.borrow().rows(&state.known_topics),
+        &state
+            .counts
+            .borrow()
+            .rows(&state.known_topics, state.hide_self.get()),
         &state.selection.borrow(),
         known,
         unknown,
@@ -942,14 +1020,17 @@ fn poll_discovery(
 
     {
         let mut counts = state.counts.borrow_mut();
-        for (old, new) in &changes {
-            counts.reattribute(old.as_deref(), new);
+        for (old, new, self_origin) in &changes {
+            counts.reattribute(old.as_deref(), new, *self_origin);
         }
     }
     state.pending_view.set(true);
     refresh_topics(
         app,
-        &state.counts.borrow().rows(&state.known_topics),
+        &state
+            .counts
+            .borrow()
+            .rows(&state.known_topics, state.hide_self.get()),
         &state.selection.borrow(),
         known,
         unknown,
@@ -965,6 +1046,14 @@ fn tick(
     unknown: &VecModel<ui::TopicRow>,
 ) {
     let now_ms = state.start.get().elapsed().as_millis() as u64;
+    let self_prefix = state
+        .resources
+        .existing()
+        .and_then(|resources| resources.self_prefix().map(str::to_string));
+    state
+        .discovery
+        .borrow_mut()
+        .set_self_prefix(self_prefix.clone());
 
     poll_discovery(app, state, known, unknown, false);
 
@@ -980,6 +1069,12 @@ fn tick(
             let mut history = state.history.borrow_mut();
             for mut record in batch {
                 state.discovery.borrow_mut().observe_and_attr(&mut record);
+                if record.is_self(self_prefix.as_deref()) {
+                    record.self_origin = true;
+                }
+                if record.topic.is_none() && record.is_discovery() {
+                    record.topic = Some("discovery".to_string());
+                }
                 let topic = record.topic.clone();
                 let first_for_topic = topic
                     .as_deref()
@@ -1013,7 +1108,10 @@ fn tick(
 
     refresh_topics(
         app,
-        &state.counts.borrow().rows(&state.known_topics),
+        &state
+            .counts
+            .borrow()
+            .rows(&state.known_topics, state.hide_self.get()),
         &state.selection.borrow(),
         known,
         unknown,
@@ -1025,8 +1123,16 @@ fn tick(
         app.set_endpoints(discovery.endpoints() as i32);
     }
 
-    let rates = state.rates.borrow_mut().sample(&state.stats.borrow(), now_ms);
-    let stats = state.stats.borrow();
+    let (stats, rates) = {
+        let stats = state.stats.borrow();
+        let visible = if state.hide_self.get() {
+            stats.excluding_self()
+        } else {
+            stats.clone()
+        };
+        let rates = state.rates.borrow_mut().sample(&visible, now_ms);
+        (visible, rates)
+    };
     app.set_packets(stats.packets as i32);
     app.set_bytes(stats.bytes as i32);
     app.set_rtps(stats.rtps as i32);
@@ -1156,6 +1262,7 @@ fn main() -> Result<(), slint::PlatformError> {
         selected_id: Cell::new(None),
         dropped: Cell::new(0),
         trimmed: Cell::new(0),
+        hide_self: Cell::new(false),
         log,
         known_topics,
         send_topics,
@@ -1170,13 +1277,16 @@ fn main() -> Result<(), slint::PlatformError> {
     app.set_records(ModelRc::from(records.clone()));
     app.set_known_topics(ModelRc::from(known.clone()));
     app.set_unknown_topics(ModelRc::from(unknown.clone()));
-    refresh_topics(
-        &app,
-        &state.counts.borrow().rows(&state.known_topics),
-        &state.selection.borrow(),
-        &known,
-        &unknown,
-    );
+                refresh_topics(
+                    &app,
+                    &state
+                        .counts
+                        .borrow()
+                        .rows(&state.known_topics, state.hide_self.get()),
+                    &state.selection.borrow(),
+                    &known,
+                    &unknown,
+                );
 
     app.set_send_fields(ModelRc::from(state.send_rows.clone()));
     let send_topic_names: Vec<slint::SharedString> = state
@@ -1247,7 +1357,10 @@ fn main() -> Result<(), slint::PlatformError> {
                     records.clear();
                     refresh_topics(
                         &app,
-                        &state.counts.borrow().rows(&state.known_topics),
+                        &state
+            .counts
+            .borrow()
+            .rows(&state.known_topics, state.hide_self.get()),
                         &state.selection.borrow(),
                         &known,
                         &unknown,
@@ -1303,7 +1416,10 @@ fn main() -> Result<(), slint::PlatformError> {
                 poll_discovery(&app, &state, &known, &unknown, true);
                 refresh_topics(
                     &app,
-                    &state.counts.borrow().rows(&state.known_topics),
+                    &state
+            .counts
+            .borrow()
+            .rows(&state.known_topics, state.hide_self.get()),
                     &state.selection.borrow(),
                     &known,
                     &unknown,
@@ -1348,7 +1464,10 @@ fn main() -> Result<(), slint::PlatformError> {
                 app.set_selected(empty_record());
                 refresh_topics(
                     &app,
-                    &state.counts.borrow().rows(&state.known_topics),
+                    &state
+            .counts
+            .borrow()
+            .rows(&state.known_topics, state.hide_self.get()),
                     &state.selection.borrow(),
                     &known,
                     &unknown,
@@ -1363,6 +1482,22 @@ fn main() -> Result<(), slint::PlatformError> {
                 app.set_dropped(0);
                 app.set_trimmed(0);
                 app.set_selected_index(-1);
+            }
+        });
+    }
+
+    // Hide/show dds-echo's own traffic.
+    {
+        let app_weak = app.as_weak();
+        let state = state.clone();
+        let records = records.clone();
+        let known = known.clone();
+        let unknown = unknown.clone();
+        app.on_hide_self_changed(move |hide| {
+            if let Some(app) = app_weak.upgrade() {
+                state.hide_self.set(hide);
+                app.set_hide_self(hide);
+                apply_selection(&app, &state, &records, &known, &unknown);
             }
         });
     }

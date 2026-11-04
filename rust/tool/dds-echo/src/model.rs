@@ -108,9 +108,31 @@ pub struct Record {
     pub hex: Vec<u8>,
     /// The decoded RTPS submessages (empty for non-RTPS datagrams).
     pub frames: Vec<Frame>,
+    /// True when the datagram originates from dds-echo's own participant.
+    pub self_origin: bool,
 }
 
 impl Record {
+    /// Whether this record carries an SPDP/SEDP discovery announcement.
+    pub fn is_discovery(&self) -> bool {
+        self.frames.iter().any(|frame| frame.announcement.is_some())
+    }
+
+    /// Whether this record originates from the participant with `self_prefix`.
+    pub fn is_self(&self, self_prefix: Option<&str>) -> bool {
+        let Some(self_prefix) = self_prefix else {
+            return false;
+        };
+        if self.guid_prefix.as_deref() == Some(self_prefix) {
+            return true;
+        }
+        self.frames.iter().any(|frame| match &frame.announcement {
+            Some(Announcement::Participant { prefix }) => prefix == self_prefix,
+            Some(Announcement::Endpoint(endpoint)) => endpoint.prefix == self_prefix,
+            None => false,
+        })
+    }
+
     /// `MM:SS.mmm` since capture started.
     pub fn time_label(&self) -> String {
         let ms = self.elapsed_ms;
@@ -193,6 +215,9 @@ pub struct Stats {
     pub packets: usize,
     pub bytes: usize,
     pub rtps: usize,
+    self_packets: usize,
+    self_bytes: usize,
+    self_rtps: usize,
 }
 
 impl Stats {
@@ -201,6 +226,23 @@ impl Stats {
         self.bytes += r.size;
         if r.class != Class::Udp {
             self.rtps += 1;
+        }
+        if r.self_origin {
+            self.self_packets += 1;
+            self.self_bytes += r.size;
+            if r.class != Class::Udp {
+                self.self_rtps += 1;
+            }
+        }
+    }
+
+    /// The totals excluding records from dds-echo's own participant.
+    pub fn excluding_self(&self) -> Stats {
+        Stats {
+            packets: self.packets.saturating_sub(self.self_packets),
+            bytes: self.bytes.saturating_sub(self.self_bytes),
+            rtps: self.rtps.saturating_sub(self.self_rtps),
+            ..Stats::default()
         }
     }
 
@@ -251,13 +293,25 @@ pub struct TopicRow {
 pub struct TopicCounts {
     counts: BTreeMap<String, usize>,
     unidentified: usize,
+    self_counts: BTreeMap<String, usize>,
+    self_unidentified: usize,
 }
 
 impl TopicCounts {
     pub fn observe(&mut self, r: &Record) {
         match &r.topic {
-            Some(topic) => *self.counts.entry(topic.clone()).or_insert(0) += 1,
-            None => self.unidentified += 1,
+            Some(topic) => {
+                *self.counts.entry(topic.clone()).or_insert(0) += 1;
+                if r.self_origin {
+                    *self.self_counts.entry(topic.clone()).or_insert(0) += 1;
+                }
+            }
+            None => {
+                self.unidentified += 1;
+                if r.self_origin {
+                    self.self_unidentified += 1;
+                }
+            }
         }
     }
 
@@ -268,62 +322,91 @@ impl TopicCounts {
 
     /// Known topics (0 if unseen), then unregistered topics seen and an
     /// `unidentified` row when there are unattributed datagrams, sorted.
-    pub fn rows(&self, known: &KnownTopics) -> Vec<TopicRow> {
+    /// With `hide_self`, records from dds-echo's own participant are excluded.
+    pub fn rows(&self, known: &KnownTopics, hide_self: bool) -> Vec<TopicRow> {
         let mut rows = Vec::new();
         for name in known.names() {
             rows.push(TopicRow {
                 name: name.to_string(),
                 known: true,
-                packets: self.counts.get(name).copied().unwrap_or(0),
+                packets: self.visible_count(
+                    name,
+                    self.counts.get(name).copied().unwrap_or(0),
+                    hide_self,
+                ),
             });
         }
         for (name, packets) in &self.counts {
             if !known.contains(name) {
-                rows.push(TopicRow {
-                    name: name.clone(),
-                    known: false,
-                    packets: *packets,
-                });
+                let packets = self.visible_count(name, *packets, hide_self);
+                if packets > 0 {
+                    rows.push(TopicRow {
+                        name: name.clone(),
+                        known: false,
+                        packets,
+                    });
+                }
             }
         }
-        if self.unidentified > 0 {
+        let unidentified = if hide_self {
+            self.unidentified.saturating_sub(self.self_unidentified)
+        } else {
+            self.unidentified
+        };
+        if unidentified > 0 {
             rows.push(TopicRow {
                 name: "unidentified".to_string(),
                 known: false,
-                packets: self.unidentified,
+                packets: unidentified,
             });
         }
         rows.sort_by(|a, b| b.known.cmp(&a.known).then_with(|| a.name.cmp(&b.name)));
         rows
     }
 
+    fn visible_count(&self, name: &str, total: usize, hide_self: bool) -> usize {
+        if hide_self {
+            total.saturating_sub(self.self_counts.get(name).copied().unwrap_or(0))
+        } else {
+            total
+        }
+    }
+
     /// Move one observed record from `old` to `new` after discovery learns its
     /// endpoint. `None` means the `unidentified` bucket.
-    pub fn reattribute(&mut self, old: Option<&str>, new: &str) {
+    pub fn reattribute(&mut self, old: Option<&str>, new: &str, self_origin: bool) {
         if new.is_empty() {
             return;
         }
         match old {
-            Some(name) => {
-                let remove = match self.counts.get_mut(name) {
-                    Some(count) => {
-                        *count = count.saturating_sub(1);
-                        *count == 0
-                    }
-                    None => false,
-                };
-                if remove {
-                    self.counts.remove(name);
-                }
-            }
+            Some(name) => decrement(&mut self.counts, name),
             None => self.unidentified = self.unidentified.saturating_sub(1),
         }
         *self.counts.entry(new.to_string()).or_insert(0) += 1;
+
+        if self_origin {
+            match old {
+                Some(name) => decrement(&mut self.self_counts, name),
+                None => self.self_unidentified = self.self_unidentified.saturating_sub(1),
+            }
+            *self.self_counts.entry(new.to_string()).or_insert(0) += 1;
+        }
     }
 
     pub fn reset(&mut self) {
         self.counts.clear();
         self.unidentified = 0;
+        self.self_counts.clear();
+        self.self_unidentified = 0;
+    }
+}
+
+fn decrement(counts: &mut BTreeMap<String, usize>, name: &str) {
+    if let Some(count) = counts.get_mut(name) {
+        *count = count.saturating_sub(1);
+        if *count == 0 {
+            counts.remove(name);
+        }
     }
 }
 
@@ -337,9 +420,19 @@ impl TopicCounts {
 pub struct Discovery {
     participants: BTreeSet<String>,
     endpoints: BTreeMap<String, Endpoint>,
+    self_prefix: Option<String>,
 }
 
 impl Discovery {
+    /// Mark dds-echo's own participant prefix.
+    pub fn set_self_prefix(&mut self, prefix: Option<String>) {
+        self.self_prefix = prefix;
+    }
+
+    fn is_self(&self, prefix: &str) -> bool {
+        self.self_prefix.as_deref() == Some(prefix)
+    }
+
     /// Learn this datagram's announcements, then attribute its topic: when the
     /// record's topic is still unknown and its writer GUID matches a learned
     /// endpoint that carries a topic, set `record.topic` from it.
@@ -386,14 +479,21 @@ impl Discovery {
             .filter(|topic| !topic.is_empty())
     }
 
-    /// The number of distinct participants observed.
+    /// The number of distinct remote participants observed.
     pub fn participants(&self) -> usize {
-        self.participants.len()
+        let self_count = self
+            .self_prefix
+            .as_ref()
+            .is_some_and(|prefix| self.participants.contains(prefix));
+        self.participants.len() - usize::from(self_count)
     }
 
-    /// The number of distinct endpoints observed.
+    /// The number of distinct remote endpoints observed.
     pub fn endpoints(&self) -> usize {
-        self.endpoints.len()
+        self.endpoints
+            .values()
+            .filter(|endpoint| !self.is_self(&endpoint.prefix))
+            .count()
     }
 }
 
@@ -605,14 +705,16 @@ impl History {
         self.buffer.push(key, size, record)
     }
 
-    /// Retained records that pass `selection`, in arrival order.
+    /// Retained records that pass `selection`, in arrival order. With
+    /// `hide_self`, records from dds-echo's own participant are skipped.
     pub fn matching<'a>(
         &'a self,
         selection: &'a TopicSelection,
+        hide_self: bool,
     ) -> impl Iterator<Item = (u64, &'a Record)> + 'a {
-        self.buffer
-            .iter()
-            .filter(move |(_, record)| selection.matches(record.topic.as_deref()))
+        self.buffer.iter().filter(move |(_, record)| {
+            (!hide_self || !record.self_origin) && selection.matches(record.topic.as_deref())
+        })
     }
 
     pub fn find(&self, id: u64) -> Option<&Record> {
@@ -621,7 +723,10 @@ impl History {
 
     /// Attribute retained records whose writer is now known. Returns the
     /// `(old, new)` topic changes so the caller can adjust `TopicCounts`.
-    pub fn reattribute(&mut self, discovery: &Discovery) -> Vec<(Option<String>, String)> {
+    pub fn reattribute(
+        &mut self,
+        discovery: &Discovery,
+    ) -> Vec<(Option<String>, String, bool)> {
         let mut changes = Vec::new();
         for slot in self.buffer.entries.values_mut() {
             let record = &mut slot.value;
@@ -636,7 +741,7 @@ impl History {
             };
             let new_topic = topic.to_string();
             record.topic = Some(new_topic.clone());
-            changes.push((None, new_topic));
+            changes.push((None, new_topic, record.self_origin));
         }
         changes
     }
@@ -704,6 +809,7 @@ mod tests {
             submessages: String::new(),
             hex: vec![0],
             frames: Vec::new(),
+            self_origin: false,
         }
     }
 
@@ -740,14 +846,14 @@ mod tests {
         let k = known();
         let mut c = TopicCounts::default();
         assert!(c
-            .rows(&k)
+            .rows(&k, false)
             .iter()
             .any(|r| r.name == "HelloWorldTopic" && r.known && r.packets == 0));
         c.observe(&record(Class::Known, 1, Some("HelloWorldTopic")));
         c.observe(&record(Class::Unregistered, 1, Some("WeatherTopic")));
         c.observe(&record(Class::Udp, 1, None));
         c.observe(&record(Class::Rtps, 1, None));
-        let rows = c.rows(&k);
+        let rows = c.rows(&k, false);
         assert!(rows
             .iter()
             .any(|r| r.name == "HelloWorldTopic" && r.known && r.packets == 1));
@@ -767,6 +873,7 @@ mod tests {
             packets: 100,
             bytes: 1000,
             rtps: 0,
+            ..Stats::default()
         };
         assert_eq!(rt.sample(&stats, 1000), Rates { pps: 100, bps: 1000 });
     }
@@ -1003,7 +1110,7 @@ mod tests {
 
         let mut selection = TopicSelection::default();
         selection.toggle("rare");
-        assert_eq!(history.matching(&selection).count(), 1);
+        assert_eq!(history.matching(&selection, false).count(), 1);
     }
 
     #[test]
@@ -1016,7 +1123,7 @@ mod tests {
         let mut selection = TopicSelection::default();
         selection.toggle("A");
         let topics: Vec<Option<String>> = history
-            .matching(&selection)
+            .matching(&selection, false)
             .map(|(_, r)| r.topic.clone())
             .collect();
         assert_eq!(topics, vec![Some("A".to_string())]);
@@ -1060,11 +1167,11 @@ mod tests {
         let changes = history.reattribute(&discovery);
         assert_eq!(
             changes,
-            vec![(None, "HelloWorldViewTopic".to_string())]
+            vec![(None, "HelloWorldViewTopic".to_string(), false)]
         );
 
         let selection = TopicSelection::default();
-        let records: Vec<_> = history.matching(&selection).collect();
+        let records: Vec<_> = history.matching(&selection, false).collect();
         assert_eq!(
             records[0].1.topic.as_deref(),
             Some("HelloWorldViewTopic")
@@ -1078,15 +1185,73 @@ mod tests {
         let known = KnownTopics::default();
 
         counts.observe(&record(Class::Rtps, 0, None));
-        counts.reattribute(None, "A");
-        let rows = counts.rows(&known);
+        counts.reattribute(None, "A", false);
+        let rows = counts.rows(&known, false);
         assert!(rows.iter().any(|r| r.name == "A" && r.packets == 1));
         assert!(!rows.iter().any(|r| r.name == "unidentified"));
 
         counts.observe(&record(Class::Known, 0, Some("B")));
-        counts.reattribute(Some("B"), "C");
-        let rows = counts.rows(&known);
+        counts.reattribute(Some("B"), "C", false);
+        let rows = counts.rows(&known, false);
         assert!(!rows.iter().any(|r| r.name == "B"));
         assert!(rows.iter().any(|r| r.name == "C" && r.packets == 1));
+    }
+
+    #[test]
+    fn self_records_are_marked_and_hidden() {
+        let mut self_record = record(Class::Known, 10, Some("HelloWorldTopic"));
+        self_record.guid_prefix = Some("selfprefix".to_string());
+        self_record.self_origin = true;
+        assert!(self_record.is_self(Some("selfprefix")));
+        assert!(!self_record.is_self(Some("otherprefix")));
+
+        let mut counts = TopicCounts::default();
+        counts.observe(&self_record);
+        let known = known();
+        let visible = counts.rows(&known, false);
+        assert!(visible
+            .iter()
+            .any(|r| r.name == "HelloWorldTopic" && r.packets == 1));
+        let hidden = counts.rows(&known, true);
+        assert!(hidden
+            .iter()
+            .any(|r| r.name == "HelloWorldTopic" && r.packets == 0));
+    }
+
+    #[test]
+    fn discovery_records_are_recognized() {
+        let mut discovery = record(Class::Rtps, 10, None);
+        discovery.frames.push(Frame {
+            id: 0x15,
+            kind: "DATA".to_string(),
+            writer: String::new(),
+            reader: String::new(),
+            seq: String::new(),
+            len: 0,
+            announcement: Some(Announcement::Participant {
+                prefix: "selfprefix".to_string(),
+            }),
+            payload: None,
+        });
+        assert!(discovery.is_discovery());
+        assert!(discovery.is_self(Some("selfprefix")));
+        assert!(!record(Class::Known, 0, Some("HelloWorldTopic")).is_discovery());
+    }
+
+    #[test]
+    fn discovery_counters_exclude_self() {
+        let mut discovery = Discovery::default();
+        discovery.set_self_prefix(Some("selfprefix".to_string()));
+        discovery.learn_participant("selfprefix".to_string());
+        discovery.learn_participant("otherprefix".to_string());
+        discovery.learn_endpoint(Endpoint {
+            guid: "selfprefix00000102".to_string(),
+            prefix: "selfprefix".to_string(),
+            kind: EndpointKind::Writer,
+            topic: "HelloWorldTopic".to_string(),
+            type_name: "hello_world::HelloWorldTopic".to_string(),
+        });
+        assert_eq!(discovery.participants(), 1);
+        assert_eq!(discovery.endpoints(), 0);
     }
 }

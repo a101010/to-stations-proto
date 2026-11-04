@@ -251,20 +251,22 @@ The target use case is the running process fleet: launch the fleet, launch dds-e
 
 ## Result
 
-Initial implementation complete; two use issues are being addressed by the follow-up fixes above:
+Initial and follow-up implementation complete; fleet manual acceptance remains for the user:
 
 - `Node::from_participant` was added to `stations-dds` and covered by `node_shares_an_existing_participant`.
 - `dds-echo` now shares one DDS participant between discovery and Send; `--no-discovery` creates it lazily on first Send.
 - `rust/tool/dds-echo/src/send.rs` generates forms from `DdsFieldMetadata`, maps both registered types to typed writers, and rejects unsupported field kinds.
 - The window has Capture and Send tabs. Send chooses a registered topic, edits generated fields, and publishes once or periodically at the chosen interval; repeating continues across tabs and stops on topic change.
-- Tests cover field enumeration, typed conversion, invalid input, registry coverage, and an end-to-end typed write/read.
+- Matched-reader detection gates Send: with zero matched subscribers the sample is not written and the status says it was not transmitted; successful sends report the subscriber count.
+- dds-echo's own participant GUID prefix is discovered; its SPDP/SEDP records are labelled `self` and bucketed as `discovery`, remote participant/endpoint counters exclude self, and the **Hide self** checkbox removes self traffic (including stats) from the view.
+- Tests cover field enumeration, typed conversion, invalid input, registry coverage, matched readers, self/discovery classification, hide-self filtering, and an end-to-end typed write/read.
 - `.\scripts\build.ps1 -Test` passed and `.\scripts\build.ps1` deployed successfully.
-- `README.md` documents the Send tab.
-- The manual UI acceptance run remains for the user; the release binary starts and creates the shared participant.
+- `README.md` documents the Send tab, matched-subscriber behavior, and self discovery.
+- The fleet manual acceptance run remains for the user; the release binary starts, logs its self prefix, and creates the shared participant.
 
 ## Bookkeeping
 
 - `topic-field-metadata` was completed at `2026-10-27 15:31:10` and moved to `completed_stories.md`.
-- `dds-echo-send` is `in progress` in `backlog.md`; its follow-up fixes are active.
+- `dds-echo-send` is `in progress` in `backlog.md`; its follow-up fixes are implemented and awaiting fleet manual acceptance.
 - `dds-echo-copy-detail` is the planned next story in `backlog.md`.
 - Do not move `dds-echo-send` to `completed_stories.md` until the user asks to plan the next story.

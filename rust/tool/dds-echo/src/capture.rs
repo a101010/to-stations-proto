@@ -228,6 +228,7 @@ pub fn record_from(data: &[u8], src: SocketAddr, local_port: u16, elapsed_ms: u6
         submessages: if class == Class::Rtps { "RTPS" } else { "UDP" }.to_string(),
         hex: data.to_vec(),
         frames: Vec::new(),
+        self_origin: false,
     };
     if class == Class::Rtps {
         let parsed = rtps::parse(data);
@@ -852,6 +853,7 @@ mod tests {
             submessages: "DATA".to_string(),
             hex: vec![0; size],
             frames: Vec::new(),
+            self_origin: false,
         }
     }
 
