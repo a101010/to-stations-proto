@@ -179,7 +179,15 @@ cargo test --manifest-path rust/Cargo.toml -p dds-echo
 
 ## Result
 
-Not started.
+Implemented and verified by tests/build:
+
+- The detail pane is now a single read-only `TextEdit` showing the plain-text record detail.
+- `detail_text` renders time, protocol, sender (`self (...)` when applicable), participant, writer, size, topic, submessages, frames/announcements, decoded fields, and hex preview.
+- Native mouse selection, Ctrl+A, and Ctrl+C work through `TextEdit`; no copy control or clipboard dependency was added.
+- Unit tests cover self-sender fields, discovery announcements, and decoded fields.
+- `cargo test -p dds-echo` passed (78 tests), `.\scripts\build.ps1 -Test` passed, and `.\scripts\build.ps1` deployed.
+- The release binary starts successfully.
+- The manual selection/Ctrl+C click-through remains for the user.
 
 ## Bookkeeping
 

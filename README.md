@@ -161,6 +161,8 @@ $env:CYCLONEDDS_URI = 'file://T:/DDS/cyclonedds-config.xml'
 
 DDS writers transmit user data only to matched readers. Send shows the number of matched subscribers and reports that nothing was transmitted when there are none; start the fleet (or another subscriber for the topic) before sending. `dds-echo`'s own discovery participant emits an SPDP announcement roughly every 8 seconds (the default 10-second lease); Capture labels it `self`/`discovery`, and the **Hide self** checkbox removes it from the view.
 
+Selecting a record shows its detail as plain text. Any portion of the detail pane can be selected and copied with Ctrl+C.
+
 To generate traffic while it is capturing, use the committed wrappers under `scripts/` (each points the source at `DDS/cyclonedds-config.xml` and makes `ddsc.dll` available):
 
 ```

@@ -832,6 +832,7 @@ fn empty_record() -> ui::Record {
         entity: "".into(),
         known: false,
         frames: ModelRc::default(),
+        text: "".into(),
     }
 }
 
@@ -880,7 +881,57 @@ fn to_detail(r: &model::Record, known: &KnownTopics) -> ui::Record {
         entity: r.entity_id.clone().unwrap_or_default().into(),
         known: r.is_known(known),
         frames: ModelRc::from(frames.as_slice()),
+        text: detail_text(r, known).into(),
     }
+}
+
+/// The plain-text rendering used by the selectable detail pane.
+fn detail_text(r: &model::Record, known: &KnownTopics) -> String {
+    let source = if r.self_origin {
+        format!("self ({})", r.src_addr)
+    } else {
+        r.src_addr.clone()
+    };
+    let mut out = String::new();
+    out.push_str(&format!("time: {}\n", r.time_label()));
+    out.push_str(&format!("protocol: {}\n", r.protocol()));
+    out.push_str(&format!("source: {source}\n"));
+    out.push_str(&format!(
+        "participant: {}\n",
+        r.guid_prefix.as_deref().unwrap_or("")
+    ));
+    out.push_str(&format!(
+        "writer: {}\n",
+        r.entity_id.as_deref().unwrap_or("")
+    ));
+    out.push_str(&format!("size: {}\n", r.size));
+    out.push_str(&format!("topic: {}\n", r.topic.as_deref().unwrap_or("")));
+    out.push_str(&format!("submessages: {}\n", r.submessages));
+    out.push('\n');
+    out.push_str(&format!("frames ({}):\n", r.frames.len()));
+    for frame in &r.frames {
+        out.push_str(&format!("  {}\n", frame_line(frame)));
+        let detail = frame_detail(frame);
+        if !detail.is_empty() {
+            out.push_str(&format!("    {detail}\n"));
+        }
+    }
+
+    let decoded = decoded_text(r, known);
+    if !decoded.is_empty() {
+        out.push('\n');
+        out.push_str("decoded:\n");
+        out.push_str(&decoded);
+        if !decoded.ends_with('\n') {
+            out.push('\n');
+        }
+    }
+
+    out.push('\n');
+    out.push_str("hex:\n");
+    out.push_str(&r.hex_string());
+    out.push('\n');
+    out
 }
 
 /// Decode the sample's payload when the record's topic is registered; the
@@ -1714,4 +1765,104 @@ fn main() -> Result<(), slint::PlatformError> {
     }
 
     app.run()
+}
+
+#[cfg(test)]
+mod copy_detail_tests {
+    use super::*;
+    use crate::model::{Announcement, Class, Frame};
+    use stations_dds::cyclonedds::{CdrEncoding, CdrSerializer};
+    use stations_dds::hello_world::HelloWorldTopic;
+    use stations_dds::math::Quaternion;
+
+    fn record() -> model::Record {
+        model::Record {
+            elapsed_ms: 1234,
+            class: Class::Rtps,
+            src_addr: "[fe80::1]:7401".to_string(),
+            guid_prefix: Some("01108c7358111aa9089f38f5".to_string()),
+            entity_id: Some("00000102".to_string()),
+            dest_port: 7401,
+            size: 4,
+            topic: Some("HelloWorldTopic".to_string()),
+            submessages: "INFO_TS, DATA".to_string(),
+            hex: vec![0x00, 0x01, 0x00, 0x00],
+            frames: Vec::new(),
+            self_origin: true,
+        }
+    }
+
+    fn data_frame(payload: Option<std::ops::Range<usize>>) -> Frame {
+        Frame {
+            id: 0x15,
+            kind: "DATA".to_string(),
+            writer: "00000102".to_string(),
+            reader: String::new(),
+            seq: "1".to_string(),
+            len: 0,
+            announcement: None,
+            payload,
+        }
+    }
+
+    #[test]
+    fn detail_text_contains_self_sender_and_fields() {
+        let text = detail_text(&record(), &KnownTopics::default());
+        assert!(text.contains("time: 00:01.234"));
+        assert!(text.contains("protocol: RTPS"));
+        assert!(text.contains("source: self ([fe80::1]:7401)"));
+        assert!(text.contains("participant: 01108c7358111aa9089f38f5"));
+        assert!(text.contains("writer: 00000102"));
+        assert!(text.contains("size: 4"));
+        assert!(text.contains("topic: HelloWorldTopic"));
+        assert!(text.contains("submessages: INFO_TS, DATA"));
+        assert!(text.contains("hex:"));
+    }
+
+    #[test]
+    fn detail_text_contains_discovery_announcements() {
+        let mut r = record();
+        r.frames = vec![Frame {
+            id: 0x15,
+            kind: "DATA".to_string(),
+            writer: String::new(),
+            reader: String::new(),
+            seq: "1".to_string(),
+            len: 0,
+            announcement: Some(Announcement::Participant {
+                prefix: "01108c7358111aa9089f38f5".to_string(),
+            }),
+            payload: None,
+        }];
+        let text = detail_text(&r, &KnownTopics::default());
+        assert!(text.contains("Participant 01108c7358111aa9089f38f5"));
+    }
+
+    #[test]
+    fn detail_text_contains_decoded_fields() {
+        let sample = HelloWorldTopic {
+            greeting: "copy-test".to_string(),
+            attitude: Quaternion {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+                w: 1.0,
+            },
+        };
+        let body = CdrSerializer::serialize(&sample, CdrEncoding::Xcdr1).unwrap();
+        let mut payload = vec![0x00, 0x01, 0x00, 0x00];
+        payload.extend_from_slice(&body);
+
+        let mut r = record();
+        r.size = payload.len();
+        r.hex = payload.clone();
+        r.frames = vec![data_frame(Some(0..payload.len()))];
+
+        let mut known = KnownTopics::default();
+        known.insert("HelloWorldTopic", "hello_world::HelloWorldTopic");
+        let text = detail_text(&r, &known);
+        assert!(text.contains("decoded:"));
+        assert!(text.contains("copy-test"));
+        assert!(text.contains("attitude"));
+    }
 }

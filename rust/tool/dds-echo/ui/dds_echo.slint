@@ -1,4 +1,4 @@
-import { Button, CheckBox, ComboBox, LineEdit, ListView, ScrollView, SpinBox } from "std-widgets.slint";
+import { Button, CheckBox, ComboBox, LineEdit, ListView, ScrollView, SpinBox, TextEdit } from "std-widgets.slint";
 
 export struct Frame {
     line: string,
@@ -18,6 +18,7 @@ export struct Record {
     entity: string,
     known: bool,
     frames: [Frame],
+    text: string,
 }
 
 export struct RecordRow {
@@ -402,36 +403,17 @@ export component MainWindow inherits Window {
                 max-width: 361px;
                 background: #202020;
                 border-radius: 6px;
-                ScrollView {
-                    VerticalLayout {
-                        alignment: LayoutAlignment.start;
-                        padding: 8px;
-                        spacing: 4px;
-                        Text { text: "Detail"; color: #ffffff; font-weight: 700; }
-                        Text { text: "protocol: " + root.selected.protocol; color: #d0d0d0; }
-                        Text { text: "source: " + root.selected.source; color: #d0d0d0; wrap: word-wrap; }
-                        Text { text: "participant: " + root.selected.guid; color: #d0d0d0; }
-                        Text { text: "writer: " + root.selected.entity; color: #d0d0d0; }
-                        Text { text: "size: " + root.selected.size; color: #d0d0d0; }
-                        Text { text: "topic: " + root.selected.topic; color: #d0d0d0; }
-                        Rectangle { height: 6px; }
-                        Text { text: "submessages (" + root.selected.frames.length + ")"; color: #9a9a9a; }
-                        for f in root.selected.frames : VerticalLayout {
-                            spacing: 1px;
-                            Text { text: f.line; color: #d0d0d0; font-family: "Courier New"; font-size: 12px; wrap: word-wrap; }
-                            if f.detail != "" : Text { text: f.detail; color: #8fd18f; font-size: 12px; wrap: word-wrap; }
-                            Rectangle { height: 1px; background: #3a3a3a; }
-                        }
-                        Rectangle { height: 6px; }
-                        Text { text: root.selected.decoded != "" ? "decoded" : "hex"; color: #9a9a9a; }
-                        Text {
-                            text: root.selected.decoded != "" ? root.selected.decoded : root.selected.hex;
-                            color: #c0c0c0;
-                            font-family: "Courier New";
-                            font-size: 12px;
-                            wrap: no-wrap;
-                            horizontal-alignment: left;
-                        }
+                VerticalLayout {
+                    padding: 8px;
+                    spacing: 4px;
+                    Text { text: "Detail"; color: #ffffff; font-weight: 700; }
+                    detail-text := TextEdit {
+                        text: root.selected.text;
+                        read-only: true;
+                        font-family: "Courier New";
+                        font-size: 12px;
+                        wrap: no-wrap;
+                        vertical-stretch: 1;
                     }
                 }
             }
