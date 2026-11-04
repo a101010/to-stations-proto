@@ -13,6 +13,7 @@ mod decode;
 mod model;
 mod rtps;
 mod sedp;
+mod send;
 
 mod ui {
     slint::include_modules!();
@@ -23,7 +24,7 @@ use std::ffi::CString;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -34,10 +35,12 @@ use crate::capture::{Capture, CaptureConfig, CaptureQueue, DRAIN_MAX_PER_TICK};
 use crate::model::{
     Discovery, History, KnownTopics, RateTracker, Stats, TopicCounts, TopicSelection,
 };
+use crate::send::{schema_for, SendForm, TopicWriter};
 use crate::ui::MainWindow;
 
-use stations_dds::contract::TopicRegistry;
+use stations_dds::contract::{TopicDef, TopicRegistry};
 use stations_dds::cyclonedds::{BuiltinEndpointSample, DataReader, DomainParticipant};
+use stations_dds::dds::Node;
 
 use cyclonedds_rust_sys as cdds;
 
@@ -208,54 +211,122 @@ impl Drop for DomainGuard {
     }
 }
 
-/// A discovery-only participant and the builtin readers that identify writers.
+fn create_domain(
+    domain: u32,
+    config: Option<&Path>,
+    log: &DiscoveryLog,
+) -> Result<Option<DomainGuard>, String> {
+    match config {
+        Some(path) => {
+            let xml = std::fs::read_to_string(path)
+                .map_err(|e| format!("read {}: {e}", path.display()))?;
+            let xml = CString::new(xml).map_err(|e| format!("config contains NUL: {e}"))?;
+            let handle =
+                unsafe { cdds::dds_create_domain(domain as cdds::dds_domainid_t, xml.as_ptr()) };
+            if handle <= 0 {
+                return Err(format!("dds_create_domain failed: {handle}"));
+            }
+            log.log(format!(
+                "created domain {domain} with config {}",
+                path.display()
+            ));
+            Ok(Some(DomainGuard(handle)))
+        }
+        None => {
+            log.log("no CycloneDDS config found; creating a default domain");
+            Ok(None)
+        }
+    }
+}
+
+/// The shared DDS entities: one participant, its contract-aware Node (when a
+/// registry was loaded), and the domain guard that must outlive both.
+struct DdsResources {
+    participant: DomainParticipant,
+    node: Option<Node>,
+    _domain: Option<DomainGuard>,
+}
+
+impl DdsResources {
+    fn new(
+        domain: u32,
+        config: Option<&Path>,
+        registry: Option<TopicRegistry>,
+        log: &DiscoveryLog,
+    ) -> Result<Self, String> {
+        let domain_guard = create_domain(domain, config, log)?;
+        let participant = DomainParticipant::new(domain).map_err(|e| e.to_string())?;
+        let node = match registry {
+            Some(registry) => Some(
+                Node::from_participant(participant.clone(), registry).map_err(|e| e.to_string())?,
+            ),
+            None => None,
+        };
+        log.log("shared DDS participant created");
+        Ok(Self {
+            participant,
+            node,
+            _domain: domain_guard,
+        })
+    }
+
+    fn node(&self) -> Option<&Node> {
+        self.node.as_ref()
+    }
+}
+
+/// Lazily created shared resources. Discovery and Send both use the same
+/// participant; with `--no-discovery` Send creates it on first use.
+struct AppResources {
+    domain: u32,
+    config: Option<PathBuf>,
+    registry: Option<TopicRegistry>,
+    slot: RefCell<Option<Rc<DdsResources>>>,
+}
+
+impl AppResources {
+    fn existing(&self) -> Option<Rc<DdsResources>> {
+        self.slot.borrow().clone()
+    }
+
+    fn ensure(&self, log: &DiscoveryLog) -> Result<Rc<DdsResources>, String> {
+        if let Some(resources) = self.slot.borrow().as_ref() {
+            return Ok(resources.clone());
+        }
+        let resources = Rc::new(DdsResources::new(
+            self.domain,
+            self.config.as_deref(),
+            self.registry.clone(),
+            log,
+        )?);
+        *self.slot.borrow_mut() = Some(resources.clone());
+        Ok(resources)
+    }
+}
+
+/// A discovery reader set over the shared participant, plus the resources that
+/// keep its domain alive.
 struct DiscoverySource {
-    // Declared before the participant so the readers drop first; the domain is
-    // deleted after its participant.
     publications: DataReader<BuiltinEndpointSample>,
     subscriptions: DataReader<BuiltinEndpointSample>,
-    _participant: DomainParticipant,
-    _domain: Option<DomainGuard>,
+    _resources: Rc<DdsResources>,
     last_poll_ms: u64,
 }
 
 impl DiscoverySource {
-    fn new(domain: u32, config: Option<&Path>, log: &DiscoveryLog) -> Result<Self, String> {
-        let domain_guard = match config {
-            Some(path) => {
-                let xml = std::fs::read_to_string(path)
-                    .map_err(|e| format!("read {}: {e}", path.display()))?;
-                let xml = CString::new(xml).map_err(|e| format!("config contains NUL: {e}"))?;
-                let handle = unsafe {
-                    cdds::dds_create_domain(domain as cdds::dds_domainid_t, xml.as_ptr())
-                };
-                if handle <= 0 {
-                    return Err(format!("dds_create_domain failed: {handle}"));
-                }
-                log.log(format!(
-                    "created domain {domain} with config {}",
-                    path.display()
-                ));
-                Some(DomainGuard(handle))
-            }
-            None => {
-                log.log("no CycloneDDS config found; creating a default domain");
-                None
-            }
-        };
-
-        let participant = DomainParticipant::new(domain).map_err(|e| e.to_string())?;
-        let publications = participant
+    fn new(resources: Rc<DdsResources>) -> Result<Self, String> {
+        let publications = resources
+            .participant
             .create_builtin_publication_reader()
             .map_err(|e| e.to_string())?;
-        let subscriptions = participant
+        let subscriptions = resources
+            .participant
             .create_builtin_subscription_reader()
             .map_err(|e| e.to_string())?;
         Ok(Self {
             publications,
             subscriptions,
-            _participant: participant,
-            _domain: domain_guard,
+            _resources: resources,
             last_poll_ms: 0,
         })
     }
@@ -278,34 +349,20 @@ impl DiscoverySource {
         let mut learned = 0;
         match self.publications.read() {
             Ok(samples) => {
-                log.log(format!(
-                    "poll t={now_ms}ms publications={}",
-                    samples.len()
-                ));
+                log.log(format!("poll t={now_ms}ms publications={}", samples.len()));
                 for sample in &samples {
-                    learned += learn_builtin_endpoint(
-                        discovery,
-                        sample,
-                        model::EndpointKind::Writer,
-                        log,
-                    );
+                    learned +=
+                        learn_builtin_endpoint(discovery, sample, model::EndpointKind::Writer, log);
                 }
             }
             Err(e) => log.log(format!("publications read failed: {e}")),
         }
         match self.subscriptions.read() {
             Ok(samples) => {
-                log.log(format!(
-                    "poll t={now_ms}ms subscriptions={}",
-                    samples.len()
-                ));
+                log.log(format!("poll t={now_ms}ms subscriptions={}", samples.len()));
                 for sample in &samples {
-                    learned += learn_builtin_endpoint(
-                        discovery,
-                        sample,
-                        model::EndpointKind::Reader,
-                        log,
-                    );
+                    learned +=
+                        learn_builtin_endpoint(discovery, sample, model::EndpointKind::Reader, log);
                 }
             }
             Err(e) => log.log(format!("subscriptions read failed: {e}")),
@@ -384,6 +441,281 @@ struct State {
     log: DiscoveryLog,
     /// The registry's topics (name -> IDL type), loaded at startup.
     known_topics: KnownTopics,
+    /// The topics the Send tab can choose from.
+    send_topics: Vec<TopicDef>,
+    /// The shared DDS resources used by discovery and Send.
+    resources: Rc<AppResources>,
+    /// The Send tab's state and periodic timer.
+    send: Rc<RefCell<SendRuntime>>,
+    /// The Send tab's generated form rows.
+    send_rows: Rc<VecModel<ui::SendField>>,
+}
+
+/// The Send tab's mutable state. The timer is kept here but its callback holds
+/// only weak references, so the state and timer do not form a cycle.
+struct SendRuntime {
+    selected: Option<usize>,
+    form: Option<SendForm>,
+    writer: Option<TopicWriter>,
+    /// Keeps the shared domain and participant alive while a writer exists.
+    resources: Option<Rc<DdsResources>>,
+    interval_ms: u64,
+    repeating: bool,
+    sent: u64,
+    status: String,
+    error: bool,
+    timer: Rc<Timer>,
+}
+
+impl SendRuntime {
+    fn new() -> Self {
+        Self {
+            selected: None,
+            form: None,
+            writer: None,
+            resources: None,
+            interval_ms: 100,
+            repeating: false,
+            sent: 0,
+            status: "Select a topic".to_string(),
+            error: false,
+            timer: Rc::new(Timer::default()),
+        }
+    }
+
+    fn ready(&self) -> bool {
+        self.form
+            .as_ref()
+            .is_some_and(|form| !form.has_unsupported())
+    }
+}
+
+fn to_send_field(row: &crate::send::FormRow) -> ui::SendField {
+    ui::SendField {
+        path: row.path.clone().into(),
+        label: row.label.clone().into(),
+        kind: row.kind.as_str().into(),
+        indent: row.indent as i32,
+        value: row.value.clone().into(),
+        bool_value: row.bool_value,
+        group: row.is_group(),
+        unsupported: row.unsupported,
+    }
+}
+
+fn update_send_props(app: &MainWindow, send: &SendRuntime) {
+    app.set_send_ready(send.ready());
+    app.set_send_repeating(send.repeating);
+    app.set_send_count(send.sent.min(i32::MAX as u64) as i32);
+    app.set_send_status(send.status.clone().into());
+    app.set_send_error(send.error);
+}
+
+fn select_send_topic(app: &MainWindow, state: &Rc<State>, index: i32) {
+    if index < 0 {
+        return;
+    }
+    let index = index as usize;
+    let Some(topic) = state.send_topics.get(index).cloned() else {
+        return;
+    };
+
+    {
+        let mut send = state.send.borrow_mut();
+        send.timer.stop();
+        send.repeating = false;
+        send.selected = Some(index);
+        send.form = None;
+        send.writer = None;
+        send.status = format!("Selected {}", topic.name);
+        send.error = false;
+        app.set_send_topic_index(index as i32);
+        update_send_props(app, &send);
+    }
+
+    let Some(schema) = schema_for(&topic.idl_type) else {
+        let mut send = state.send.borrow_mut();
+        send.status = format!("Error: unsupported topic type `{}`", topic.idl_type);
+        send.error = true;
+        update_send_props(app, &send);
+        return;
+    };
+
+    let form = SendForm::from_schema(&topic.idl_type, schema);
+    let rows: Vec<ui::SendField> = form.rows().iter().map(to_send_field).collect();
+    state.send_rows.set_vec(rows);
+
+    let writer_result = match state.resources.existing() {
+        Some(resources) => match resources.node() {
+            Some(node) => Some((
+                resources.clone(),
+                TopicWriter::new(node, &topic.name, &topic.idl_type),
+            )),
+            None => Some((
+                resources.clone(),
+                Err("the topic registry was not loaded; sending is unavailable".to_string()),
+            )),
+        },
+        None => None,
+    };
+
+    let unsupported = form.has_unsupported();
+    let mut send = state.send.borrow_mut();
+    send.form = Some(form);
+    match writer_result {
+        Some((resources, Ok(writer))) => {
+            send.resources = Some(resources);
+            send.writer = Some(writer);
+            send.status = format!("Ready: {}", topic.name);
+            send.error = false;
+        }
+        Some((resources, Err(error))) => {
+            send.resources = Some(resources);
+            send.status = format!("Error: {error}");
+            send.error = true;
+        }
+        None => {
+            send.status = format!("Selected {}; press Send to start DDS", topic.name);
+            send.error = false;
+        }
+    }
+    if unsupported && !send.error {
+        send.status = "This topic has unsupported field types".to_string();
+        send.error = true;
+    }
+    update_send_props(app, &send);
+}
+
+/// Create the selected topic's writer on first use. With `--no-discovery` this
+/// is the moment the shared participant is created.
+fn ensure_writer(state: &Rc<State>) -> Result<(), String> {
+    {
+        let send = state.send.borrow();
+        if send.writer.is_some() {
+            return Ok(());
+        }
+        if send.form.is_none() {
+            return Err("no topic selected".to_string());
+        }
+    }
+
+    let topic = {
+        let send = state.send.borrow();
+        send.selected
+            .and_then(|index| state.send_topics.get(index).cloned())
+            .ok_or_else(|| "no topic selected".to_string())?
+    };
+    let resources = state.resources.ensure(&state.log)?;
+    let node = resources
+        .node()
+        .ok_or_else(|| "the topic registry was not loaded; sending is unavailable".to_string())?;
+    let writer = TopicWriter::new(node, &topic.name, &topic.idl_type)?;
+
+    let mut send = state.send.borrow_mut();
+    send.resources = Some(resources);
+    send.writer = Some(writer);
+    if !send.error {
+        send.status = format!("Ready: {}", topic.name);
+    }
+    Ok(())
+}
+
+fn send_now(app: &MainWindow, state: &Rc<State>, timer: &Weak<Timer>) {
+    if let Err(error) = ensure_writer(state) {
+        if let Some(timer) = timer.upgrade() {
+            timer.stop();
+        }
+        let mut send = state.send.borrow_mut();
+        send.repeating = false;
+        send.error = true;
+        send.status = format!("Error: {error}");
+        update_send_props(app, &send);
+        return;
+    }
+
+    let result: Result<(), String> = (|| {
+        let send = state.send.borrow();
+        let form = send.form.as_ref().ok_or("no topic selected")?;
+        let writer = send.writer.as_ref().ok_or("no writer available")?;
+        let value = form.to_dynamic_value()?;
+        writer.write_dynamic(&value)
+    })();
+
+    match result {
+        Ok(()) => {
+            let mut send = state.send.borrow_mut();
+            send.sent += 1;
+            send.error = false;
+            send.status = format!("Sent {} sample(s)", send.sent);
+            update_send_props(app, &send);
+        }
+        Err(error) => {
+            if let Some(timer) = timer.upgrade() {
+                timer.stop();
+            }
+            let mut send = state.send.borrow_mut();
+            send.repeating = false;
+            send.error = true;
+            send.status = format!("Error: {error}");
+            update_send_props(app, &send);
+        }
+    }
+}
+
+fn start_sending(app: &MainWindow, state: &Rc<State>) {
+    if let Err(error) = ensure_writer(state) {
+        let mut send = state.send.borrow_mut();
+        send.repeating = false;
+        send.error = true;
+        send.status = format!("Error: {error}");
+        update_send_props(app, &send);
+        return;
+    }
+
+    let ready = state.send.borrow().ready();
+    if !ready {
+        let mut send = state.send.borrow_mut();
+        send.repeating = false;
+        send.error = true;
+        send.status = "Select a supported topic before sending".to_string();
+        update_send_props(app, &send);
+        return;
+    }
+
+    let (interval, timer) = {
+        let send = state.send.borrow();
+        (
+            Duration::from_millis(send.interval_ms.max(1)),
+            send.timer.clone(),
+        )
+    };
+
+    {
+        let mut send = state.send.borrow_mut();
+        send.repeating = true;
+        send.error = false;
+        send.status = format!("Sending every {} ms", interval.as_millis());
+        update_send_props(app, &send);
+    }
+
+    let weak_state = Rc::downgrade(state);
+    let weak_timer = Rc::downgrade(&timer);
+    let app_weak = app.as_weak();
+    timer.start(TimerMode::Repeated, interval, move || {
+        if let (Some(app), Some(state)) = (app_weak.upgrade(), weak_state.upgrade()) {
+            send_now(&app, &state, &weak_timer);
+        }
+    });
+}
+
+fn stop_sending(app: &MainWindow, state: &Rc<State>) {
+    let mut send = state.send.borrow_mut();
+    send.timer.stop();
+    send.repeating = false;
+    if !send.error {
+        send.status = "Stopped".to_string();
+    }
+    update_send_props(app, &send);
 }
 
 /// A submessage's envelope row, e.g.
@@ -752,11 +1084,17 @@ fn main() -> Result<(), slint::PlatformError> {
         .map(known_from_registry)
         .unwrap_or_default();
 
+    let resources = Rc::new(AppResources {
+        domain: args.domain,
+        config: config.clone(),
+        registry: registry.clone(),
+        slot: RefCell::new(None),
+    });
     let discovery_source = if args.no_discovery {
         log.log("discovery disabled by --no-discovery");
         None
     } else {
-        match DiscoverySource::new(args.domain, config.as_deref(), &log) {
+        match resources.ensure(&log).and_then(DiscoverySource::new) {
             Ok(source) => {
                 log.log("discovery participant created");
                 Some(source)
@@ -768,6 +1106,10 @@ fn main() -> Result<(), slint::PlatformError> {
             }
         }
     };
+    let send_topics = registry
+        .as_ref()
+        .map(|registry| registry.topics.clone())
+        .unwrap_or_default();
 
     let app = MainWindow::new()?;
 
@@ -816,6 +1158,10 @@ fn main() -> Result<(), slint::PlatformError> {
         trimmed: Cell::new(0),
         log,
         known_topics,
+        send_topics,
+        resources,
+        send: Rc::new(RefCell::new(SendRuntime::new())),
+        send_rows: Rc::new(VecModel::<ui::SendField>::default()),
     });
 
     let records = Rc::new(VecModel::<ui::RecordRow>::default());
@@ -831,6 +1177,24 @@ fn main() -> Result<(), slint::PlatformError> {
         &known,
         &unknown,
     );
+
+    app.set_send_fields(ModelRc::from(state.send_rows.clone()));
+    let send_topic_names: Vec<slint::SharedString> = state
+        .send_topics
+        .iter()
+        .map(|topic| topic.name.as_str().into())
+        .collect();
+    let send_topics_model = Rc::new(VecModel::<slint::SharedString>::default());
+    send_topics_model.set_vec(send_topic_names);
+    app.set_send_topics(ModelRc::from(send_topics_model));
+    app.set_send_interval_ms(state.send.borrow().interval_ms as i32);
+    {
+        let send = state.send.borrow();
+        update_send_props(&app, &send);
+    }
+    if !state.send_topics.is_empty() {
+        select_send_topic(&app, &state, 0);
+    }
 
     let timer = Rc::new(Timer::default());
 
@@ -1105,6 +1469,102 @@ fn main() -> Result<(), slint::PlatformError> {
         app.on_dismiss_error(move || {
             if let Some(app) = app_weak.upgrade() {
                 app.set_error_message("".into());
+            }
+        });
+    }
+
+    // Switch between the Capture and Send tabs.
+    {
+        let app_weak = app.as_weak();
+        app.on_select_tab(move |index| {
+            if let Some(app) = app_weak.upgrade() {
+                app.set_tab(index);
+            }
+        });
+    }
+
+    // Choose the topic to send.
+    {
+        let app_weak = app.as_weak();
+        let state = state.clone();
+        app.on_select_send_topic(move |index| {
+            if let Some(app) = app_weak.upgrade() {
+                select_send_topic(&app, &state, index);
+            }
+        });
+    }
+
+    // Text and number edits are kept in the Rust form, not the Slint model, so
+    // typing does not disturb the input cursor.
+    {
+        let state = state.clone();
+        app.on_send_field_edited(move |path, text| {
+            let mut send = state.send.borrow_mut();
+            if let Some(form) = send.form.as_mut() {
+                form.set_text(path.as_str(), text.to_string());
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        app.on_send_field_toggled(move |path, value| {
+            let mut send = state.send.borrow_mut();
+            if let Some(form) = send.form.as_mut() {
+                form.set_bool(path.as_str(), value);
+            }
+        });
+    }
+
+    // Apply an interval change immediately when repeating.
+    {
+        let app_weak = app.as_weak();
+        let state = state.clone();
+        app.on_send_interval_edited(move |value| {
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            let value = value.max(1) as u64;
+            let repeating = {
+                let mut send = state.send.borrow_mut();
+                send.interval_ms = value;
+                send.repeating
+            };
+            app.set_send_interval_ms(value as i32);
+            if repeating {
+                stop_sending(&app, &state);
+                start_sending(&app, &state);
+            }
+        });
+    }
+
+    {
+        let app_weak = app.as_weak();
+        let state = state.clone();
+        app.on_send_once(move || {
+            if let Some(app) = app_weak.upgrade() {
+                let timer = state.send.borrow().timer.clone();
+                send_now(&app, &state, &Rc::downgrade(&timer));
+            }
+        });
+    }
+
+    {
+        let app_weak = app.as_weak();
+        let state = state.clone();
+        app.on_send_start(move || {
+            if let Some(app) = app_weak.upgrade() {
+                start_sending(&app, &state);
+            }
+        });
+    }
+
+    {
+        let app_weak = app.as_weak();
+        let state = state.clone();
+        app.on_send_stop(move || {
+            if let Some(app) = app_weak.upgrade() {
+                stop_sending(&app, &state);
             }
         });
     }

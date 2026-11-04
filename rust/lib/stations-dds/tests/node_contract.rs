@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::sync::Once;
 
 use stations_dds::contract::TopicRegistry;
+use stations_dds::cyclonedds::DomainParticipant;
 use stations_dds::dds::{Error, Node};
 use stations_dds::{hello_world::HelloWorldTopic, math::Quaternion};
 
@@ -40,6 +41,21 @@ fn node_rejects_bad_topics() {
     assert!(matches!(
         node.writer::<Quaternion>("HelloWorldTopic"),
         Err(Error::TypeMismatch { .. })
+    ));
+    assert!(node.writer::<HelloWorldTopic>("HelloWorldTopic").is_ok());
+}
+
+#[test]
+fn node_shares_an_existing_participant() {
+    init();
+
+    let registry = TopicRegistry::load(&repo_root().join("contracts/topics.toml")).unwrap();
+    let participant = DomainParticipant::new(0).unwrap();
+    let node = Node::from_participant(participant, registry).unwrap();
+
+    assert!(matches!(
+        node.writer::<HelloWorldTopic>("NotRegistered"),
+        Err(Error::UnregisteredTopic(t)) if t == "NotRegistered"
     ));
     assert!(node.writer::<HelloWorldTopic>("HelloWorldTopic").is_ok());
 }

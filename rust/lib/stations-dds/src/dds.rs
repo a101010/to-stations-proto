@@ -77,6 +77,20 @@ impl Node {
         })
     }
 
+    /// Create a Node on an existing participant. The registry is validated the
+    /// same way as [`Node::new`], so callers can share a participant (for
+    /// example with a discovery source) without creating a second one.
+    pub fn from_participant(
+        participant: DomainParticipant,
+        registry: TopicRegistry,
+    ) -> Result<Self, Error> {
+        registry.validate()?;
+        Ok(Self {
+            participant,
+            registry,
+        })
+    }
+
     /// The underlying participant.
     pub fn participant(&self) -> &DomainParticipant {
         &self.participant

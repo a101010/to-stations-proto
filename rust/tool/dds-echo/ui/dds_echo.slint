@@ -1,4 +1,4 @@
-import { Button, LineEdit, ListView, ScrollView } from "std-widgets.slint";
+import { Button, CheckBox, ComboBox, LineEdit, ListView, ScrollView, SpinBox } from "std-widgets.slint";
 
 export struct Frame {
     line: string,
@@ -35,6 +35,17 @@ export struct TopicRow {
     known: bool,
     packets: int,
     selected: bool,
+}
+
+export struct SendField {
+    path: string,
+    label: string,
+    kind: string,
+    indent: int,
+    value: string,
+    bool-value: bool,
+    group: bool,
+    unsupported: bool,
 }
 
 component StatChip inherits Rectangle {
@@ -191,9 +202,68 @@ export component MainWindow inherits Window {
     in-out property <length> topic-menu-x: 0px;
     in-out property <length> topic-menu-y: 0px;
 
+    // Send tab.
+    in-out property <int> tab: 0;
+    in-out property <[string]> send-topics: [];
+    in-out property <int> send-topic-index: -1;
+    in-out property <[SendField]> send-fields: [];
+    in-out property <int> send-interval-ms: 100;
+    in-out property <bool> send-repeating: false;
+    in-out property <bool> send-ready: false;
+    in-out property <int> send-count: 0;
+    in-out property <string> send-status: "Select a topic";
+    in-out property <bool> send-error: false;
+
+    callback select-tab(int);
+    callback select-send-topic(int);
+    callback send-field-edited(string, string);
+    callback send-field-toggled(string, bool);
+    callback send-interval-edited(int);
+    callback send-once();
+    callback send-start();
+    callback send-stop();
+
     VerticalLayout {
         padding: 10px;
         spacing: 10px;
+
+        // ---- tabs ----
+        HorizontalLayout {
+            spacing: 4px;
+            Rectangle {
+                width: 100px;
+                height: 30px;
+                background: root.tab == 0 ? #2f3a44 : #242424;
+                border-radius: 4px;
+                Text {
+                    text: "Capture";
+                    color: root.tab == 0 ? #ffffff : #b0b0b0;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                }
+                TouchArea { clicked => { root.select-tab(0); } }
+            }
+            Rectangle {
+                width: 100px;
+                height: 30px;
+                background: root.tab == 1 ? #2f3a44 : #242424;
+                border-radius: 4px;
+                Text {
+                    text: "Send";
+                    color: root.tab == 1 ? #ffffff : #b0b0b0;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                }
+                TouchArea { clicked => { root.select-tab(1); } }
+            }
+            Rectangle { horizontal-stretch: 1; }
+        }
+
+        if root.tab == 0 : VerticalLayout {
+            spacing: 10px;
+            vertical-stretch: 1;
 
         // ---- toolbar ----
         HorizontalLayout {
@@ -358,6 +428,106 @@ export component MainWindow inherits Window {
                 }
             }
         }
+
+        // Keep the live tail pinned to the bottom while following.
+        Timer {
+            interval: 100ms;
+            running: root.follow;
+            triggered => {
+                if (root.follow) {
+                    list.content-y = min(0px, list.visible-height - list.content-height);
+                }
+            }
+        }
+        }
+
+        // ---- send ----
+        if root.tab == 1 : VerticalLayout {
+            spacing: 10px;
+            vertical-stretch: 1;
+
+            HorizontalLayout {
+                spacing: 8px;
+                Text { text: "Topic"; color: #9a9a9a; vertical-alignment: center; }
+                ComboBox {
+                    model: root.send-topics;
+                    current-index: root.send-topic-index;
+                    selected(value) => { root.select-send-topic(self.current-index); }
+                    min-width: 280px;
+                    max-width: 420px;
+                }
+                Rectangle { horizontal-stretch: 1; }
+            }
+
+            Rectangle {
+                vertical-stretch: 1;
+                background: #202020;
+                border-radius: 6px;
+                ScrollView {
+                    VerticalLayout {
+                        padding: 10px;
+                        spacing: 6px;
+                        for f in root.send-fields : VerticalLayout {
+                            spacing: 2px;
+                            if f.group : HorizontalLayout {
+                                padding-left: f.indent * 16px;
+                                Text { text: f.label; color: #9aa0b0; font-weight: 600; }
+                            }
+                            if !f.group : HorizontalLayout {
+                                padding-left: f.indent * 16px;
+                                spacing: 8px;
+                                Text {
+                                    text: f.label;
+                                    color: f.unsupported ? #c9a26a : #d0d0d0;
+                                    width: 220px;
+                                    vertical-alignment: center;
+                                }
+                                if f.kind == "bool" : CheckBox {
+                                    checked: f.bool-value;
+                                    toggled => { root.send-field-toggled(f.path, self.checked); }
+                                }
+                                if f.kind != "bool" : LineEdit {
+                                    text: f.value;
+                                    read-only: f.unsupported;
+                                    edited(text) => { root.send-field-edited(f.path, text); }
+                                }
+                                if f.unsupported : Text {
+                                    text: "unsupported";
+                                    color: #ff8080;
+                                    vertical-alignment: center;
+                                }
+                                Rectangle { horizontal-stretch: 1; }
+                            }
+                        }
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 8px;
+                Text { text: "interval (ms)"; color: #9a9a9a; vertical-alignment: center; }
+                SpinBox {
+                    minimum: 1;
+                    maximum: 60000;
+                    step-size: 10;
+                    value: root.send-interval-ms;
+                    edited(value) => { root.send-interval-edited(value); }
+                    min-width: 130px;
+                    max-width: 170px;
+                }
+                Button { text: "Send Once"; enabled: root.send-ready; clicked => { root.send-once(); } }
+                Button { text: "Start"; enabled: root.send-ready && !root.send-repeating; clicked => { root.send-start(); } }
+                Button { text: "Stop"; enabled: root.send-repeating; clicked => { root.send-stop(); } }
+                Rectangle { horizontal-stretch: 1; }
+                Text { text: "sent " + root.send-count; color: #9a9a9a; vertical-alignment: center; }
+            }
+
+            Text {
+                text: root.send-status;
+                color: root.send-error ? #ff8080 : #9ae6a0;
+                wrap: word-wrap;
+            }
+        }
     }
 
     // Topic-selection context menu (right-click in the topics pane).
@@ -414,14 +584,4 @@ export component MainWindow inherits Window {
         }
     }
 
-    // Keep the live tail pinned to the bottom while following.
-    Timer {
-        interval: 100ms;
-        running: root.follow;
-        triggered => {
-            if (root.follow) {
-                list.content-y = min(0px, list.visible-height - list.content-height);
-            }
-        }
-    }
 }
