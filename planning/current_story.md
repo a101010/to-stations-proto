@@ -191,7 +191,15 @@ cargo test --manifest-path rust/Cargo.toml -p single-instance
 
 ## Result
 
-Not started.
+Implemented and verified:
+
+- Added `rust/lib/single-instance` with the `acquire`/`activate_existing_window` API.
+- The primary instance holds `Local\to-stations-<tool>` for its lifetime; a duplicate closes its handle, restores and foregrounds the existing window by title, then exits.
+- `dds-echo` acquires the guard after argument parsing and before opening its discovery log or creating DDS/Slint resources.
+- The activation path restores minimized windows, calls `SetForegroundWindow`, uses `AttachThreadInput` (with a temporary message queue) when needed, and falls back to `SwitchToThisWindow`.
+- `single-instance` unit test passes; `.\scripts\build.ps1 -Test` passes; `.\scripts\build.ps1` deploys.
+- Manual duplicate test passed: the first window was minimized, a second launch exited, the first returned to the foreground, a third launch exited, `--help` exited successfully, and only one `dds-echo` process remained.
+- The architecture rule is recorded in `planning/architecture.md`.
 
 ## Bookkeeping
 

@@ -1060,6 +1060,7 @@ dependencies = [
  "clap",
  "cyclonedds-rust-sys",
  "if-addrs",
+ "single-instance",
  "slint",
  "slint-build",
  "socket2",
@@ -4336,6 +4337,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a9c6883ca9c3c7c90e888de77b7a5c849c779d25d74a1269b0218b14e8b136c"
 dependencies = [
  "log",
+]
+
+[[package]]
+name = "single-instance"
+version = "0.0.0"
+dependencies = [
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

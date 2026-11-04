@@ -1171,6 +1171,15 @@ fn known_from_registry(registry: &TopicRegistry) -> KnownTopics {
 
 fn main() -> Result<(), slint::PlatformError> {
     let args = Args::parse();
+
+    let _instance = match single_instance::acquire("dds-echo") {
+        single_instance::Acquire::Primary(guard) => guard,
+        single_instance::Acquire::Duplicate => {
+            single_instance::activate_existing_window("dds-echo");
+            return Ok(());
+        }
+    };
+
     let log = DiscoveryLog::open(args.discovery_log.as_deref());
     log.log(format!("dds-echo starting; domain={}", args.domain));
 
