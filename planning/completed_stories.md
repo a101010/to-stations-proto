@@ -201,3 +201,9 @@ Add a send screen to `dds-echo`: the window becomes two tabs, **Capture** (the c
 - **Completed:** 2026-11-04 13:23:16.
 - **Depends on:** none.
 - **Minimal test:** with the fleet running, fill the hello-world fields and press Send; subscribers receive the sample and it appears on Capture with sender `self`; with no subscriber, Send reports that it was not transmitted. The tool's own periodic discovery is labeled `self`/`discovery` and can be hidden.
+
+### gui-single-instance
+Add a reusable Windows named-mutex single-instance guard for manually launched singleton GUI tools, and use it in `dds-echo`. A second `dds-echo` launch restores and foregrounds the existing window, then exits without creating a DDS participant or window. The guard is not used by fleet-launched applications or per-station/per-display windows.
+- **Completed:** 2026-11-04 13:48:29.
+- **Depends on:** none.
+- **Minimal test:** start `dds-echo`, minimize it, and launch a second `dds-echo`; the first window comes to the foreground, the second exits, and only one process/participant remains.

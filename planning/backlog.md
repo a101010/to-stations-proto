@@ -37,17 +37,11 @@ Third-party libraries are built/installed to an external prefix (for example `C:
 
 **Done when.** `launch-rust.ps1` brings up the model service, the view service, and `lil-d` from `build/deploy`; `lil-d` shows the tilted, cube-mapped earth lit from the upper right with the greeting text rendered in the loaded font, its power button works, and the format manager switches between the default and hello-world formats. `dds-echo` observes every topic in the registry, `--topics` and `build/topics.md` match `contracts/`, and `cleanup.ps1` stops everything.
 
-### gui-single-instance
-Add a reusable Windows named-mutex single-instance guard for manually launched singleton GUI tools, and use it in `dds-echo`. A second `dds-echo` launch restores and foregrounds the existing window, then exits without creating a DDS participant or window. The guard is not used by fleet-launched applications or per-station/per-display windows.
-- **Depends on:** none.
-- **Minimal test:** start `dds-echo`, minimize it, and launch a second `dds-echo`; the first window comes to the foreground, the second exits, and only one process/participant remains.
-- **Status:** in progress.
-
 ### dds-echo-copy-detail
-Make the `dds-echo` detail pane copyable: add a Copy action that exports the selected record's time, protocol, sender (including `self`), participant and writer GUIDs, size, topic, submessages, decoded fields, and hex as plain text; make the hex and decoded blocks selectable read-only text.
+Make the `dds-echo` detail pane selectable read-only text so the user can select any portion and copy it with Ctrl+C. Render the selected record's time, protocol, sender (including `self`), participant and writer GUIDs, size, topic, submessages, decoded fields, and hex in one selectable text view. No copy button is added.
 - **Depends on:** none.
-- **Minimal test:** select a record, copy it, and paste into an editor; the pasted text contains the sender and decoded fields.
-- **Status:** todo.
+- **Minimal test:** select a record, select sender lines in the detail pane, press Ctrl+C, and paste into an editor; the pasted text is the selected portion.
+- **Status:** in progress.
 
 ## Later increments
 
