@@ -7,7 +7,7 @@ This file is the detailed, living plan for the one active story. It is rewritten
 Add a **Send** tab to `dds-echo`. The window becomes two tabs: **Capture** (the current UI unchanged) and **Send**. In Send, choose a topic registered in `contracts/topics.toml`, edit its fields through a form generated from `DdsFieldMetadata`, and publish the sample once or periodically at a chosen interval. Publishing uses `stations-dds` (`Node` typed writer).
 
 - **Depends on:** none; `topic-field-metadata` is complete and provides `DdsFieldMetadata`.
-- **Minimal test:** run `dds-echo` alone, start Capture, fill the hello-world fields in Send, press Send; the sample appears on the Capture tab decoded as a known topic.
+- **Minimal test:** with the process fleet running, launch `dds-echo` midstream, select `HelloWorldTopic`, fill the hello-world fields, and press Send; the fleet's subscribers receive it and the sample appears on the Capture tab decoded as a known topic with sender `self`. With no matching subscriber, Send reports that nothing was transmitted. dds-echo's own periodic SPDP appears as `self` discovery and can be hidden.
 
 ## Context
 
@@ -157,16 +157,19 @@ Automated, in `rust/tool/dds-echo/src/send.rs` tests:
 - Invalid numeric input reports the offending field path.
 - Every registered topic has a sender handler, so adding a registry entry without a sender fails the test.
 
-Manual, one run:
+Manual, one run (fleet workflow):
 
-1. Run `build/deploy/bin/dds-echo.exe` alone; no services are needed.
-2. Start Capture.
+1. Start the fleet with `launch-rust.ps1`.
+2. Launch `build/deploy/bin/dds-echo.exe` midstream and start Capture.
 3. Switch to Send, select `HelloWorldTopic`, set greeting to a unique value (for example `dds-echo-send-test`) and `attitude.w = 1`.
-4. Press **Send Once**; verify a Known `HelloWorldTopic` record appears and the detail pane decodes the unique greeting.
-5. Set the interval to 100 ms, press **Start**, switch to Capture, and verify packets and samples continue; press **Stop** and verify sending stops.
-6. Select `HelloWorldViewTopic`, set a unique greeting and `valid`, send; verify the decoded `valid` field.
-7. Enter an invalid float (for example `abc`); verify a Send error appears and no sample is published.
-8. Confirm Capture Start/Stop/Clear, topic filtering, selection, and the context menu still work.
+4. Confirm the Send status shows at least one matched subscriber, then press **Send Once**.
+5. Verify the view service/display receives the greeting and Capture shows a Known `HelloWorldTopic` record with sender `self` and the decoded greeting.
+6. Set the interval to 100 ms, press **Start**, switch to Capture, and verify packets and samples continue; press **Stop** and verify sending stops.
+7. Select `HelloWorldViewTopic`, set a unique greeting and `valid`, send; verify the display receives it and Capture decodes `valid`.
+8. Enter an invalid float (for example `abc`); verify a Send error appears and no sample is published.
+9. Stop the fleet and press **Send Once**; verify Send reports that no subscriber matched and does not claim success.
+10. Verify dds-echo's own periodic discovery is labelled `self`/`discovery`, and use **Hide self** to make Capture empty.
+11. Confirm Capture Start/Stop/Clear, topic filtering, selection, and the context menu still work.
 
 ## Verification
 
@@ -189,6 +192,9 @@ Manual, one run:
 - **UI-thread writes:** periodic writes run on the Slint event loop. At very high rates this can jitter; validate the interval and treat a dedicated send thread as a follow-up if needed.
 - **Registry growth:** the "every registered topic has a handler" test intentionally fails when a topic is added without a sender, forcing the mapping to be updated.
 - **QoS and capture visibility:** Send uses the registry QoS; a best-effort sample may be missed by capture, so retry or send once more during acceptance.
+- **DDS matching:** a writer sends user data only to matched readers. With no subscriber, the write is local-only; Send must report that rather than claim success.
+- **Multicast visibility:** if subscribers receive a sample but Capture does not, the writer chose unicast. Diagnose the shared `AddrsetCosts`/`AllowMulticast` configuration; do not substitute a synthetic record.
+- **Self discovery:** dds-echo's own SPDP is expected at ~8 s with the default 10 s lease. It must be labelled `self`/`discovery` and filterable, not shown as unidentified.
 
 ## Files touched
 
@@ -199,15 +205,66 @@ Manual, one run:
 - `rust/lib/stations-dds/tests/node_contract.rs`
 - `rust/tool/dds-echo/src/send.rs` (new)
 - `rust/tool/dds-echo/src/main.rs`
+- `rust/tool/dds-echo/src/model.rs`
 - `rust/tool/dds-echo/ui/dds_echo.slint`
 - `README.md`
 
+## Follow-up fixes (active)
+
+The initial Send implementation works, but use revealed two problems:
+
+1. Sending with no matched subscriber reports success while nothing reaches the wire. DDS writers transmit user data only to matched readers; dds-echo's Capture is a raw UDP snooper, not a subscriber.
+2. dds-echo's own SPDP appears as `unidentified` every ~8 s. The shared config leaves the CycloneDDS defaults: a 10 s participant lease and `SPDPInterval` at ~80% of the lease (8 s).
+
+The target use case is the running process fleet: launch the fleet, launch dds-echo midstream, send a topic, and all subscribers in the fleet receive it. The follow-up must make that workflow observable and explicit.
+
+### Matched subscribers
+
+- Add `TopicWriter::matched_readers()` backed by `DataWriter::matched_subscriptions()`.
+- Show the matched count in the Send status.
+- On Send Once/Start, if the count is zero, do not claim success: report "no matching subscriber; sample not transmitted" and do not increment the sent count.
+- When the count is positive, perform the normal typed DDS write and report the subscriber count.
+- Do not add a raw-RTPS fallback. It would not reach fleet subscribers and would misrepresent DDS delivery.
+
+### Fleet acceptance and multicast visibility
+
+- Reproduce with `launch-rust.ps1` running, then launch dds-echo midstream.
+- Confirm `HelloWorldTopic` matches `hello-view-service` and `HelloWorldViewTopic` matches `lil-d`, and that a unique greeting reaches the display.
+- Confirm Capture shows the same sample with sender `self`.
+- If subscribers receive the sample but Capture does not, diagnose multicast versus unicast: compare with `traffic-throughput.ps1` (which proves separate-process DDS traffic is capturable), inspect the shared `AddrsetCosts`/`AllowMulticast` configuration, and fix the writer's address selection. Do not hide the problem with a synthetic record.
+
+### Self discovery labeling and filtering
+
+- Get dds-echo's own participant GUID prefix with `dds_get_guid` (`DdsEntity` + `cyclonedds_rust_sys`).
+- Add a `self` flag to `model::Record` and show `self` in the table's sender column; the detail pane keeps the actual address.
+- Classify SPDP/SEDP as `discovery` rather than `unidentified`; show `SPDP participant announcement` / `SEDP endpoint announcement` in the detail pane.
+- Exclude self from the remote `participants`/`endpoints` counters while retaining its endpoints for topic attribution.
+- Add a **Hide self** checkbox so Capture can be made completely empty when only dds-echo is running.
+- Document the ~8 s self SPDP in `README.md`.
+
+### Follow-up tests
+
+- `TopicWriter::matched_readers()` reports zero without a reader and positive with one.
+- Self/discovery classification: self records are marked, SPDP/SEDP are bucketed as discovery, and self is excluded from remote counters.
+- Hide-self filtering removes self records without hiding remote or user data.
+- Fleet manual test above.
+
 ## Result
 
-Not started.
+Initial implementation complete; two use issues are being addressed by the follow-up fixes above:
+
+- `Node::from_participant` was added to `stations-dds` and covered by `node_shares_an_existing_participant`.
+- `dds-echo` now shares one DDS participant between discovery and Send; `--no-discovery` creates it lazily on first Send.
+- `rust/tool/dds-echo/src/send.rs` generates forms from `DdsFieldMetadata`, maps both registered types to typed writers, and rejects unsupported field kinds.
+- The window has Capture and Send tabs. Send chooses a registered topic, edits generated fields, and publishes once or periodically at the chosen interval; repeating continues across tabs and stops on topic change.
+- Tests cover field enumeration, typed conversion, invalid input, registry coverage, and an end-to-end typed write/read.
+- `.\scripts\build.ps1 -Test` passed and `.\scripts\build.ps1` deployed successfully.
+- `README.md` documents the Send tab.
+- The manual UI acceptance run remains for the user; the release binary starts and creates the shared participant.
 
 ## Bookkeeping
 
 - `topic-field-metadata` was completed at `2026-10-27 15:31:10` and moved to `completed_stories.md`.
-- `dds-echo-send` is `in progress` in `backlog.md`.
+- `dds-echo-send` is `in progress` in `backlog.md`; its follow-up fixes are active.
+- `dds-echo-copy-detail` is the planned next story in `backlog.md`.
 - Do not move `dds-echo-send` to `completed_stories.md` until the user asks to plan the next story.

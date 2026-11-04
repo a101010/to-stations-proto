@@ -157,7 +157,9 @@ $env:CYCLONEDDS_URI = 'file://T:/DDS/cyclonedds-config.xml'
 
 ### dds-echo traffic generators
 
-`dds-echo` captures DDSI-RTPS multicast so traffic can be inspected. To generate traffic while it is capturing, use the committed wrappers under `scripts/` (each points the source at `DDS/cyclonedds-config.xml` and makes `ddsc.dll` available):
+`dds-echo` captures DDSI-RTPS multicast so traffic can be inspected. Its **Send** tab publishes any topic registered in `contracts/topics.toml`: choose the topic, fill in the generated fields, then send once or periodically at the chosen interval. Publishing uses `stations-dds` and the same DDS configuration as capture, so a sent sample appears on the Capture tab; a unique greeting makes it easy to identify.
+
+To generate traffic while it is capturing, use the committed wrappers under `scripts/` (each points the source at `DDS/cyclonedds-config.xml` and makes `ddsc.dll` available):
 
 ```
 .\scripts\traffic-throughput.ps1 -Seconds 30     # throughput example (subscriber + publisher)

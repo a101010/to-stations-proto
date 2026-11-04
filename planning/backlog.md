@@ -38,10 +38,16 @@ Third-party libraries are built/installed to an external prefix (for example `C:
 **Done when.** `launch-rust.ps1` brings up the model service, the view service, and `lil-d` from `build/deploy`; `lil-d` shows the tilted, cube-mapped earth lit from the upper right with the greeting text rendered in the loaded font, its power button works, and the format manager switches between the default and hello-world formats. `dds-echo` observes every topic in the registry, `--topics` and `build/topics.md` match `contracts/`, and `cleanup.ps1` stops everything.
 
 ### dds-echo-send
-Add a send screen to `dds-echo`: the window becomes two tabs, **Capture** (the current UI) and **Send**. In the Send tab, choose a registered topic from `contracts/topics.toml`, fill in its fields, and publish the sample **once or periodically** at a chosen rate. Publishing uses `stations-dds` (a `Node` typed writer); per-type field forms come from `topic-field-metadata`.
+Add a send screen to `dds-echo`: the window becomes two tabs, **Capture** (the current UI) and **Send**. In the Send tab, choose a registered topic from `contracts/topics.toml`, fill in its fields, and publish the sample **once or periodically** at a chosen rate. Publishing uses `stations-dds` (a `Node` typed writer); per-type field forms come from `topic-field-metadata`. Send reports matched subscribers and does not claim success when nothing is transmitted. Label dds-echo's own SPDP/SEDP as `self` discovery and make it filterable.
 - **Depends on:** none.
-- **Minimal test:** in the Send tab, fill the hello-world fields and press Send; the sample appears on the Capture tab.
+- **Minimal test:** with the fleet running, fill the hello-world fields and press Send; subscribers receive the sample and it appears on Capture with sender `self`; with no subscriber, Send reports that it was not transmitted. The tool's own periodic discovery is labelled `self`/`discovery` and can be hidden.
 - **Status:** in progress.
+
+### dds-echo-copy-detail
+Make the `dds-echo` detail pane copyable: add a Copy action that exports the selected record's time, protocol, sender (including `self`), participant and writer GUIDs, size, topic, submessages, decoded fields, and hex as plain text; make the hex and decoded blocks selectable read-only text.
+- **Depends on:** dds-echo-send.
+- **Minimal test:** select a record, copy it, and paste into an editor; the pasted text contains the sender and decoded fields.
+- **Status:** todo.
 
 ## Later increments
 
