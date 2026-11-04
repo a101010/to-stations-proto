@@ -189,3 +189,9 @@ Create the hello_world model service (`hello-service`): publish `HelloWorldTopic
 - **Completed:** 2026-10-27 10:08:01.
 - **Depends on:** none.
 - **Minimal test:** `launch-rust.ps1` starts the model service, view service, and display; `dds-echo` shows `HelloWorldTopic` and `HelloWorldViewTopic`; the display renders the model-driven world; stopping `hello-service` shows the last earth and a counting `NoConn hh:mm:ss`; restarting resumes valid data; the greeting changes within 15-60 seconds; `cleanup.ps1` stops all three.
+
+### topic-field-metadata
+Consume the fork's `DdsFieldMetadata` implementation (fork rev `952906b`): re-pin the Rust dependencies and codegen rev, regenerate the hello_world types, and add a `stations-dds` test that enumerates a generated topic's fields and round-trips a value through the typed sample. `dds-echo` is unchanged; the send form and detail-pane integration come later.
+- **Completed:** 2026-10-27 15:31:10.
+- **Depends on:** none.
+- **Minimal test:** `rust/lib/stations-dds/tests/field_metadata.rs` enumerates `HelloWorldTopic`/`HelloWorldViewTopic` fields from the metadata and round-trips typed values through the dynamic value conversions.

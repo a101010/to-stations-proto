@@ -1,128 +1,213 @@
-# Current story: topic-field-metadata
+# Current story: dds-echo-send
 
 This file is the detailed, living plan for the one active story. It is rewritten for each story. The backlog in `backlog.md` holds all work and the per-story status.
 
 ## Story
 
-Consume the fork's `DdsFieldMetadata` implementation by re-pinning `cyclonedds-rust` from `acef684` to `952906b`, regenerate the hello_world types, and add a `stations-dds` acceptance test that enumerates a generated topic's fields and round-trips a value through the typed sample. Do not change `dds-echo` in this story.
+Add a **Send** tab to `dds-echo`. The window becomes two tabs: **Capture** (the current UI unchanged) and **Send**. In Send, choose a topic registered in `contracts/topics.toml`, edit its fields through a form generated from `DdsFieldMetadata`, and publish the sample once or periodically at a chosen interval. Publishing uses `stations-dds` (`Node` typed writer).
 
-- **Depends on:** none; the fork implementation is available at `952906b`.
-- **Minimal test:** `stations-dds/tests/field_metadata.rs` enumerates the fields of `HelloWorldTopic`/`HelloWorldViewTopic` from `DdsFieldMetadata::field_schema` and round-trips typed values through `to_dynamic_value`/`from_dynamic_value`.
+- **Depends on:** none; `topic-field-metadata` is complete and provides `DdsFieldMetadata`.
+- **Minimal test:** run `dds-echo` alone, start Capture, fill the hello-world fields in Send, press Send; the sample appears on the Capture tab decoded as a known topic.
 
 ## Context
 
-The to-stations tool `dds-echo` (and the future `tentacles-injector`) needs generic field views for any topic registered in `contracts/topics.toml`. Rust has no runtime reflection, so the field knowledge must be generated at compile time.
+`dds-echo` is currently a capture-only inspector: it records DDSI-RTPS traffic, attributes writers through a discovery-only participant, and decodes registered samples. It has no way to originate traffic.
 
-The fork already implements this work on branch `multifile` at rev `952906b`:
+`topic-field-metadata` added generated `DdsFieldMetadata` implementations for the hello_world types. The trait exposes each type's `DynamicTypeSchema`, conversion to and from `DynamicValue`, and field get/set helpers. That is enough to generate a typed editor for any registered topic without runtime reflection.
 
-- `cyclonedds/src/field_metadata.rs` defines `DdsFieldMetadata`.
-- `cyclonedds-build` emits `field_schema`, `to_dynamic_value`, `from_dynamic_value`, and the field get/set helpers for generated structs, enums, bitmasks, and unions.
-- The fork's test suite covers schema enumeration and round-tripping for primitives, strings, bounds, typedefs, nested structs, sequences, arrays, optionals, enums, bitmasks, and unions.
-
-`to-stations-proto` still pins `acef684`, which predates the trait, so the generated hello_world types have no field metadata. This story is therefore an integration and verification story, not a second implementation of the fork feature.
-
-The fork plan explicitly leaves `dds-echo` UI work to the later `dds-echo-send` story. The detail pane will continue to use its interim pretty-print for now.
+The send form must eventually serve `tentacles-injector`, but this story keeps the `idl_type` dispatch local to `dds-echo`; extract it to `stations-dds` when the second consumer appears.
 
 ## Decisions
 
-1. **Consume the fork; do not duplicate it.** Re-pin to `952906b5018831683c0863cd11001bdac427ee10`. Do not copy the fork's source into this repository.
-2. **Update both pins.** `rust/Cargo.toml` and `scripts/build.ps1` carry independent revision strings; both must use the new rev. Regenerate `rust/Cargo.lock` for `cyclonedds`, `cyclonedds-derive`, `cyclonedds-rust-sys`, and `cyclonedds-src`. Key the codegen install target directory by rev so Cargo cannot reuse the previous `cyclonedds-idlc` binary when the package version is unchanged.
-3. **No `dds-echo` changes.** This story exposes and verifies the generated metadata. `dds-echo`'s detail pane and send form remain for `dds-echo-send`/the detail-pane follow-up.
-4. **No new dependencies.** The fork feature uses `std::sync::OnceLock`, `DynamicTypeSchema`, and `DynamicValue`; to-stations gains only the pinned revision.
-5. **Test the actual generated types.** The fork tests cover the full type matrix. The to-stations test uses the hello_world IDL types that this repository actually builds and consumes.
+1. **Form coverage: current registry kinds.** Generate editors for strings, all primitives, bool, enum, bitmask, and nested structs. Optional, sequence, array, union, and map fields render as unsupported and block sending with a clear error. No registered topic needs them yet; the form remains schema-driven so adding them later is localized.
+2. **One DDS participant.** Add `Node::from_participant` to `stations-dds` and share the existing discovery participant. This keeps the `participants` stat accurate and avoids a second participant. `Node::new` remains unchanged for the services.
+3. **Repeat semantics.** Provide `Send Once`, `Start`, `Stop`, and an interval in milliseconds. Repeating continues while viewing Capture; changing the selected topic stops repeating.
+4. **Keep dispatch local for now.** The typed `idl_type` -> schema/writer mapping lives in `dds-echo/src/send.rs`. Extract it to `stations-dds` when `tentacles-injector` needs the same mapping.
+5. **No new dependencies and no new executable.** `dds-echo` already depends on `slint`, `stations-dds`, and `clap`. `scripts/build.ps1` already builds and deploys `dds-echo`; only its code and UI change.
+6. **No service contract.** `dds-echo` is a tool, not a launched service; its send topics are chosen at runtime. `contracts/services/` is unchanged.
 
 ## Interfaces
 
-`cyclonedds::DdsFieldMetadata` (native feature) provides:
+### `stations-dds`
+
+Add to `rust/lib/stations-dds/src/dds.rs`:
 
 ```rust
-pub trait DdsFieldMetadata: Sized + 'static {
-    fn field_schema() -> &'static DynamicTypeSchema;
-    fn to_dynamic_value(&self) -> DynamicValue;
-    fn from_dynamic_value(value: &DynamicValue) -> DdsResult<Self>;
-    fn field_names() -> Vec<String>;
-    fn get_field(&self, name: &str) -> DdsResult<DynamicValue>;
-    fn set_field(&mut self, name: &str, value: DynamicValue) -> DdsResult<()>;
+impl Node {
+    /// Create a contract-aware Node on an existing participant.
+    pub fn from_participant(
+        participant: DomainParticipant,
+        registry: TopicRegistry,
+    ) -> Result<Self, Error>;
 }
 ```
 
-For the current IDL, codegen should emit impls for:
+It validates the registry and stores the participant. `Node::new` remains unchanged.
 
-- `math::Quaternion`
-- `hello_world::HelloWorldTopic`
-- `hello_world::HelloWorldViewTopic`
+### `dds-echo` send module (`src/send.rs`, new)
 
-The generated `HelloWorldTopic` schema is a struct with `greeting: string` and `attitude: math::Quaternion`. The view schema adds `valid: boolean`.
+- `schema_for(idl_type: &str) -> Option<&'static DynamicTypeSchema>` maps every registered type to its generated metadata.
+- `SendForm`:
+  - built recursively from a `DynamicTypeSchema`;
+  - flattening: structs become a group row plus indented child rows; primitives, strings, bools, enums, and bitmasks become editable rows;
+  - stores edited text/bool values in Rust, not in the Slint model;
+  - `to_dynamic_value(&self) -> Result<DynamicValue, String>` parses values, applies them to `schema.default_value()`, and validates against the schema.
+- `TopicWriter`:
+  - variants for `HelloWorldTopic` and `HelloWorldViewTopic`;
+  - `new(node: &Node, topic: &str, idl_type: &str) -> Result<Self, String>`;
+  - `write_dynamic(&self, value: &DynamicValue) -> Result<(), String>`, which converts via `from_dynamic_value` and calls `DataWriter::write`.
+
+Unsupported rows are reported by path so the status line can identify the field.
+
+### `dds-echo` resource handling
+
+Introduce a shared resource owner in `dds-echo`:
+
+```rust
+struct DdsResources {
+    participant: DomainParticipant,
+    node: Option<Node>,
+    _domain: Option<DomainGuard>,
+}
+```
+
+- `DdsResources::new(domain, config, registry)` creates the domain guard, the participant, and the `Node` via `Node::from_participant`.
+- Move domain creation out of `DiscoverySource`; `DiscoverySource` receives or clones the shared `Rc<DdsResources>` and creates its builtin readers on `resources.participant`.
+- Field order keeps participants and nodes dropping before `_domain`.
+- When discovery is enabled, resources are created at startup. With `--no-discovery`, resources are created lazily on first Send, so passive capture remains passive until the user actually sends.
+
+### UI (`ui/dds_echo.slint`)
+
+New struct:
+
+```slint
+export struct SendField {
+    path: string,
+    label: string,
+    kind: string,       // "string" | "bool" | "int" | "float" | "enum" | "bitmask" | "group" | "unsupported"
+    indent: int,
+    value: string,
+    bool-value: bool,
+    group: bool,
+    unsupported: bool,
+}
+```
+
+New properties and callbacks:
+
+- `tab` (0 Capture, 1 Send)
+- `send-topics: [string]`, `send-topic-index: int`
+- `send-fields: [SendField]`
+- `send-interval-ms: int` (default 100)
+- `send-repeating: bool`, `send-ready: bool`, `send-count: int`
+- `send-status: string`
+- callbacks: `select-tab(int)`, `select-send-topic(int)`, `send-field-edited(string, string)`, `send-field-toggled(string, bool)`, `send-interval-edited(int)`, `send-once()`, `send-start()`, `send-stop()`
+
+Layout:
+
+- Two-button tab bar at the top.
+- **Capture** tab: the entire current toolbar, stats, and main layout moved under `if root.tab == 0`.
+- **Send** tab:
+  - topic `ComboBox`;
+  - `ScrollView` form with group labels, `LineEdit` for text and number rows, `CheckBox` for bool rows, and an "unsupported" marker for unsupported kinds;
+  - interval `SpinBox` (1-60000 ms, step 10);
+  - `Send Once`, `Start`, and `Stop` buttons;
+  - status line showing readiness, sent count, or the last error.
+- Do not rewrite the row model on each keystroke; keep edits in Rust so Slint's input cursor is not disturbed. Rebuild the model only when the selected topic changes.
 
 ## Implementation steps
 
-1. **Planning bookkeeping.** The completed `hello-service` story has been moved to `completed_stories.md` with completion time `2026-10-27 10:08:01` and removed from `backlog.md`; `topic-field-metadata` is now the active story.
-2. **Re-pin.** Change the fork revision in:
-   - `rust/Cargo.toml` (`cyclonedds`, `cyclonedds-rust-sys`)
-   - `scripts/build.ps1` (`$forkRev`)
-3. **Update the lock file.**
-   ```powershell
-   cargo update -p cyclonedds -p cyclonedds-derive -p cyclonedds-rust-sys -p cyclonedds-src
-   ```
-   Confirm all four packages resolve to `952906b5018831683c0863cd11001bdac427ee10`.
-4. **Regenerate.** Run `.\scripts\build.ps1 -Test`; it reinstalls the codegen tool from the new rev and regenerates `build/gen/rust/hello_world.rs`. Confirm the generated file contains `impl cyclonedds::DdsFieldMetadata` for all three types and nested `Quaternion` schema references.
-5. **Add the acceptance test** at `rust/lib/stations-dds/tests/field_metadata.rs`.
-6. **Update living documentation**:
-   - `docs/versions.md`: new fork revision and the field-metadata feature.
-   - `README.md`: new revision and feature list.
-   - `planning/backlog.md`: external-component revision.
-   - `planning/cyclonedds-build-plan.md`: record the metadata increment.
-7. **Verify once** with `.\scripts\build.ps1 -Test`; if it passes, run `.\scripts\build.ps1` once to refresh deploy artifacts. Do not take screenshots; there is no UI change.
-8. **Record completion** in `current_story.md` while leaving the backlog status `in progress` until the user asks to plan the next story.
+1. **Planning bookkeeping.**
+   - The completed `topic-field-metadata` story has been moved to `completed_stories.md` with completion time `2026-10-27 15:31:10` and removed from `backlog.md`; `dds-echo-send` is now the active story.
+2. **`stations-dds`.**
+   - Add `Node::from_participant` in `rust/lib/stations-dds/src/dds.rs`.
+   - Extend `rust/lib/stations-dds/tests/node_contract.rs` to create a participant and construct a `Node` through the new constructor; verify registered and mis-typed topic behavior.
+3. **`dds-echo` resources.**
+   - Move `DomainGuard` and domain creation out of `DiscoverySource`.
+   - Add the shared `DdsResources`; wire startup discovery to it.
+   - Keep inherited `CYCLONEDDS_URI` ignored; the explicit deploy/config path remains authoritative.
+4. **`dds-echo` send logic.**
+   - Add `src/send.rs` with the form model, schema flattening, typed dispatch, and tests.
+   - Parse and validate on send, not on every keystroke.
+   - Support bool toggles, numeric and text edits, and nested struct paths such as `attitude.x`.
+5. **Wire `main.rs`.**
+   - Load the registry into the send runtime (clone from the validated registry).
+   - Build the Send tab topic list and select the first topic by default.
+   - Create or recreate the `TopicWriter` on topic selection; stop repeating on topic change.
+   - Wire field edits and toggles, `Send Once`, `Start`, `Stop`, and interval changes.
+   - Use a `slint::Timer` for periodic sends; on write failure, stop repeating and show the error in `send-status`.
+6. **Update `ui/dds_echo.slint`.**
+   - Add the tab bar, the Send tab, `SendField`, properties, and callbacks.
+   - Preserve all current Capture behavior and the topic context menu.
+7. **Documentation.**
+   - `README.md`: add a short paragraph under the `dds-echo` section describing the Send tab, that it uses `stations-dds` and the shared DDS configuration, and that a unique greeting helps identify sent samples.
+8. **Verification.**
+   - `.\scripts\build.ps1 -Test`
+   - `.\scripts\build.ps1`
+   - One manual UI run.
+9. **Record completion** in `current_story.md` while leaving the backlog status `in progress` until the user asks to plan the next story.
 
 ## Acceptance test
 
-`rust/lib/stations-dds/tests/field_metadata.rs`:
+Automated, in `rust/tool/dds-echo/src/send.rs` tests:
 
-- Import `DdsFieldMetadata`, `DynamicPrimitiveKind`, `DynamicTypeSchema`, and `DynamicValue` through `stations_dds::cyclonedds`.
-- Build a `HelloWorldTopic` with a greeting and a non-default `Quaternion`.
-- Assert `HelloWorldTopic::field_names() == ["greeting", "attitude"]`.
-- Assert the schema name is `hello_world::HelloWorldTopic`.
-- Assert `greeting` is `DynamicTypeSchema::String { bound: None }`.
-- Assert `attitude` is the same schema as `math::Quaternion`.
-- Round-trip `HelloWorldTopic` through `to_dynamic_value`/`from_dynamic_value`.
-- Use `get_field`/`set_field` and assert the typed value changes.
-- Assert a wrong-type field value is rejected.
-- Assert a missing required field is rejected.
-- Repeat schema/round-trip coverage for `HelloWorldViewTopic`, including `valid: Boolean`.
+- `HelloWorldTopic` and `HelloWorldViewTopic` schemas enumerate the expected fields, including nested `attitude.x/y/z/w`.
+- A form built from the schema produces a valid typed sample; edited values survive `to_dynamic_value` -> `from_dynamic_value`.
+- Bool editing covers `HelloWorldViewTopic.valid`.
+- Invalid numeric input reports the offending field path.
+- Every registered topic has a sender handler, so adding a registry entry without a sender fails the test.
+
+Manual, one run:
+
+1. Run `build/deploy/bin/dds-echo.exe` alone; no services are needed.
+2. Start Capture.
+3. Switch to Send, select `HelloWorldTopic`, set greeting to a unique value (for example `dds-echo-send-test`) and `attitude.w = 1`.
+4. Press **Send Once**; verify a Known `HelloWorldTopic` record appears and the detail pane decodes the unique greeting.
+5. Set the interval to 100 ms, press **Start**, switch to Capture, and verify packets and samples continue; press **Stop** and verify sending stops.
+6. Select `HelloWorldViewTopic`, set a unique greeting and `valid`, send; verify the decoded `valid` field.
+7. Enter an invalid float (for example `abc`); verify a Send error appears and no sample is published.
+8. Confirm Capture Start/Stop/Clear, topic filtering, selection, and the context menu still work.
 
 ## Verification
 
 ```powershell
 .\scripts\build.ps1 -Test
 .\scripts\build.ps1
+.\build\deploy\bin\dds-echo.exe
 ```
 
-- `build.ps1 -Test` must pass once; the new test is included in the workspace test run.
-- `build.ps1` must deploy successfully once.
+- `build.ps1 -Test` must pass once.
+- `build.ps1` must deploy once.
 - No screenshots and no repeated UI runs.
-- If the new fork revision fails to compile or the generated metadata is incorrect, stop after the allowed iterations and report the failure.
+- If a Slint binding or DDS lifecycle problem survives three iterations, stop and report.
 
 ## Risks
 
-- **Revision drift:** two independent pins plus `Cargo.lock` must agree.
-- **Fork compatibility:** generated metadata is emitted unconditionally; a compile failure means the fork integration needs attention, not a local copy of the fork.
-- **Generated code visibility:** the generated file is temporary and not committed; verify it after regeneration.
-- **Scope:** `dds-echo` remains unchanged by design; its detail pane/send form are follow-up work.
+- **Slint input binding:** updating model rows while typing can move the cursor; keep edits in Rust and rebuild only on topic change.
+- **Domain lifetime:** the domain guard must outlive every participant clone; keep it in the shared `Rc<DdsResources>` with participants and nodes declared before `_domain`.
+- **`--no-discovery`:** lazy Send resource creation must not silently enable discovery readers; it only creates a participant for publishing.
+- **UI-thread writes:** periodic writes run on the Slint event loop. At very high rates this can jitter; validate the interval and treat a dedicated send thread as a follow-up if needed.
+- **Registry growth:** the "every registered topic has a handler" test intentionally fails when a topic is added without a sender, forcing the mapping to be updated.
+- **QoS and capture visibility:** Send uses the registry QoS; a best-effort sample may be missed by capture, so retry or send once more during acceptance.
+
+## Files touched
+
+- `planning/current_story.md`
+- `planning/backlog.md`
+- `planning/completed_stories.md`
+- `rust/lib/stations-dds/src/dds.rs`
+- `rust/lib/stations-dds/tests/node_contract.rs`
+- `rust/tool/dds-echo/src/send.rs` (new)
+- `rust/tool/dds-echo/src/main.rs`
+- `rust/tool/dds-echo/ui/dds_echo.slint`
+- `README.md`
 
 ## Result
 
-Implementation complete and verified:
-
-- The fork is pinned to `952906b` in `rust/Cargo.toml` and `scripts/build.ps1`; `rust/Cargo.lock` resolves all fork packages at that rev.
-- Code generation emits `DdsFieldMetadata` for `math::Quaternion`, `hello_world::HelloWorldTopic`, and `hello_world::HelloWorldViewTopic`.
-- `stations-dds/tests/field_metadata.rs` passes five tests covering field enumeration, nested schemas, round-trips, get/set, invalid values, missing fields, and the view topic.
-- `.\scripts\build.ps1 -Test` passed and `.\scripts\build.ps1` deployed successfully.
-- The codegen install target is rev-keyed; without that, Cargo reused the old generator binary.
-- No `dds-echo` UI changes were made.
+Not started.
 
 ## Bookkeeping
 
-- `hello-service` was completed at `2026-10-27 10:08:01` and moved to `completed_stories.md`.
-- `topic-field-metadata` is `in progress` in `backlog.md`.
-- Do not move `topic-field-metadata` to `completed_stories.md` until the user asks to plan the next story.
+- `topic-field-metadata` was completed at `2026-10-27 15:31:10` and moved to `completed_stories.md`.
+- `dds-echo-send` is `in progress` in `backlog.md`.
+- Do not move `dds-echo-send` to `completed_stories.md` until the user asks to plan the next story.

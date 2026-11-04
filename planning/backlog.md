@@ -37,17 +37,11 @@ Third-party libraries are built/installed to an external prefix (for example `C:
 
 **Done when.** `launch-rust.ps1` brings up the model service, the view service, and `lil-d` from `build/deploy`; `lil-d` shows the tilted, cube-mapped earth lit from the upper right with the greeting text rendered in the loaded font, its power button works, and the format manager switches between the default and hello-world formats. `dds-echo` observes every topic in the registry, `--topics` and `build/topics.md` match `contracts/`, and `cleanup.ps1` stops everything.
 
-### topic-field-metadata
-Consume the fork's `DdsFieldMetadata` implementation (fork rev `952906b`): re-pin the Rust dependencies and codegen rev, regenerate the hello_world types, and add a `stations-dds` test that enumerates a generated topic's fields and round-trips a value through the typed sample. Do not change `dds-echo` in this story; the send form and detail-pane integration come later.
-- **Depends on:** none; the fork implementation is available at `952906b`.
-- **Minimal test:** enumerate a generated topic's fields from the metadata and round-trip a value to and from the typed sample.
-- **Status:** in progress.
-
 ### dds-echo-send
 Add a send screen to `dds-echo`: the window becomes two tabs, **Capture** (the current UI) and **Send**. In the Send tab, choose a registered topic from `contracts/topics.toml`, fill in its fields, and publish the sample **once or periodically** at a chosen rate. Publishing uses `stations-dds` (a `Node` typed writer); per-type field forms come from `topic-field-metadata`.
-- **Depends on:** topic-field-metadata.
+- **Depends on:** none.
 - **Minimal test:** in the Send tab, fill the hello-world fields and press Send; the sample appears on the Capture tab.
-- **Status:** todo.
+- **Status:** in progress.
 
 ## Later increments
 
