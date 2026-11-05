@@ -838,7 +838,7 @@ fn empty_record() -> ui::Record {
 
 /// The lightweight table row; hex, decoded fields, and frames are deferred to
 /// [`to_detail`].
-fn to_row(r: &model::Record, known: &KnownTopics) -> ui::RecordRow {
+fn to_row(r: &model::Record) -> ui::RecordRow {
     ui::RecordRow {
         time: r.time_label().into(),
         protocol: r.protocol().into(),
@@ -848,9 +848,9 @@ fn to_row(r: &model::Record, known: &KnownTopics) -> ui::RecordRow {
             r.src_addr.clone().into()
         },
         size: r.size as i32,
-        topic: r.topic.clone().unwrap_or_default().into(),
+        topic: r.display_topic().unwrap_or_default().into(),
         submessages: r.submessages.clone().into(),
-        known: r.is_known(known),
+        known: r.kind == model::MessageKind::KnownTopic,
     }
 }
 
@@ -873,13 +873,13 @@ fn to_detail(r: &model::Record, known: &KnownTopics) -> ui::Record {
             r.src_addr.clone().into()
         },
         size: r.size as i32,
-        topic: r.topic.clone().unwrap_or_default().into(),
+        topic: r.display_topic().unwrap_or_default().into(),
         submessages: r.submessages.clone().into(),
         hex: r.hex_string().into(),
         decoded: decoded_text(r, known).into(),
         guid: r.guid_prefix.clone().unwrap_or_default().into(),
         entity: r.entity_id.clone().unwrap_or_default().into(),
-        known: r.is_known(known),
+        known: r.kind == model::MessageKind::KnownTopic,
         frames: ModelRc::from(frames.as_slice()),
         text: detail_text(r, known).into(),
     }
@@ -905,7 +905,18 @@ fn detail_text(r: &model::Record, known: &KnownTopics) -> String {
         r.entity_id.as_deref().unwrap_or("")
     ));
     out.push_str(&format!("size: {}\n", r.size));
-    out.push_str(&format!("topic: {}\n", r.topic.as_deref().unwrap_or("")));
+    out.push_str(&format!(
+        "kind: {}\n",
+        if r.kind.is_topic() {
+            "topic"
+        } else {
+            r.kind.label()
+        }
+    ));
+    out.push_str(&format!(
+        "topic: {}\n",
+        r.display_topic().unwrap_or("")
+    ));
     out.push_str(&format!("submessages: {}\n", r.submessages));
     out.push('\n');
     out.push_str(&format!("frames ({}):\n", r.frames.len()));
@@ -968,7 +979,7 @@ fn rebuild_view(app: &MainWindow, state: &State, records: &VecModel<ui::RecordRo
         if Some(id) == selected {
             selected_index = rows.len() as i32;
         }
-        rows.push(to_row(record, &state.known_topics));
+        rows.push(to_row(record));
         ids.push(id);
     }
     records.set_vec(rows);
@@ -980,14 +991,34 @@ fn rebuild_view(app: &MainWindow, state: &State, records: &VecModel<ui::RecordRo
     }
 }
 
+/// The five topics-pane groups.
+struct TopicModels {
+    known: Rc<VecModel<ui::TopicRow>>,
+    unknown: Rc<VecModel<ui::TopicRow>>,
+    discovery: Rc<VecModel<ui::TopicRow>>,
+    rtps_control: Rc<VecModel<ui::TopicRow>>,
+    unidentified: Rc<VecModel<ui::TopicRow>>,
+}
+
+impl TopicModels {
+    fn new() -> Self {
+        Self {
+            known: Rc::new(VecModel::default()),
+            unknown: Rc::new(VecModel::default()),
+            discovery: Rc::new(VecModel::default()),
+            rtps_control: Rc::new(VecModel::default()),
+            unidentified: Rc::new(VecModel::default()),
+        }
+    }
+}
+
 /// Re-apply the current selection: refresh the topics rows and rebuild the
 /// record view.
 fn apply_selection(
     app: &MainWindow,
     state: &State,
     records: &VecModel<ui::RecordRow>,
-    known: &VecModel<ui::TopicRow>,
-    unknown: &VecModel<ui::TopicRow>,
+    topics: &TopicModels,
 ) {
     refresh_topics(
         app,
@@ -996,8 +1027,7 @@ fn apply_selection(
             .borrow()
             .rows(&state.known_topics, state.hide_self.get()),
         &state.selection.borrow(),
-        known,
-        unknown,
+        topics,
     );
     rebuild_view(app, state, records);
     state.pending_view.set(false);
@@ -1010,31 +1040,54 @@ fn refresh_topics(
     app: &MainWindow,
     rows: &[model::TopicRow],
     selection: &TopicSelection,
-    known: &VecModel<ui::TopicRow>,
-    unknown: &VecModel<ui::TopicRow>,
+    topics: &TopicModels,
 ) {
-    known.clear();
-    unknown.clear();
+    topics.known.clear();
+    topics.unknown.clear();
+    topics.discovery.clear();
+    topics.rtps_control.clear();
+    topics.unidentified.clear();
     let mut known_total = 0i32;
     let mut unknown_total = 0i32;
+    let mut discovery_total = 0i32;
+    let mut rtps_control_total = 0i32;
+    let mut unidentified_total = 0i32;
     for row in rows {
         let packets = row.packets as i32;
         let ui_row = ui::TopicRow {
             name: row.name.clone().into(),
-            known: row.known,
+            known: row.kind == model::MessageKind::KnownTopic,
             packets,
             selected: selection.contains(&row.name),
         };
-        if row.known {
-            known_total += packets;
-            known.push(ui_row);
-        } else {
-            unknown_total += packets;
-            unknown.push(ui_row);
+        match row.kind {
+            model::MessageKind::KnownTopic => {
+                known_total += packets;
+                topics.known.push(ui_row);
+            }
+            model::MessageKind::UnregisteredTopic => {
+                unknown_total += packets;
+                topics.unknown.push(ui_row);
+            }
+            model::MessageKind::Discovery => {
+                discovery_total += packets;
+                topics.discovery.push(ui_row);
+            }
+            model::MessageKind::RtpsControl => {
+                rtps_control_total += packets;
+                topics.rtps_control.push(ui_row);
+            }
+            model::MessageKind::UnidentifiedData | model::MessageKind::Udp => {
+                unidentified_total += packets;
+                topics.unidentified.push(ui_row);
+            }
         }
     }
     app.set_known_total(known_total);
     app.set_unknown_total(unknown_total);
+    app.set_discovery_total(discovery_total);
+    app.set_rtps_control_total(rtps_control_total);
+    app.set_unidentified_total(unidentified_total);
 }
 
 /// Poll the discovery readers and re-attribute retained records when new
@@ -1042,8 +1095,7 @@ fn refresh_topics(
 fn poll_discovery(
     app: &MainWindow,
     state: &State,
-    known: &VecModel<ui::TopicRow>,
-    unknown: &VecModel<ui::TopicRow>,
+    topics: &TopicModels,
     force: bool,
 ) -> bool {
     let now_ms = state.start.get().elapsed().as_millis() as u64;
@@ -1063,7 +1115,10 @@ fn poll_discovery(
 
     let changes = {
         let discovery = state.discovery.borrow();
-        state.history.borrow_mut().reattribute(&discovery)
+        state
+            .history
+            .borrow_mut()
+            .reattribute(&discovery, &state.known_topics)
     };
     if changes.is_empty() {
         return false;
@@ -1071,8 +1126,8 @@ fn poll_discovery(
 
     {
         let mut counts = state.counts.borrow_mut();
-        for (old, new, self_origin) in &changes {
-            counts.reattribute(old.as_deref(), new, *self_origin);
+        for change in &changes {
+            counts.reattribute(change);
         }
     }
     state.pending_view.set(true);
@@ -1083,8 +1138,7 @@ fn poll_discovery(
             .borrow()
             .rows(&state.known_topics, state.hide_self.get()),
         &state.selection.borrow(),
-        known,
-        unknown,
+        topics,
     );
     true
 }
@@ -1093,8 +1147,7 @@ fn tick(
     app: &MainWindow,
     state: &State,
     records: &VecModel<ui::RecordRow>,
-    known: &VecModel<ui::TopicRow>,
-    unknown: &VecModel<ui::TopicRow>,
+    topics: &TopicModels,
 ) {
     let now_ms = state.start.get().elapsed().as_millis() as u64;
     let self_prefix = state
@@ -1106,7 +1159,7 @@ fn tick(
         .borrow_mut()
         .set_self_prefix(self_prefix.clone());
 
-    poll_discovery(app, state, known, unknown, false);
+    poll_discovery(app, state, topics, false);
 
     // Drain a bounded batch from the capture queue and append it to the
     // frequency-ranked history.
@@ -1123,13 +1176,12 @@ fn tick(
                 if record.is_self(self_prefix.as_deref()) {
                     record.self_origin = true;
                 }
-                if record.topic.is_none() && record.is_discovery() {
-                    record.topic = Some("discovery".to_string());
-                }
+                record.kind = record.classify(&state.known_topics);
                 let topic = record.topic.clone();
-                let first_for_topic = topic
-                    .as_deref()
-                    .is_some_and(|topic| state.counts.borrow().count(topic) == 0);
+                let first_for_topic = record.kind.is_topic()
+                    && topic
+                        .as_deref()
+                        .is_some_and(|topic| state.counts.borrow().count(topic) == 0);
                 state.stats.borrow_mut().observe(&record);
                 state.counts.borrow_mut().observe(&record);
                 if first_for_topic {
@@ -1164,8 +1216,7 @@ fn tick(
             .borrow()
             .rows(&state.known_topics, state.hide_self.get()),
         &state.selection.borrow(),
-        known,
-        unknown,
+        topics,
     );
 
     {
@@ -1332,21 +1383,22 @@ fn main() -> Result<(), slint::PlatformError> {
     });
 
     let records = Rc::new(VecModel::<ui::RecordRow>::default());
-    let known = Rc::new(VecModel::<ui::TopicRow>::default());
-    let unknown = Rc::new(VecModel::<ui::TopicRow>::default());
+    let topics = Rc::new(TopicModels::new());
     app.set_records(ModelRc::from(records.clone()));
-    app.set_known_topics(ModelRc::from(known.clone()));
-    app.set_unknown_topics(ModelRc::from(unknown.clone()));
-                refresh_topics(
-                    &app,
-                    &state
-                        .counts
-                        .borrow()
-                        .rows(&state.known_topics, state.hide_self.get()),
-                    &state.selection.borrow(),
-                    &known,
-                    &unknown,
-                );
+    app.set_known_topics(ModelRc::from(topics.known.clone()));
+    app.set_unknown_topics(ModelRc::from(topics.unknown.clone()));
+    app.set_discovery_topics(ModelRc::from(topics.discovery.clone()));
+    app.set_rtps_control_topics(ModelRc::from(topics.rtps_control.clone()));
+    app.set_unidentified_topics(ModelRc::from(topics.unidentified.clone()));
+    refresh_topics(
+        &app,
+        &state
+            .counts
+            .borrow()
+            .rows(&state.known_topics, state.hide_self.get()),
+        &state.selection.borrow(),
+        &topics,
+    );
 
     app.set_send_fields(ModelRc::from(state.send_rows.clone()));
     let send_topic_names: Vec<slint::SharedString> = state
@@ -1373,8 +1425,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let app_weak = app.as_weak();
         let state = state.clone();
         let records = records.clone();
-        let known = known.clone();
-        let unknown = unknown.clone();
+        let topics = topics.clone();
         let timer = timer.clone();
         app.on_start(move || {
             let Some(app) = app_weak.upgrade() else {
@@ -1422,8 +1473,7 @@ fn main() -> Result<(), slint::PlatformError> {
             .borrow()
             .rows(&state.known_topics, state.hide_self.get()),
                         &state.selection.borrow(),
-                        &known,
-                        &unknown,
+                        &topics,
                     );
                     app.set_selected(empty_record());
                     app.set_selected_index(-1);
@@ -1440,11 +1490,10 @@ fn main() -> Result<(), slint::PlatformError> {
                     let app_weak = app.as_weak();
                     let state = state.clone();
                     let records = records.clone();
-                    let known = known.clone();
-                    let unknown = unknown.clone();
+                    let topics = topics.clone();
                     timer.start(TimerMode::Repeated, TICK, move || {
                         if let Some(app) = app_weak.upgrade() {
-                            tick(&app, &state, &records, &known, &unknown);
+                            tick(&app, &state, &records, &topics);
                         }
                     });
                 }
@@ -1458,8 +1507,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let app_weak = app.as_weak();
         let state = state.clone();
         let records = records.clone();
-        let known = known.clone();
-        let unknown = unknown.clone();
+        let topics = topics.clone();
         let timer = timer.clone();
         app.on_stop(move || {
             if let Some(app) = app_weak.upgrade() {
@@ -1473,7 +1521,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 state.dropped.set(queue.dropped());
             }
             if let Some(app) = app_weak.upgrade() {
-                poll_discovery(&app, &state, &known, &unknown, true);
+                poll_discovery(&app, &state, &topics, true);
                 refresh_topics(
                     &app,
                     &state
@@ -1481,8 +1529,7 @@ fn main() -> Result<(), slint::PlatformError> {
             .borrow()
             .rows(&state.known_topics, state.hide_self.get()),
                     &state.selection.borrow(),
-                    &known,
-                    &unknown,
+                    &topics,
                 );
                 rebuild_view(&app, &state, &records);
                 {
@@ -1501,8 +1548,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let app_weak = app.as_weak();
         let state = state.clone();
         let records = records.clone();
-        let known = known.clone();
-        let unknown = unknown.clone();
+        let topics = topics.clone();
         app.on_clear(move || {
             if let Some(app) = app_weak.upgrade() {
                 if let Some(queue) = state.queue.borrow().as_ref() {
@@ -1529,8 +1575,7 @@ fn main() -> Result<(), slint::PlatformError> {
             .borrow()
             .rows(&state.known_topics, state.hide_self.get()),
                     &state.selection.borrow(),
-                    &known,
-                    &unknown,
+                    &topics,
                 );
                 app.set_packets(0);
                 app.set_bytes(0);
@@ -1551,13 +1596,12 @@ fn main() -> Result<(), slint::PlatformError> {
         let app_weak = app.as_weak();
         let state = state.clone();
         let records = records.clone();
-        let known = known.clone();
-        let unknown = unknown.clone();
+        let topics = topics.clone();
         app.on_hide_self_changed(move |hide| {
             if let Some(app) = app_weak.upgrade() {
                 state.hide_self.set(hide);
                 app.set_hide_self(hide);
-                apply_selection(&app, &state, &records, &known, &unknown);
+                apply_selection(&app, &state, &records, &topics);
             }
         });
     }
@@ -1595,12 +1639,11 @@ fn main() -> Result<(), slint::PlatformError> {
         let app_weak = app.as_weak();
         let state = state.clone();
         let records = records.clone();
-        let known = known.clone();
-        let unknown = unknown.clone();
+        let topics = topics.clone();
         app.on_toggle_topic(move |name| {
             if let Some(app) = app_weak.upgrade() {
                 state.selection.borrow_mut().toggle(&name);
-                apply_selection(&app, &state, &records, &known, &unknown);
+                apply_selection(&app, &state, &records, &topics);
             }
         });
     }
@@ -1610,12 +1653,11 @@ fn main() -> Result<(), slint::PlatformError> {
         let app_weak = app.as_weak();
         let state = state.clone();
         let records = records.clone();
-        let known = known.clone();
-        let unknown = unknown.clone();
+        let topics = topics.clone();
         app.on_clear_topics(move || {
             if let Some(app) = app_weak.upgrade() {
                 state.selection.borrow_mut().clear();
-                apply_selection(&app, &state, &records, &known, &unknown);
+                apply_selection(&app, &state, &records, &topics);
             }
         });
     }
@@ -1647,13 +1689,12 @@ fn main() -> Result<(), slint::PlatformError> {
         let app_weak = app.as_weak();
         let state = state.clone();
         let records = records.clone();
-        let known = known.clone();
-        let unknown = unknown.clone();
+        let topics = topics.clone();
         app.on_unselect_all_topics(move || {
             if let Some(app) = app_weak.upgrade() {
                 state.selection.borrow_mut().clear();
                 app.set_topic_menu_visible(false);
-                apply_selection(&app, &state, &records, &known, &unknown);
+                apply_selection(&app, &state, &records, &topics);
             }
         });
     }
@@ -1770,7 +1811,7 @@ fn main() -> Result<(), slint::PlatformError> {
 #[cfg(test)]
 mod copy_detail_tests {
     use super::*;
-    use crate::model::{Announcement, Class, Frame};
+    use crate::model::{Announcement, Class, Frame, MessageKind};
     use stations_dds::cyclonedds::{CdrEncoding, CdrSerializer, DdsSequence};
     use stations_dds::format_manager::{FormatManagerCtlTopic, FormatWindowAssignment};
     use stations_dds::hello_world::HelloWorldTopic;
@@ -1790,6 +1831,7 @@ mod copy_detail_tests {
             hex: vec![0x00, 0x01, 0x00, 0x00],
             frames: Vec::new(),
             self_origin: true,
+            kind: MessageKind::KnownTopic,
         }
     }
 

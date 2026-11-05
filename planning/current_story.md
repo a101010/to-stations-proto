@@ -163,7 +163,15 @@ One manual capture run. No screenshots and no repeated UI runs.
 
 ## Result
 
-Not started.
+Implemented and verified by tests/build:
+
+- Added `MessageKind`, `Record.kind`, classification priority, display labels, and the builtin SPDP/SEDP writer fallback.
+- Reworked `TopicCounts`, `TopicRow`, filtering, and reattribution for topic and non-topic categories.
+- Added separate Discovery, RTPS control, and Unidentified topics-pane groups while keeping Known and Unknown.
+- The detail text now shows the message kind and category label.
+- Added model tests for discovery by announcement and writer ID, control/unidentified/UDP classification, priority, category counts, Hide self, and reattribution.
+- `cargo test`/`build.ps1 -Test` pass; `build.ps1` deploys; the release `dds-echo` starts successfully.
+- The manual captured-traffic group check remains for the user.
 
 ## Bookkeeping
 

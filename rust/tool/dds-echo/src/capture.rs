@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 
 use socket2::{Domain, Protocol, Socket, Type};
 
-use crate::model::{self, Class, Record};
+use crate::model::{self, Class, MessageKind, Record};
 use crate::rtps;
 use crate::sedp;
 
@@ -229,6 +229,11 @@ pub fn record_from(data: &[u8], src: SocketAddr, local_port: u16, elapsed_ms: u6
         hex: data.to_vec(),
         frames: Vec::new(),
         self_origin: false,
+        kind: if class == Class::Udp {
+            MessageKind::Udp
+        } else {
+            MessageKind::RtpsControl
+        },
     };
     if class == Class::Rtps {
         let parsed = rtps::parse(data);
@@ -273,6 +278,7 @@ pub fn record_from(data: &[u8], src: SocketAddr, local_port: u16, elapsed_ms: u6
             record.submessages = record.submessage_list();
         }
     }
+    record.kind = record.classify(&model::KnownTopics::default());
     record
 }
 
@@ -854,6 +860,11 @@ mod tests {
             hex: vec![0; size],
             frames: Vec::new(),
             self_origin: false,
+            kind: if topic.is_some() {
+                MessageKind::UnregisteredTopic
+            } else {
+                MessageKind::UnidentifiedData
+            },
         }
     }
 

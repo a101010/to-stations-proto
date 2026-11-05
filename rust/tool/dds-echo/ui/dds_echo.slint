@@ -168,8 +168,14 @@ export component MainWindow inherits Window {
     in-out property <[RecordRow]> records: [];
     in-out property <[TopicRow]> known-topics: [];
     in-out property <[TopicRow]> unknown-topics: [];
+    in-out property <[TopicRow]> discovery-topics: [];
+    in-out property <[TopicRow]> rtps-control-topics: [];
+    in-out property <[TopicRow]> unidentified-topics: [];
     in-out property <int> known-total: 0;
     in-out property <int> unknown-total: 0;
+    in-out property <int> discovery-total: 0;
+    in-out property <int> rtps-control-total: 0;
+    in-out property <int> unidentified-total: 0;
 
     in-out property <Record> selected: {
         time: "",
@@ -347,6 +353,21 @@ export component MainWindow inherits Window {
                             }
                             TopicGroup {
                                 title: "Unknown"; rows: root.unknown-topics; packets: root.unknown-total;
+                                toggle-row(name) => { root.toggle-topic(name); }
+                                topic-menu(x, y) => { root.topic-menu(x, y); }
+                            }
+                            TopicGroup {
+                                title: "Discovery"; rows: root.discovery-topics; packets: root.discovery-total;
+                                toggle-row(name) => { root.toggle-topic(name); }
+                                topic-menu(x, y) => { root.topic-menu(x, y); }
+                            }
+                            TopicGroup {
+                                title: "RTPS control"; rows: root.rtps-control-topics; packets: root.rtps-control-total;
+                                toggle-row(name) => { root.toggle-topic(name); }
+                                topic-menu(x, y) => { root.topic-menu(x, y); }
+                            }
+                            TopicGroup {
+                                title: "Unidentified"; rows: root.unidentified-topics; packets: root.unidentified-total;
                                 toggle-row(name) => { root.toggle-topic(name); }
                                 topic-menu(x, y) => { root.topic-menu(x, y); }
                             }

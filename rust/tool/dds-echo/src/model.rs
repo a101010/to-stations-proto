@@ -26,6 +26,36 @@ pub enum Class {
     Known,
 }
 
+/// How a record is classified for the topics pane.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum MessageKind {
+    KnownTopic,
+    UnregisteredTopic,
+    Discovery,
+    RtpsControl,
+    UnidentifiedData,
+    Udp,
+}
+
+impl MessageKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            MessageKind::KnownTopic | MessageKind::UnregisteredTopic => "",
+            MessageKind::Discovery => "discovery",
+            MessageKind::RtpsControl => "rtps control",
+            MessageKind::UnidentifiedData => "unidentified",
+            MessageKind::Udp => "udp",
+        }
+    }
+
+    pub fn is_topic(self) -> bool {
+        matches!(self, MessageKind::KnownTopic | MessageKind::UnregisteredTopic)
+    }
+}
+
+/// The builtin RTPS writer entity IDs used for discovery traffic.
+const DISCOVERY_WRITERS: [&str; 3] = ["000100c2", "000003c2", "000004c2"];
+
 /// One decoded RTPS submessage, formatted for display.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Frame {
@@ -110,12 +140,50 @@ pub struct Record {
     pub frames: Vec<Frame>,
     /// True when the datagram originates from dds-echo's own participant.
     pub self_origin: bool,
+    /// The message category, computed after topic attribution.
+    pub kind: MessageKind,
 }
 
 impl Record {
-    /// Whether this record carries an SPDP/SEDP discovery announcement.
+    /// Whether this record carries SPDP/SEDP discovery traffic.
     pub fn is_discovery(&self) -> bool {
-        self.frames.iter().any(|frame| frame.announcement.is_some())
+        self.frames.iter().any(|frame| {
+            frame.announcement.is_some() || DISCOVERY_WRITERS.contains(&frame.writer.as_str())
+        })
+    }
+
+    /// Classify this record for the topics pane.
+    pub fn classify(&self, known: &KnownTopics) -> MessageKind {
+        if self.class == Class::Udp {
+            return MessageKind::Udp;
+        }
+        if let Some(topic) = self.topic.as_deref().filter(|topic| !topic.is_empty()) {
+            return if known.contains(topic) {
+                MessageKind::KnownTopic
+            } else {
+                MessageKind::UnregisteredTopic
+            };
+        }
+        if self.is_discovery() {
+            return MessageKind::Discovery;
+        }
+        if self
+            .frames
+            .iter()
+            .any(|frame| frame.kind == "DATA" || frame.kind == "DATA_FRAG")
+        {
+            return MessageKind::UnidentifiedData;
+        }
+        MessageKind::RtpsControl
+    }
+
+    /// The name shown in the table's Topic column and used by the filter.
+    pub fn display_topic(&self) -> Option<&str> {
+        if self.kind.is_topic() {
+            self.topic.as_deref().filter(|topic| !topic.is_empty())
+        } else {
+            Some(self.kind.label())
+        }
     }
 
     /// Whether this record originates from the participant with `self_prefix`.
@@ -162,10 +230,6 @@ impl Record {
             out.push_str(&format!("… (+{} bytes)", self.hex.len() - n));
         }
         out
-    }
-
-    pub fn is_known(&self, known: &KnownTopics) -> bool {
-        self.topic.as_deref().is_some_and(|t| known.contains(t))
     }
 
     /// The transport protocol for the table's `Protocol` column.
@@ -283,35 +347,54 @@ impl KnownTopics {
 #[derive(Clone, Debug, PartialEq)]
 pub struct TopicRow {
     pub name: String,
+    pub kind: MessageKind,
     pub known: bool,
     pub packets: usize,
 }
 
-/// Per-topic packet counts (known and unregistered topics) plus a count of
-/// datagrams with no identified topic.
+/// A record moved from one bucket to another after discovery learns its topic.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Reattribution {
+    pub old_topic: Option<String>,
+    pub old_kind: MessageKind,
+    pub new_topic: String,
+    pub new_kind: MessageKind,
+    pub self_origin: bool,
+}
+
+/// The category rows, in display order.
+const CATEGORY_KINDS: [MessageKind; 4] = [
+    MessageKind::Discovery,
+    MessageKind::RtpsControl,
+    MessageKind::UnidentifiedData,
+    MessageKind::Udp,
+];
+
+/// Per-topic packet counts for known/unregistered topics plus counts for the
+/// non-topic categories.
 #[derive(Clone, Debug, Default)]
 pub struct TopicCounts {
     counts: BTreeMap<String, usize>,
-    unidentified: usize,
     self_counts: BTreeMap<String, usize>,
-    self_unidentified: usize,
+    categories: BTreeMap<MessageKind, usize>,
+    self_categories: BTreeMap<MessageKind, usize>,
 }
 
 impl TopicCounts {
     pub fn observe(&mut self, r: &Record) {
-        match &r.topic {
-            Some(topic) => {
-                *self.counts.entry(topic.clone()).or_insert(0) += 1;
+        if r.kind.is_topic() {
+            if let Some(topic) = r.topic.as_deref().filter(|topic| !topic.is_empty()) {
+                *self.counts.entry(topic.to_string()).or_insert(0) += 1;
                 if r.self_origin {
-                    *self.self_counts.entry(topic.clone()).or_insert(0) += 1;
+                    *self.self_counts.entry(topic.to_string()).or_insert(0) += 1;
                 }
+                return;
             }
-            None => {
-                self.unidentified += 1;
-                if r.self_origin {
-                    self.self_unidentified += 1;
-                }
-            }
+        }
+
+        *self.categories.entry(r.kind).or_insert(0) += 1;
+        if r.self_origin {
+            *self.self_categories.entry(r.kind).or_insert(0) += 1;
         }
     }
 
@@ -320,14 +403,15 @@ impl TopicCounts {
         self.counts.get(topic).copied().unwrap_or(0)
     }
 
-    /// Known topics (0 if unseen), then unregistered topics seen and an
-    /// `unidentified` row when there are unattributed datagrams, sorted.
-    /// With `hide_self`, records from dds-echo's own participant are excluded.
+    /// Known topics (0 if unseen), unregistered topics, and non-topic category
+    /// rows. With `hide_self`, records from dds-echo's own participant are
+    /// excluded.
     pub fn rows(&self, known: &KnownTopics, hide_self: bool) -> Vec<TopicRow> {
         let mut rows = Vec::new();
         for name in known.names() {
             rows.push(TopicRow {
                 name: name.to_string(),
+                kind: MessageKind::KnownTopic,
                 known: true,
                 packets: self.visible_count(
                     name,
@@ -342,23 +426,23 @@ impl TopicCounts {
                 if packets > 0 {
                     rows.push(TopicRow {
                         name: name.clone(),
+                        kind: MessageKind::UnregisteredTopic,
                         known: false,
                         packets,
                     });
                 }
             }
         }
-        let unidentified = if hide_self {
-            self.unidentified.saturating_sub(self.self_unidentified)
-        } else {
-            self.unidentified
-        };
-        if unidentified > 0 {
-            rows.push(TopicRow {
-                name: "unidentified".to_string(),
-                known: false,
-                packets: unidentified,
-            });
+        for kind in CATEGORY_KINDS {
+            let packets = self.visible_category(kind, hide_self);
+            if packets > 0 {
+                rows.push(TopicRow {
+                    name: kind.label().to_string(),
+                    kind,
+                    known: false,
+                    packets,
+                });
+            }
         }
         rows.sort_by(|a, b| b.known.cmp(&a.known).then_with(|| a.name.cmp(&b.name)));
         rows
@@ -372,32 +456,54 @@ impl TopicCounts {
         }
     }
 
-    /// Move one observed record from `old` to `new` after discovery learns its
-    /// endpoint. `None` means the `unidentified` bucket.
-    pub fn reattribute(&mut self, old: Option<&str>, new: &str, self_origin: bool) {
-        if new.is_empty() {
-            return;
+    fn visible_category(&self, kind: MessageKind, hide_self: bool) -> usize {
+        let total = self.categories.get(&kind).copied().unwrap_or(0);
+        if hide_self {
+            total.saturating_sub(self.self_categories.get(&kind).copied().unwrap_or(0))
+        } else {
+            total
         }
-        match old {
-            Some(name) => decrement(&mut self.counts, name),
-            None => self.unidentified = self.unidentified.saturating_sub(1),
-        }
-        *self.counts.entry(new.to_string()).or_insert(0) += 1;
+    }
 
-        if self_origin {
-            match old {
-                Some(name) => decrement(&mut self.self_counts, name),
-                None => self.self_unidentified = self.self_unidentified.saturating_sub(1),
+    pub fn reattribute(&mut self, change: &Reattribution) {
+        if change.old_kind.is_topic() {
+            if let Some(topic) = change.old_topic.as_deref() {
+                decrement(&mut self.counts, topic);
+                if change.self_origin {
+                    decrement(&mut self.self_counts, topic);
+                }
             }
-            *self.self_counts.entry(new.to_string()).or_insert(0) += 1;
+        } else {
+            decrement_category(&mut self.categories, change.old_kind);
+            if change.self_origin {
+                decrement_category(&mut self.self_categories, change.old_kind);
+            }
+        }
+
+        if change.new_kind.is_topic() {
+            *self
+                .counts
+                .entry(change.new_topic.clone())
+                .or_insert(0) += 1;
+            if change.self_origin {
+                *self
+                    .self_counts
+                    .entry(change.new_topic.clone())
+                    .or_insert(0) += 1;
+            }
+        } else {
+            *self.categories.entry(change.new_kind).or_insert(0) += 1;
+            if change.self_origin {
+                *self.self_categories.entry(change.new_kind).or_insert(0) += 1;
+            }
         }
     }
 
     pub fn reset(&mut self) {
         self.counts.clear();
-        self.unidentified = 0;
         self.self_counts.clear();
-        self.self_unidentified = 0;
+        self.categories.clear();
+        self.self_categories.clear();
     }
 }
 
@@ -406,6 +512,15 @@ fn decrement(counts: &mut BTreeMap<String, usize>, name: &str) {
         *count = count.saturating_sub(1);
         if *count == 0 {
             counts.remove(name);
+        }
+    }
+}
+
+fn decrement_category(counts: &mut BTreeMap<MessageKind, usize>, kind: MessageKind) {
+    if let Some(count) = counts.get_mut(&kind) {
+        *count = count.saturating_sub(1);
+        if *count == 0 {
+            counts.remove(&kind);
         }
     }
 }
@@ -713,7 +828,7 @@ impl History {
         hide_self: bool,
     ) -> impl Iterator<Item = (u64, &'a Record)> + 'a {
         self.buffer.iter().filter(move |(_, record)| {
-            (!hide_self || !record.self_origin) && selection.matches(record.topic.as_deref())
+            (!hide_self || !record.self_origin) && selection.matches(record.display_topic())
         })
     }
 
@@ -722,11 +837,12 @@ impl History {
     }
 
     /// Attribute retained records whose writer is now known. Returns the
-    /// `(old, new)` topic changes so the caller can adjust `TopicCounts`.
+    /// bucket changes so the caller can adjust `TopicCounts`.
     pub fn reattribute(
         &mut self,
         discovery: &Discovery,
-    ) -> Vec<(Option<String>, String, bool)> {
+        known: &KnownTopics,
+    ) -> Vec<Reattribution> {
         let mut changes = Vec::new();
         for slot in self.buffer.entries.values_mut() {
             let record = &mut slot.value;
@@ -740,8 +856,21 @@ impl History {
                 continue;
             };
             let new_topic = topic.to_string();
+            let new_kind = if known.contains(&new_topic) {
+                MessageKind::KnownTopic
+            } else {
+                MessageKind::UnregisteredTopic
+            };
+            let old_kind = record.kind;
+            record.kind = new_kind;
             record.topic = Some(new_topic.clone());
-            changes.push((None, new_topic, record.self_origin));
+            changes.push(Reattribution {
+                old_topic: None,
+                old_kind,
+                new_topic,
+                new_kind,
+                self_origin: record.self_origin,
+            });
         }
         changes
     }
@@ -797,6 +926,13 @@ mod tests {
     use super::*;
 
     fn record(class: Class, size: usize, topic: Option<&str>) -> Record {
+        let kind = match class {
+            Class::Udp => MessageKind::Udp,
+            Class::Known => MessageKind::KnownTopic,
+            Class::Unregistered => MessageKind::UnregisteredTopic,
+            Class::Rtps if topic.is_some() => MessageKind::UnregisteredTopic,
+            Class::Rtps => MessageKind::UnidentifiedData,
+        };
         Record {
             elapsed_ms: 0,
             class,
@@ -810,6 +946,7 @@ mod tests {
             hex: vec![0],
             frames: Vec::new(),
             self_origin: false,
+            kind,
         }
     }
 
@@ -834,11 +971,19 @@ mod tests {
     }
 
     #[test]
-    fn record_is_known_uses_the_registry() {
+    fn record_classification_uses_the_registry() {
         let k = known();
-        assert!(record(Class::Rtps, 0, Some("HelloWorldTopic")).is_known(&k));
-        assert!(!record(Class::Rtps, 0, Some("WeatherTopic")).is_known(&k));
-        assert!(!record(Class::Rtps, 0, None).is_known(&k));
+        assert_eq!(
+            record(Class::Rtps, 0, Some("HelloWorldTopic")).classify(&k),
+            MessageKind::KnownTopic
+        );
+        assert_eq!(
+            record(Class::Rtps, 0, Some("WeatherTopic")).classify(&k),
+            MessageKind::UnregisteredTopic
+        );
+        let mut data = record(Class::Rtps, 0, None);
+        data.frames = vec![frame(0x15, "DATA", "00000102", "1", 20)];
+        assert_eq!(data.classify(&k), MessageKind::UnidentifiedData);
     }
 
     #[test]
@@ -862,7 +1007,10 @@ mod tests {
             .any(|r| r.name == "WeatherTopic" && !r.known && r.packets == 1));
         assert!(rows
             .iter()
-            .any(|r| r.name == "unidentified" && !r.known && r.packets == 2));
+            .any(|r| r.name == "unidentified" && r.kind == MessageKind::UnidentifiedData && r.packets == 1));
+        assert!(rows
+            .iter()
+            .any(|r| r.name == "udp" && r.kind == MessageKind::Udp && r.packets == 1));
     }
 
     #[test]
@@ -980,6 +1128,97 @@ mod tests {
         d.observe_and_attr(&mut ann.clone());
         assert_eq!(d.participants(), 1);
         assert_eq!(d.endpoints(), 1);
+    }
+
+    #[test]
+    fn classifies_discovery_by_announcement_and_writer_id() {
+        let known = known();
+        let mut announcement = record(Class::Rtps, 0, None);
+        announcement.frames.push(Frame {
+            announcement: Some(Announcement::Participant {
+                prefix: "selfprefix".to_string(),
+            }),
+            ..frame(0x15, "DATA", "", "1", 20)
+        });
+        assert!(announcement.is_discovery());
+        assert_eq!(announcement.classify(&known), MessageKind::Discovery);
+
+        let mut builtin_writer = record(Class::Rtps, 0, None);
+        builtin_writer.frames = vec![frame(0x15, "DATA", "000100c2", "1", 20)];
+        assert!(builtin_writer.is_discovery());
+        assert_eq!(builtin_writer.classify(&known), MessageKind::Discovery);
+    }
+
+    #[test]
+    fn classifies_control_unidentified_and_udp() {
+        let known = known();
+        let mut control = record(Class::Rtps, 0, None);
+        control.frames = vec![frame(0x07, "HEARTBEAT", "00000102", "1..2", 28)];
+        assert_eq!(control.classify(&known), MessageKind::RtpsControl);
+
+        let mut data = record(Class::Rtps, 0, None);
+        data.frames = vec![frame(0x15, "DATA", "00000102", "1", 20)];
+        assert_eq!(data.classify(&known), MessageKind::UnidentifiedData);
+
+        assert_eq!(
+            record(Class::Udp, 0, None).classify(&known),
+            MessageKind::Udp
+        );
+    }
+
+    #[test]
+    fn classification_prefers_topics_over_discovery() {
+        let known = known();
+        let mut r = record(Class::Rtps, 0, Some("HelloWorldTopic"));
+        r.frames = vec![frame(0x15, "DATA", "000100c2", "1", 20)];
+        assert_eq!(r.classify(&known), MessageKind::KnownTopic);
+
+        let mut unregistered = record(Class::Rtps, 0, Some("WeatherTopic"));
+        unregistered.frames = vec![frame(0x15, "DATA", "000100c2", "1", 20)];
+        assert_eq!(
+            unregistered.classify(&known),
+            MessageKind::UnregisteredTopic
+        );
+    }
+
+    #[test]
+    fn category_rows_and_hide_self() {
+        let known = known();
+        let mut counts = TopicCounts::default();
+
+        let mut discovery = record(Class::Rtps, 1, None);
+        discovery.kind = MessageKind::Discovery;
+        discovery.self_origin = true;
+        counts.observe(&discovery);
+
+        let mut control = record(Class::Rtps, 1, None);
+        control.kind = MessageKind::RtpsControl;
+        counts.observe(&control);
+
+        let mut udp = record(Class::Udp, 1, None);
+        udp.kind = MessageKind::Udp;
+        counts.observe(&udp);
+
+        let rows = counts.rows(&known, false);
+        assert!(rows
+            .iter()
+            .any(|r| r.kind == MessageKind::Discovery && r.packets == 1));
+        assert!(rows
+            .iter()
+            .any(|r| r.kind == MessageKind::RtpsControl && r.packets == 1));
+        assert!(rows
+            .iter()
+            .any(|r| r.kind == MessageKind::Udp && r.packets == 1));
+
+        let hidden = counts.rows(&known, true);
+        assert!(!hidden.iter().any(|r| r.kind == MessageKind::Discovery));
+        assert!(hidden
+            .iter()
+            .any(|r| r.kind == MessageKind::RtpsControl && r.packets == 1));
+
+        assert!(discovery.display_topic() == Some("discovery"));
+        assert_eq!(control.display_topic(), Some("rtps control"));
+        assert_eq!(udp.display_topic(), Some("udp"));
     }
 
     #[test]
@@ -1164,10 +1403,18 @@ mod tests {
 
         let mut discovery = Discovery::default();
         discovery.learn_endpoint(view_endpoint());
-        let changes = history.reattribute(&discovery);
+        let mut known = KnownTopics::default();
+        known.insert("HelloWorldViewTopic", "hello_world::HelloWorldViewTopic");
+        let changes = history.reattribute(&discovery, &known);
         assert_eq!(
             changes,
-            vec![(None, "HelloWorldViewTopic".to_string(), false)]
+            vec![Reattribution {
+                old_topic: None,
+                old_kind: MessageKind::UnidentifiedData,
+                new_topic: "HelloWorldViewTopic".to_string(),
+                new_kind: MessageKind::KnownTopic,
+                self_origin: false,
+            }]
         );
 
         let selection = TopicSelection::default();
@@ -1176,7 +1423,7 @@ mod tests {
             records[0].1.topic.as_deref(),
             Some("HelloWorldViewTopic")
         );
-        assert!(history.reattribute(&discovery).is_empty());
+        assert!(history.reattribute(&discovery, &known).is_empty());
     }
 
     #[test]
@@ -1185,13 +1432,25 @@ mod tests {
         let known = KnownTopics::default();
 
         counts.observe(&record(Class::Rtps, 0, None));
-        counts.reattribute(None, "A", false);
+        counts.reattribute(&Reattribution {
+            old_topic: None,
+            old_kind: MessageKind::UnidentifiedData,
+            new_topic: "A".to_string(),
+            new_kind: MessageKind::UnregisteredTopic,
+            self_origin: false,
+        });
         let rows = counts.rows(&known, false);
         assert!(rows.iter().any(|r| r.name == "A" && r.packets == 1));
         assert!(!rows.iter().any(|r| r.name == "unidentified"));
 
         counts.observe(&record(Class::Known, 0, Some("B")));
-        counts.reattribute(Some("B"), "C", false);
+        counts.reattribute(&Reattribution {
+            old_topic: Some("B".to_string()),
+            old_kind: MessageKind::KnownTopic,
+            new_topic: "C".to_string(),
+            new_kind: MessageKind::UnregisteredTopic,
+            self_origin: false,
+        });
         let rows = counts.rows(&known, false);
         assert!(!rows.iter().any(|r| r.name == "B"));
         assert!(rows.iter().any(|r| r.name == "C" && r.packets == 1));
