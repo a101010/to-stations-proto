@@ -8,6 +8,9 @@
 //! `topic-field-metadata`.
 
 use stations_dds::cyclonedds::{CdrDeserializer, CdrEncoding, DdsType};
+use stations_dds::format_manager::{
+    FormatManagerCtlTopic, FormatManagerInputTopic, FormatManagerViewTopic,
+};
 use stations_dds::hello_world::{HelloWorldTopic, HelloWorldViewTopic};
 
 /// Decode a known-type DATA payload (encapsulation header + CDR) into a
@@ -21,6 +24,18 @@ pub fn decode(idl_type: &str, payload: &[u8]) -> Option<String> {
         }
         "hello_world::HelloWorldViewTopic" => {
             let sample = deserialize::<HelloWorldViewTopic>(payload)?;
+            Some(format!("{sample:#?}"))
+        }
+        "format_manager::FormatManagerInputTopic" => {
+            let sample = deserialize::<FormatManagerInputTopic>(payload)?;
+            Some(format!("{sample:#?}"))
+        }
+        "format_manager::FormatManagerCtlTopic" => {
+            let sample = deserialize::<FormatManagerCtlTopic>(payload)?;
+            Some(format!("{sample:#?}"))
+        }
+        "format_manager::FormatManagerViewTopic" => {
+            let sample = deserialize::<FormatManagerViewTopic>(payload)?;
             Some(format!("{sample:#?}"))
         }
         _ => None,
@@ -45,6 +60,7 @@ fn deserialize<T: DdsType>(payload: &[u8]) -> Option<T> {
 mod tests {
     use super::*;
     use stations_dds::cyclonedds::CdrSerializer;
+    use stations_dds::format_manager;
     use stations_dds::math::Quaternion;
 
     const HELLO: &str = "hello_world::HelloWorldTopic";
@@ -61,8 +77,8 @@ mod tests {
         }
     }
 
-    /// The sample's CDR body behind a little-endian CDR encapsulation header.
-    fn framed(sample: &HelloWorldTopic) -> Vec<u8> {
+    /// A sample's CDR body behind a little-endian CDR encapsulation header.
+    fn framed<T: DdsType>(sample: &T) -> Vec<u8> {
         let cdr = CdrSerializer::serialize(sample, CdrEncoding::Xcdr1).unwrap();
         let mut payload = vec![0x00, 0x01, 0x00, 0x00];
         payload.extend_from_slice(&cdr);
@@ -120,6 +136,92 @@ mod tests {
     #[test]
     fn unknown_type_is_none() {
         assert!(decode("weather::WeatherTopic", &framed(&sample())).is_none());
+    }
+    #[test]
+    fn decodes_format_manager_input_topic() {
+        use format_manager::FormatManagerInputTopic;
+
+        let sample = FormatManagerInputTopic {
+            window: 0,
+            command: 1,
+            format: "default".to_string(),
+        };
+        let dump =
+            decode("format_manager::FormatManagerInputTopic", &framed(&sample)).expect("decoded");
+        assert!(dump.contains("window: 0"));
+        assert!(dump.contains("command: 1"));
+        assert!(dump.contains("default"));
+    }
+
+    #[test]
+    fn decodes_format_manager_control_and_view_sequences() {
+        use format_manager::{
+            FormatManagerCtlTopic, FormatManagerViewTopic, FormatWindowAssignment,
+        };
+        use stations_dds::cyclonedds::DdsSequence;
+
+        let windows = vec![
+            FormatWindowAssignment {
+                window: 0,
+                format: "default".to_string(),
+            },
+            FormatWindowAssignment {
+                window: 1,
+                format: "hello-world".to_string(),
+            },
+        ];
+        let control = FormatManagerCtlTopic {
+            windows: DdsSequence::from_vec(windows.clone()).unwrap(),
+        };
+        let dump = decode("format_manager::FormatManagerCtlTopic", &framed(&control))
+            .expect("decoded control");
+        assert!(dump.contains("window: 0"));
+        assert!(dump.contains("default"));
+        assert!(dump.contains("hello-world"));
+
+        let view = FormatManagerViewTopic {
+            windows: DdsSequence::from_vec(windows).unwrap(),
+        };
+        let dump =
+            decode("format_manager::FormatManagerViewTopic", &framed(&view)).expect("decoded view");
+        assert!(dump.contains("window: 1"));
+        assert!(dump.contains("hello-world"));
+    }
+
+    #[test]
+    fn every_registered_topic_has_a_decoder() {
+        use stations_dds::contract::TopicRegistry;
+        use std::path::PathBuf;
+
+        fn default_sample(idl_type: &str) -> Option<Vec<u8>> {
+            match idl_type {
+                "hello_world::HelloWorldTopic" => Some(framed(&HelloWorldTopic::default())),
+                "hello_world::HelloWorldViewTopic" => Some(framed(&HelloWorldViewTopic::default())),
+                "format_manager::FormatManagerInputTopic" => {
+                    Some(framed(&FormatManagerInputTopic::default()))
+                }
+                "format_manager::FormatManagerCtlTopic" => {
+                    Some(framed(&FormatManagerCtlTopic::default()))
+                }
+                "format_manager::FormatManagerViewTopic" => {
+                    Some(framed(&FormatManagerViewTopic::default()))
+                }
+                _ => None,
+            }
+        }
+
+        let root = PathBuf::from(env!("REPO_ROOT"));
+        let registry = TopicRegistry::load(&root.join("contracts/topics.toml")).unwrap();
+        for topic in &registry.topics {
+            let payload = default_sample(&topic.idl_type).unwrap_or_else(|| {
+                panic!("no test sample for registered type `{}`", topic.idl_type)
+            });
+            assert!(
+                decode(&topic.idl_type, &payload).is_some(),
+                "no decoder for registered type `{}`",
+                topic.idl_type
+            );
+        }
     }
 
     #[test]

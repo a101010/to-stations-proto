@@ -299,7 +299,7 @@ Then the manual fleet click-through and `dds-echo` checks.
 
 ## Result
 
-Core implementation complete; the story remains in progress until `dds-echo` decodes the sequence-bearing format-manager payloads:
+Implementation complete and verified by tests/build:
 
 - Added `DDS/format_manager.idl`; the input/control/view topic types are registered and generated with the existing IDL build.
 - Added `contracts/formats.toml`, the shared `format-list` crate, and both service contracts.
@@ -310,8 +310,8 @@ Core implementation complete; the story remains in progress until `dds-echo` dec
 - Build/deploy/launch/cleanup include both services and deploy `formats.toml`.
 - `cargo test`/`build.ps1 -Test` pass and `build.ps1` deploys.
 - Manual click-through passed: clicking the `lil-d` format window changed `hello-world` to `default` through the display-library -> controller -> view-service -> display-library chain.
+- `dds-echo` now decodes all three format-manager topics; tests cover the input topic and the sequence-bearing control/view payloads, a detail-text test verifies the decoded sequence appears in the detail pane, and a registry-coverage test requires a decoder for every registered type.
 - The wire command is an `i32` (`0` = Next, `1` = Select) because generated enum fields are not usable in the generated topic structs with this fork revision; the constants live in `format-list`.
-- Pending completion: `dds-echo` detail decoding for the three format-manager topics, including control/view sequence fields.
 - `dds-echo-message-classification` is the next queued story after this one is complete.
 - `multi-lil-d` follows for two displays and ABI v3 identity.
 - `dds-echo-send-sequences` is queued at the end of the backlog.
@@ -319,7 +319,7 @@ Core implementation complete; the story remains in progress until `dds-echo` dec
 ## Bookkeeping
 
 - `dds-echo-copy-detail` was completed at `2026-11-04 14:25:18` and moved to `completed_stories.md`.
-- `format-ctl-service` is `in progress` in `backlog.md`.
+- `format-ctl-service` is `in progress` in `backlog.md`; implementation and decode acceptance are complete.
 - `dds-echo-message-classification` is the next queued story after detail decoding is complete.
 - `multi-lil-d` follows for two `lil-d` instances and the ABI identity change.
 - `dds-echo-send-sequences` is queued at the end of the backlog.

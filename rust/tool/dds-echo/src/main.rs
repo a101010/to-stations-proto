@@ -1771,7 +1771,8 @@ fn main() -> Result<(), slint::PlatformError> {
 mod copy_detail_tests {
     use super::*;
     use crate::model::{Announcement, Class, Frame};
-    use stations_dds::cyclonedds::{CdrEncoding, CdrSerializer};
+    use stations_dds::cyclonedds::{CdrEncoding, CdrSerializer, DdsSequence};
+    use stations_dds::format_manager::{FormatManagerCtlTopic, FormatWindowAssignment};
     use stations_dds::hello_world::HelloWorldTopic;
     use stations_dds::math::Quaternion;
 
@@ -1836,6 +1837,36 @@ mod copy_detail_tests {
         }];
         let text = detail_text(&r, &KnownTopics::default());
         assert!(text.contains("Participant 01108c7358111aa9089f38f5"));
+    }
+
+    #[test]
+    fn detail_text_shows_format_manager_sequence() {
+        let sample = FormatManagerCtlTopic {
+            windows: DdsSequence::from_vec(vec![FormatWindowAssignment {
+                window: 0,
+                format: "default".to_string(),
+            }])
+            .unwrap(),
+        };
+        let body = CdrSerializer::serialize(&sample, CdrEncoding::Xcdr1).unwrap();
+        let mut payload = vec![0x00, 0x01, 0x00, 0x00];
+        payload.extend_from_slice(&body);
+
+        let mut r = record();
+        r.topic = Some("FormatManagerCtlTopic".to_string());
+        r.size = payload.len();
+        r.hex = payload.clone();
+        r.frames = vec![data_frame(Some(0..payload.len()))];
+
+        let mut known = KnownTopics::default();
+        known.insert(
+            "FormatManagerCtlTopic",
+            "format_manager::FormatManagerCtlTopic",
+        );
+        let text = detail_text(&r, &known);
+        assert!(text.contains("decoded:"));
+        assert!(text.contains("default"));
+        assert!(text.contains("window: 0"));
     }
 
     #[test]
