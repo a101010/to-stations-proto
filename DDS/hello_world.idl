@@ -1,4 +1,5 @@
 #include "math.idl"
+#include "format_manager.idl"
 
 module hello_world {
   struct HelloWorldTopic {

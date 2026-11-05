@@ -1,0 +1,8 @@
+# The ordered format list shared by the format-manager controller, the display
+# library, and the format menu/chooser. The first entry is the default format.
+
+[[formats]]
+name = "hello-world"
+
+[[formats]]
+name = "default"

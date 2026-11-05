@@ -41,20 +41,15 @@ Create `DDS/format_manager.idl`:
 
 ```idl
 module format_manager {
-  enum FormatCommand {
-    Next,
-    Select
-  };
-
   struct FormatWindowAssignment {
-    int32 window;
+    long window;
     string format;
   };
 
   struct FormatManagerInputTopic {
-    int32 window;
-    FormatCommand command;
-    string format;   // Select only; empty for Next
+    long window;
+    long command;   // 0 = Next, 1 = Select
+    string format;  // Select only; empty for Next
   };
 
   struct FormatManagerCtlTopic {
@@ -142,14 +137,14 @@ Location: `rust/service/format-ctl-service`.
 - Loads topics registry, its contract, and the formats contract.
 - Subscribes `FormatManagerInputTopic`; publishes `FormatManagerCtlTopic`.
 - Maintains `BTreeMap<i32, String>` format-window assignments.
-- On `Next`:
+- On command `0` (Next):
   - current = assigned format, else the first format;
   - next format in the list, wrapping;
   - update the map and publish the full assignment vector.
-- On `Select`:
+- On command `1` (Select):
   - validate the format name;
   - update the map and publish.
-- Ignores unknown formats.
+- Ignores unknown commands/formats.
 - Stays alive to retain transient-local control history.
 
 ### `format-view-service` (new crate)
@@ -164,7 +159,7 @@ Location: `rust/service/format-view-service`.
 ## `dds-echo` compatibility
 
 - Add `schema_for` and `TopicWriter` handling for the three new registered types.
-- `FormatManagerInputTopic` is usable from the Send form (enum as numeric, fields editable), enabling manual `Next`/`Select` injection.
+- `FormatManagerInputTopic` is usable from the Send form (command values 0/1, fields editable), enabling manual `Next`/`Select` injection.
 - The control/view topics contain sequences; the Send form marks those fields unsupported, which is acceptable. The registry-coverage test still requires a sender handler.
 
 ## Build, launch, and cleanup
@@ -268,6 +263,7 @@ Then the manual fleet click-through and `dds-echo` checks.
 - `rust/lib/display-lib/src/formats.rs`
 - `rust/lib/display-lib/src/formats/*.rs`
 - `rust/lib/display-lib/src/view.rs`
+- `rust/lib/display-lib/src/format_source.rs` (new)
 - `rust/tool/dds-echo/src/send.rs`
 - `scripts/build.ps1`
 - `scripts/launch-rust.ps1`
@@ -281,7 +277,19 @@ Then the manual fleet click-through and `dds-echo` checks.
 
 ## Result
 
-Not started.
+Implemented and verified:
+
+- Added `DDS/format_manager.idl`; the input/control/view topic types are registered and generated with the existing IDL build.
+- Added `contracts/formats.toml`, the shared `format-list` crate, and both service contracts.
+- Added `format-ctl-service` (per-window assignments, next/select, full control publication) and `format-view-service` (assignment forwarding).
+- The display library now owns the format-manager DDS on one shared participant, applies assignments by name, and creates logical `Next` events from local clicks. Local format cycling is removed.
+- `lil-d` is unchanged; the display ABI remains version 2.
+- `dds-echo`'s Send dispatch covers the three new registered topics.
+- Build/deploy/launch/cleanup include both services and deploy `formats.toml`.
+- `cargo test`/`build.ps1 -Test` pass and `build.ps1` deploys.
+- Manual click-through passed: clicking the `lil-d` format window changed `hello-world` to `default` through the display-library -> controller -> view-service -> display-library chain.
+- The wire command is an `i32` (`0` = Next, `1` = Select) because generated enum fields are not usable in the generated topic structs with this fork revision; the constants live in `format-list`.
+- `multi-lil-d` remains the follow-up for two displays and ABI v3 identity.
 
 ## Bookkeeping
 

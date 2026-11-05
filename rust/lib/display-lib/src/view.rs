@@ -5,10 +5,8 @@
 //! needs view data renders black until the first sample arrives.
 
 use std::cell::{Cell, RefCell};
-use std::path::Path;
 use std::rc::Rc;
 
-use stations_dds::contract::TopicRegistry;
 use stations_dds::cyclonedds::DataReader;
 use stations_dds::dds::Node;
 use stations_dds::hello_world::HelloWorldViewTopic;
@@ -30,26 +28,18 @@ pub(crate) fn new_state() -> ViewState {
     Rc::new(RefCell::new(None))
 }
 
-/// A `HelloWorldViewTopic` reader on one domain.
+/// A `HelloWorldViewTopic` reader on the display library's shared participant.
 pub(crate) struct ViewSource {
-    // Kept alive for the reader's lifetime.
-    _node: Node,
     reader: DataReader<HelloWorldViewTopic>,
     last_attitude: Cell<Option<[f32; 4]>>,
 }
 
 impl ViewSource {
-    /// Create the participant and reader. The registry is loaded from
-    /// `config_dir/topics.toml`.
-    pub(crate) fn new(domain: u32, config_dir: &Path) -> Result<Self, String> {
-        let registry =
-            TopicRegistry::load(&config_dir.join("topics.toml")).map_err(|e| e.to_string())?;
-        let node = Node::new(domain, registry).map_err(|e| e.to_string())?;
+    pub(crate) fn new(node: &Node) -> Result<Self, String> {
         let reader = node
             .reader::<HelloWorldViewTopic>("HelloWorldViewTopic")
             .map_err(|e| e.to_string())?;
         Ok(Self {
-            _node: node,
             reader,
             last_attitude: Cell::new(None),
         })

@@ -100,6 +100,9 @@ pub fn known_types() -> &'static [&'static str] {
     &[
         "hello_world::HelloWorldTopic",
         "hello_world::HelloWorldViewTopic",
+        "format_manager::FormatManagerInputTopic",
+        "format_manager::FormatManagerCtlTopic",
+        "format_manager::FormatManagerViewTopic",
     ]
 }
 

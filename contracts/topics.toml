@@ -12,3 +12,21 @@ name = "HelloWorldViewTopic"
 type = "hello_world::HelloWorldViewTopic"
 qos = "best_effort"
 key = []
+
+[[topics]]
+name = "FormatManagerInputTopic"
+type = "format_manager::FormatManagerInputTopic"
+qos = "reliable"
+key = []
+
+[[topics]]
+name = "FormatManagerCtlTopic"
+type = "format_manager::FormatManagerCtlTopic"
+qos = "transient_local"
+key = []
+
+[[topics]]
+name = "FormatManagerViewTopic"
+type = "format_manager::FormatManagerViewTopic"
+qos = "transient_local"
+key = []

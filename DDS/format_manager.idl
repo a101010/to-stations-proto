@@ -1,0 +1,20 @@
+module format_manager {
+  struct FormatWindowAssignment {
+    long window;
+    string format;
+  };
+
+  struct FormatManagerInputTopic {
+    long window;
+    long command;   // 0 = Next, 1 = Select
+    string format;
+  };
+
+  struct FormatManagerCtlTopic {
+    sequence<FormatWindowAssignment> windows;
+  };
+
+  struct FormatManagerViewTopic {
+    sequence<FormatWindowAssignment> windows;
+  };
+};

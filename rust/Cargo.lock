@@ -1111,6 +1111,7 @@ dependencies = [
 name = "display-lib"
 version = "0.0.0"
 dependencies = [
+ "format-list",
  "glow 0.17.0",
  "harfbuzz",
  "image",
@@ -1593,6 +1594,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
 dependencies = [
  "percent-encoding",
+]
+
+[[package]]
+name = "format-ctl-service"
+version = "0.0.0"
+dependencies = [
+ "clap",
+ "format-list",
+ "stations-dds",
+]
+
+[[package]]
+name = "format-list"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "toml 0.8.23",
+]
+
+[[package]]
+name = "format-view-service"
+version = "0.0.0"
+dependencies = [
+ "clap",
+ "stations-dds",
 ]
 
 [[package]]

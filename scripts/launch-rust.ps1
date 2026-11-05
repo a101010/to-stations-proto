@@ -4,7 +4,8 @@ Launches the Rust configuration.
 
 .DESCRIPTION
 Starts the applications of the Rust configuration from build/deploy: the
-hello_world model service, the view service, and the small display (lil-d).
+hello_world model service, the view service, the format-manager services, and
+the small display (lil-d).
 
 All participants read the shared DDS configuration; this script sets
 CYCLONEDDS_URI before starting them.
@@ -31,8 +32,10 @@ $config = Join-Path $repoRoot 'build\deploy\config\cyclonedds-config.xml'
 
 $model = Join-Path $bin 'hello-service.exe'
 $view = Join-Path $bin 'hello-view-service.exe'
+$formatCtl = Join-Path $bin 'format-ctl-service.exe'
+$formatView = Join-Path $bin 'format-view-service.exe'
 $display = Join-Path $bin 'lil-d.exe'
-if (-not (Test-Path $model) -or -not (Test-Path $view) -or -not (Test-Path $display) -or -not (Test-Path $config)) {
+if (-not (Test-Path $model) -or -not (Test-Path $view) -or -not (Test-Path $formatCtl) -or -not (Test-Path $formatView) -or -not (Test-Path $display) -or -not (Test-Path $config)) {
     throw "Not built: run scripts\build.ps1 first."
 }
 
@@ -44,5 +47,9 @@ Start-Process -FilePath $model
 Start-Sleep -Milliseconds 500
 Start-Process -FilePath $view
 Start-Sleep -Milliseconds 500
+Start-Process -FilePath $formatCtl
+Start-Sleep -Milliseconds 300
+Start-Process -FilePath $formatView
+Start-Sleep -Milliseconds 300
 Start-Process -FilePath $display -ArgumentList '--station', $Station
-Write-Host "Started hello-service, hello-view-service, and lil-d (station $Station)"
+Write-Host "Started hello-service, hello-view-service, format-ctl-service, format-view-service, and lil-d (station $Station)"

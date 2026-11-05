@@ -10,6 +10,7 @@
 
 mod earth;
 mod format_manager;
+mod format_source;
 mod formats;
 mod shader;
 mod text;
@@ -17,6 +18,9 @@ mod view;
 
 use std::cell::RefCell;
 use std::ffi::{c_char, c_int, c_void, CString};
+use format_list::FormatList;
+use stations_dds::contract::TopicRegistry;
+use stations_dds::dds::Node;
 
 /// ABI version implemented by this library. Mirrors `DISPLAY_LIB_ABI_VERSION`
 /// in `include/display_lib.h`.
@@ -35,6 +39,8 @@ enum DisplayError {
     Font(String),
     /// An image asset (an earth cube-map face) could not be loaded or decoded.
     Image(String),
+    /// The formats contract could not be loaded or names a format we cannot build.
+    Formats(String),
 }
 
 impl std::fmt::Display for DisplayError {
@@ -44,6 +50,7 @@ impl std::fmt::Display for DisplayError {
             DisplayError::Io(msg) => write!(f, "io error: {msg}"),
             DisplayError::Font(msg) => write!(f, "font error: {msg}"),
             DisplayError::Image(msg) => write!(f, "image error: {msg}"),
+            DisplayError::Formats(msg) => write!(f, "formats error: {msg}"),
         }
     }
 }
@@ -57,6 +64,8 @@ struct Display {
     /// The DDS subscription for the hello_world view; `None` when it could not
     /// be created (the format then renders black).
     view: Option<view::ViewSource>,
+    /// Format-manager assignments and logical input events.
+    format_source: Option<format_source::FormatSource>,
     /// The latest received view sample, shared with the formats.
     state: view::ViewState,
 }
@@ -65,14 +74,27 @@ impl Display {
     fn new(loader: impl FnMut(&str) -> *const c_void) -> Result<Self, DisplayError> {
         let gl = unsafe { glow::Context::from_loader_function(loader) };
         let state = view::new_state();
+        let config = config_root();
+        let formats = FormatList::load(&config.join("formats.toml"))
+            .map_err(|e| DisplayError::Formats(e.to_string()))?;
         let format_manager =
-            format_manager::FormatManager::new(&gl, &assets_root(), state.clone())?;
-        // Best-effort: without DDS/config the format simply renders black.
-        let view = view::ViewSource::new(0, &config_root()).ok();
+            format_manager::FormatManager::new(&gl, &assets_root(), state.clone(), &formats)?;
+
+        // Best-effort: without DDS/config the format renders black and local
+        // clicks do not reach a controller.
+        let node = TopicRegistry::load(&config.join("topics.toml"))
+            .ok()
+            .and_then(|registry| Node::new(0, registry).ok());
+        let view = node.as_ref().and_then(|node| view::ViewSource::new(node).ok());
+        let format_source = node
+            .as_ref()
+            .and_then(|node| format_source::FormatSource::new(node).ok());
+
         Ok(Self {
             gl,
             format_manager,
             view,
+            format_source,
             state,
         })
     }
@@ -83,13 +105,24 @@ impl Display {
         if let Some(view) = &self.view {
             view.poll(&self.state);
         }
+        if let Some(format_source) = &self.format_source {
+            format_source.poll(&mut self.format_manager);
+        }
         self.format_manager
             .render(&self.gl, framebuffer_height, x, y, width, height);
     }
 
-    /// Forward a mouse button event (physical pixels, top-left origin).
+    /// Forward a mouse button event (physical pixels, top-left origin). A left
+    /// press inside a format window publishes a logical `Next` event.
     fn mouse_button(&mut self, x: i32, y: i32, button: i32, pressed: bool) {
-        self.format_manager.mouse_button(x, y, button, pressed);
+        if button != 0 || !pressed {
+            return;
+        }
+        if let Some(window) = self.format_manager.hit_window(x, y) {
+            if let Some(format_source) = &self.format_source {
+                format_source.send_next(window);
+            }
+        }
     }
 }
 

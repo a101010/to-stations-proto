@@ -20,7 +20,7 @@ include!(concat!(env!("REPO_ROOT"), "/build/gen/rust/hello_world.rs"));
 
 #[cfg(test)]
 mod tests {
-    use super::{hello_world, math};
+    use super::{format_manager, hello_world, math};
     use ::cyclonedds::DdsType;
 
     #[test]
@@ -29,6 +29,10 @@ mod tests {
         assert_eq!(
             <hello_world::HelloWorldTopic as DdsType>::type_name(),
             "hello_world::HelloWorldTopic"
+        );
+        assert_eq!(
+            <format_manager::FormatManagerInputTopic as DdsType>::type_name(),
+            "format_manager::FormatManagerInputTopic"
         );
     }
 }

@@ -9,10 +9,15 @@ pub(crate) mod hello_world;
 
 use std::path::Path;
 
+use format_list::FormatList;
+
 use crate::DisplayError;
 
 /// A displayable format.
 pub(crate) trait Format {
+    /// The format's registry name.
+    fn name(&self) -> &'static str;
+
     /// Render into the region (physical pixels, top-left origin).
     /// `framebuffer_height` is the whole framebuffer height.
     fn render(
@@ -26,15 +31,29 @@ pub(crate) trait Format {
     );
 }
 
-/// Build the format registry, in display order. The first format is the
-/// initial active format.
+/// Build the format registry in contract order. The first format is the
+/// default for unassigned format windows.
 pub(crate) fn registry(
     gl: &glow::Context,
     assets_root: &Path,
     state: crate::view::ViewState,
+    formats: &FormatList,
 ) -> Result<Vec<Box<dyn Format>>, DisplayError> {
-    Ok(vec![
-        Box::new(hello_world::HelloWorld::new(gl, assets_root, state)?),
-        Box::new(default::Default::new(gl)?),
-    ])
+    let mut result = Vec::with_capacity(formats.names().len());
+    for name in formats.names() {
+        match name.as_str() {
+            "hello-world" => result.push(Box::new(hello_world::HelloWorld::new(
+                gl,
+                assets_root,
+                state.clone(),
+            )?) as Box<dyn Format>),
+            "default" => result.push(Box::new(default::Default::new(gl)?) as Box<dyn Format>),
+            other => {
+                return Err(DisplayError::Formats(format!(
+                    "unknown format in formats.toml: {other}"
+                )))
+            }
+        }
+    }
+    Ok(result)
 }

@@ -56,6 +56,10 @@ impl HelloWorld {
 }
 
 impl crate::formats::Format for HelloWorld {
+    fn name(&self) -> &'static str {
+        "hello-world"
+    }
+
     /// Render into the region (physical pixels, top-left origin).
     /// `framebuffer_height` is the whole framebuffer height.
     fn render(

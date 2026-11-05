@@ -151,6 +151,10 @@ impl Default {
 }
 
 impl crate::formats::Format for Default {
+    fn name(&self) -> &'static str {
+        "default"
+    }
+
     /// Render into the region (physical pixels, top-left origin).
     /// `framebuffer_height` is the whole framebuffer height.
     fn render(

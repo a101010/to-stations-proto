@@ -11,6 +11,9 @@ use stations_dds::cyclonedds::{
     DataWriter, DdsFieldMetadata, DynamicPrimitiveKind, DynamicTypeSchema, DynamicValue,
 };
 use stations_dds::dds::Node;
+use stations_dds::format_manager::{
+    FormatManagerCtlTopic, FormatManagerInputTopic, FormatManagerViewTopic,
+};
 use stations_dds::hello_world::{HelloWorldTopic, HelloWorldViewTopic};
 
 /// How a field is edited in the Send form.
@@ -182,6 +185,15 @@ pub fn schema_for(idl_type: &str) -> Option<&'static DynamicTypeSchema> {
         "hello_world::HelloWorldViewTopic" => {
             Some(<HelloWorldViewTopic as DdsFieldMetadata>::field_schema())
         }
+        "format_manager::FormatManagerInputTopic" => {
+            Some(<FormatManagerInputTopic as DdsFieldMetadata>::field_schema())
+        }
+        "format_manager::FormatManagerCtlTopic" => {
+            Some(<FormatManagerCtlTopic as DdsFieldMetadata>::field_schema())
+        }
+        "format_manager::FormatManagerViewTopic" => {
+            Some(<FormatManagerViewTopic as DdsFieldMetadata>::field_schema())
+        }
         _ => None,
     }
 }
@@ -190,6 +202,9 @@ pub fn schema_for(idl_type: &str) -> Option<&'static DynamicTypeSchema> {
 pub enum TopicWriter {
     HelloWorld(DataWriter<HelloWorldTopic>),
     HelloWorldView(DataWriter<HelloWorldViewTopic>),
+    FormatManagerInput(DataWriter<FormatManagerInputTopic>),
+    FormatManagerCtl(DataWriter<FormatManagerCtlTopic>),
+    FormatManagerView(DataWriter<FormatManagerViewTopic>),
 }
 
 impl TopicWriter {
@@ -202,6 +217,18 @@ impl TopicWriter {
             "hello_world::HelloWorldViewTopic" => node
                 .writer::<HelloWorldViewTopic>(topic)
                 .map(TopicWriter::HelloWorldView)
+                .map_err(|e| e.to_string()),
+            "format_manager::FormatManagerInputTopic" => node
+                .writer::<FormatManagerInputTopic>(topic)
+                .map(TopicWriter::FormatManagerInput)
+                .map_err(|e| e.to_string()),
+            "format_manager::FormatManagerCtlTopic" => node
+                .writer::<FormatManagerCtlTopic>(topic)
+                .map(TopicWriter::FormatManagerCtl)
+                .map_err(|e| e.to_string()),
+            "format_manager::FormatManagerViewTopic" => node
+                .writer::<FormatManagerViewTopic>(topic)
+                .map(TopicWriter::FormatManagerView)
                 .map_err(|e| e.to_string()),
             other => Err(format!("unsupported topic type `{other}`")),
         }
@@ -218,6 +245,18 @@ impl TopicWriter {
                 .matched_subscriptions()
                 .map(|handles| handles.len())
                 .map_err(|e| e.to_string()),
+            TopicWriter::FormatManagerInput(writer) => writer
+                .matched_subscriptions()
+                .map(|handles| handles.len())
+                .map_err(|e| e.to_string()),
+            TopicWriter::FormatManagerCtl(writer) => writer
+                .matched_subscriptions()
+                .map(|handles| handles.len())
+                .map_err(|e| e.to_string()),
+            TopicWriter::FormatManagerView(writer) => writer
+                .matched_subscriptions()
+                .map(|handles| handles.len())
+                .map_err(|e| e.to_string()),
         }
     }
 
@@ -231,6 +270,21 @@ impl TopicWriter {
             TopicWriter::HelloWorldView(writer) => {
                 let sample = HelloWorldViewTopic::from_dynamic_value(value)
                     .map_err(|e| format!("HelloWorldViewTopic: {e}"))?;
+                writer.write(&sample).map_err(|e| e.to_string())
+            }
+            TopicWriter::FormatManagerInput(writer) => {
+                let sample = FormatManagerInputTopic::from_dynamic_value(value)
+                    .map_err(|e| format!("FormatManagerInputTopic: {e}"))?;
+                writer.write(&sample).map_err(|e| e.to_string())
+            }
+            TopicWriter::FormatManagerCtl(writer) => {
+                let sample = FormatManagerCtlTopic::from_dynamic_value(value)
+                    .map_err(|e| format!("FormatManagerCtlTopic: {e}"))?;
+                writer.write(&sample).map_err(|e| e.to_string())
+            }
+            TopicWriter::FormatManagerView(writer) => {
+                let sample = FormatManagerViewTopic::from_dynamic_value(value)
+                    .map_err(|e| format!("FormatManagerViewTopic: {e}"))?;
                 writer.write(&sample).map_err(|e| e.to_string())
             }
         }

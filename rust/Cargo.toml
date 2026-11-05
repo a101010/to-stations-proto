@@ -1,11 +1,12 @@
 [workspace]
 resolver = "2"
-members = ["lib/stations-dds", "lib/display-lib", "lib/harfbuzz", "lib/single-instance", "service/hello-service", "service/hello-view-service", "tool/dds-contracts", "tool/dds-echo", "tool/equirect-to-cubemap", "ui/lil-d"]
+members = ["lib/stations-dds", "lib/display-lib", "lib/harfbuzz", "lib/single-instance", "lib/format-list", "service/hello-service", "service/hello-view-service", "service/format-ctl-service", "service/format-view-service", "tool/dds-contracts", "tool/dds-echo", "tool/equirect-to-cubemap", "ui/lil-d"]
 
 [workspace.dependencies]
 cyclonedds = { git = "https://github.com/a101010/cyclonedds-rust", rev = "952906b5018831683c0863cd11001bdac427ee10", default-features = false, features = ["native"] }
 cyclonedds-rust-sys = { git = "https://github.com/a101010/cyclonedds-rust", rev = "952906b5018831683c0863cd11001bdac427ee10", default-features = false }
 harfbuzz = { path = "lib/harfbuzz" }
+format-list = { path = "lib/format-list" }
 single-instance = { path = "lib/single-instance" }
 stations-dds = { path = "lib/stations-dds" }
 libloading = "0.8"
