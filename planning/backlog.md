@@ -39,27 +39,21 @@ Third-party libraries are built/installed to an external prefix (for example `C:
 
 ## Later increments
 
-### format-ctl-service
-Create the per-display format-manager controller and view services. The display library creates logical format events from local input and publishes them; `format-ctl-service` consumes them, owns per-format-window assignments using the shared formats contract, and publishes control; `format-view-service` forwards the assignments to the display library. `lil-d` remains format- and topic-agnostic; the display library owns all format-manager DDS. This story is single-display and unscoped; display identity/scoping comes in multi-lil-d.
-- **Depends on:** none.
-- **Minimal test:** launch the fleet, click in `lil-d`'s format window, and verify the display switches `hello-world` <-> `default` while `dds-echo` shows and decodes the input/control/view topics, including sequence-bearing payloads.
-- **Status:** in progress.
-
 ### dds-echo-message-classification
 Classify `dds-echo` capture records into separate groups: known topics, unregistered topics, DDS discovery, RTPS control, and unidentified data. Show Discovery, RTPS control, and Unidentified as their own topics-pane groups; keep the Known and Unknown topic rows; update counts, filtering, table labels, detail category, and Hide self. Use builtin discovery writer IDs as a fallback for discovery detection.
 - **Depends on:** none.
 - **Minimal test:** capture a known topic, an unregistered topic, SPDP/SEDP discovery, a heartbeat-only datagram, and an unattributed DATA datagram; each appears in its own group and filters correctly.
-- **Status:** todo.
+- **Status:** in progress.
 
 ### multi-lil-d
 Add display identity/scoping to the format-manager chain so two `lil-d` instances with different `--station` values can be controlled independently. Add station/display fields to the format-manager topics, identity to the controller/view services, `display_lib_set_identity` and ABI v3, and stamp/filter in the display library; update launch/cleanup for multiple displays.
-- **Depends on:** format-ctl-service.
+- **Depends on:** none.
 - **Minimal test:** run `lil-d` for station 0 and station 1; clicking one format window changes only that display's format.
 - **Status:** todo.
 
 ### format-menu
 Add a three-dot menu to the format manager, drawn in the upper left over all formats, with one entry per format.
-- **Depends on:** format-ctl-service.
+- **Depends on:** none.
 - **Minimal test:** the menu switches the active format.
 - **Status:** todo.
 

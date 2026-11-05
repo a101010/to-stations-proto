@@ -213,3 +213,9 @@ Make the `dds-echo` detail pane selectable read-only text so the user can select
 - **Completed:** 2026-11-04 14:25:18.
 - **Depends on:** none.
 - **Minimal test:** select a record, select sender lines in the detail pane, press Ctrl+C, and paste into an editor; the pasted text is the selected portion.
+
+### format-ctl-service
+Create the per-display format-manager controller and view services. The display library creates logical format events from local input and publishes them; `format-ctl-service` consumes them, owns per-format-window assignments using the shared formats contract, and publishes control; `format-view-service` forwards the assignments to the display library. `lil-d` remains format- and topic-agnostic; the display library owns all format-manager DDS. The story is single-display and unscoped; display identity/scoping comes in `multi-lil-d`. `dds-echo` decodes all three format-manager topics, including the sequence-bearing control/view payloads.
+- **Completed:** 2026-11-05 16:19:54.
+- **Depends on:** none.
+- **Minimal test:** launch the fleet, click in `lil-d`'s format window, and verify the display switches `hello-world` <-> `default` while `dds-echo` shows and decodes the input/control/view topics, including sequence-bearing payloads.

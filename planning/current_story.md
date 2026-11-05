@@ -1,327 +1,173 @@
-# Current story: format-ctl-service
+# Current story: dds-echo-message-classification
 
 This file is the detailed, living plan for the one active story. It is rewritten for each story. The backlog in `backlog.md` holds all work and the per-story status.
 
 ## Story
 
-Create the per-display format-manager controller and view services. The display library creates logical format events from local input and publishes them; `format-ctl-service` consumes them, owns per-format-window assignments using the shared formats contract, and publishes control; `format-view-service` forwards the assignments to the display library. `lil-d` remains format- and topic-agnostic; the display library owns all format-manager DDS.
+Classify captured records into distinct message kinds and show DDS discovery and non-topic RTPS messages in separate topics-pane groups instead of Unknown/unidentified.
 
 - **Depends on:** none.
-- **Minimal test:** launch the Rust fleet, click in `lil-d`'s format window, and verify the display switches `hello-world` <-> `default` while `dds-echo` shows and decodes the input/control/view topics, including the sequence-bearing control/view payloads.
-
-## Terms
-
-- **Format window** = a square region that displays a format: one on `lil-d`, three on `big-d`.
-- The **eyebrow** is not a format, is not a format window, and is not controlled by the format manager.
+- **Minimal test:** capture a known topic, an unregistered topic, SPDP/SEDP discovery, a heartbeat-only datagram, and an unattributed DATA datagram; each appears in its own group and filters correctly.
 
 ## Context
 
-The display library currently owns the format registry and switches formats locally when `lil-d` forwards a left click. This story moves the format-selection logic into a separate controller service and adds the view service that forwards assignments to the display library.
+The `format-ctl-service` story added format-manager topics, and `dds-echo` now decodes them. Classification is a separate `dds-echo` model/UI concern.
 
-The display application remains intentionally ignorant of formats and topics: it loads the display library, renders the regions the library is given, and forwards local input events. The display library handles all format-manager DDS and turns local input into logical events.
+Current behavior:
 
-This story is **single-display and unscoped**: there is one `lil-d` and one controller/view pair, so the topics do not yet carry `station`/`display` fields. The follow-up `multi-lil-d` story adds display identity, topic scoping, and the display ABI change.
+- `tick` forces discovery records to `topic = "discovery"`, so they appear as an unknown topic row.
+- RTPS records with no topic, such as HEARTBEAT/ACKNACK/GAP/INFO-only datagrams, count as `unidentified`.
+- The UI has only Known and Unknown groups.
+- `Class` describes transport/known state, but the model has no message-category concept.
 
 ## Decisions
 
-1. **Logical events.** The display library creates `Next`/`Select` events for a format window from local input. `lil-d` does not create format events or know format names.
-2. **Single-display, unscoped topics.** No `station`/`display` fields in this story; one controller/view pair. `multi-lil-d` adds identity/scoping and ABI v3 later.
-3. **No ABI change.** `lil-d` continues to use the existing ABI; the display library handles the new DDS work internally.
-4. **Shared formats contract.** Add `contracts/formats.toml` with the ordered format names. The controller uses it for next/select; the display library uses it to name/order formats.
-5. **Controller owns per-window assignments.** It stores format-window ID -> format name, starting from the first format for unassigned windows.
-6. **View service is a pass-through.** It receives controller assignments and republishes them on the view topic. It can add view-specific data later.
-7. **Display library owns the DDS.** It subscribes to assignments, publishes logical input events, and applies assignments. It shares one DDS `Node` with the hello_world view reader where practical.
-8. **Format windows only.** No event, assignment, or format ID is created for the eyebrow.
-9. **`dds-echo` compatibility.** The three new topics are registered, so `dds-echo`'s Send dispatch gains schemas and typed writers for them to keep the registry-coverage test passing.
-10. **One controller/view instance.** The services are per display by design, but this increment runs one of each for the single `lil-d`.
+1. **Add a `MessageKind`** independent of the transport `Class`:
+   - `KnownTopic`
+   - `UnregisteredTopic`
+   - `Discovery`
+   - `RtpsControl`
+   - `UnidentifiedData`
+   - `Udp`
+2. **Separate topics-pane groups**, as requested:
+   - Known (existing)
+   - Unknown (existing; unregistered topics only)
+   - Discovery
+   - RTPS control
+   - Unidentified (includes a `udp` row for non-RTPS datagrams)
+3. **Classification priority** for mixed datagrams:
+   1. known registered topic
+   2. unregistered identified topic
+   3. discovery announcement or builtin discovery writer
+   4. RTPS DATA without an attributed topic -> unidentified data
+   5. RTPS without DATA -> RTPS control
+   6. non-RTPS -> UDP
+4. **Discovery fallback:** recognize SPDP/SEDP by builtin writer entity IDs (`000100c2`, `000003c2`, `000004c2`) in addition to decoded announcements, so failed payload parsing does not misclassify discovery.
+5. **Keep filtering and Hide self** working across all groups.
+6. **No DDS/service changes.** This is a `dds-echo` model/UI story.
+7. **No Send-sequence work.** That remains `dds-echo-send-sequences` at the end of the backlog.
 
-## Topics and IDL
+## Model changes
 
-Create `DDS/format_manager.idl`:
+In `rust/tool/dds-echo/src/model.rs`:
 
-```idl
-module format_manager {
-  struct FormatWindowAssignment {
-    long window;
-    string format;
-  };
+- Add `MessageKind` and a `Record.kind` field.
+- Add `Record::classify(&KnownTopics) -> MessageKind`.
+- Extend `is_discovery()` with the builtin writer entity IDs.
+- Add `Record::display_topic()` returning:
+  - the topic for known/unregistered topics;
+  - `discovery`, `rtps control`, `unidentified`, or `udp` for categories.
+- Update `TopicCounts`:
+  - keep per-topic counts for known/unregistered topics;
+  - add per-kind counts for the non-topic categories;
+  - track self-category counts so Hide self can subtract them;
+  - return `TopicRow { name, kind, packets }` for all groups.
+- Update `TopicSelection`/`History::matching` to filter by `display_topic()`.
+- Update `History::reattribute` so a record moving from unidentified to a registered topic:
+  - changes its kind;
+  - moves its count from `UnidentifiedData` to the topic bucket;
+  - preserves self-origin counts.
 
-  struct FormatManagerInputTopic {
-    long window;
-    long command;   // 0 = Next, 1 = Select
-    string format;  // Select only; empty for Next
-  };
+The `Class` enum remains for transport purposes; `MessageKind` drives grouping.
 
-  struct FormatManagerCtlTopic {
-    sequence<FormatWindowAssignment> windows;
-  };
+## UI changes
 
-  struct FormatManagerViewTopic {
-    sequence<FormatWindowAssignment> windows;
-  };
-};
-```
+In `ui/dds_echo.slint`:
 
-- Add `#include "format_manager.idl"` to the generated root (`DDS/hello_world.idl`).
-- Add all three `*Topic` types to `stations-dds::contract::known_types()`.
-- Add the `format_manager` module to generated-type tests.
-
-Registry entries:
-
-| Topic | Type | QoS |
-|---|---|---|
-| `FormatManagerInputTopic` | `format_manager::FormatManagerInputTopic` | `reliable` |
-| `FormatManagerCtlTopic` | `format_manager::FormatManagerCtlTopic` | `transient_local` |
-| `FormatManagerViewTopic` | `format_manager::FormatManagerViewTopic` | `transient_local` |
-
-Service contracts:
-
-- `contracts/services/format-ctl-service.toml`: publish `FormatManagerCtlTopic`, subscribe `FormatManagerInputTopic`.
-- `contracts/services/format-view-service.toml`: publish `FormatManagerViewTopic`, subscribe `FormatManagerCtlTopic`.
-
-## Shared formats contract
-
-Add `contracts/formats.toml`:
-
-```toml
-[[formats]]
-name = "hello-world"
-
-[[formats]]
-name = "default"
-```
-
-Add a shared loader, for example `rust/lib/format-list` (`format_list`):
-
-- loads the ordered list;
-- validates non-empty/unique names;
-- provides `first()`, `contains()`, and `next()`.
-
-Consumers:
-
-- `format-ctl-service`: next/select logic and validation.
-- `display-library`: build its format renderer registry in contract order and expose names.
-- Later: `format-menu` and `format-chooser-format`.
-
-Deploy `formats.toml` to `build/deploy/config/`.
-
-## Responsibilities
-
-### Display library
-
-- Load `formats.toml`; build format renderers in contract order.
-- Add `name()` to the `Format` trait; names for `hello-world`/`default`.
-- Replace the single active format with per-format-window assignments:
-  - unassigned window -> first format;
-  - unknown name -> ignore;
-  - render window `0` from the single region for `lil-d`.
-- Share one DDS `Node` for:
-  - the existing `HelloWorldViewTopic` reader;
-  - a `FormatManagerViewTopic` reader;
-  - a `FormatManagerInputTopic` writer.
-- On a left press inside a format window, publish a logical `Next` event for that window (window `0` for `lil-d`).
-- Apply assignments from the view reader before rendering.
-- Remove local format cycling from the format manager.
-- Keep the eyebrow out of all format-manager paths.
-
-### `lil-d`
-
-- Unchanged: load the display library, render, and forward unconsumed pointer events.
-- No knowledge of formats, format names, format events, topics, or contracts.
-
-### `format-ctl-service` (new crate)
-
-Location: `rust/service/format-ctl-service`.
-
-- Arguments: `--domain`, `--config`, `--topics` only. No format/input identity or selection from the CLI.
-- Loads topics registry, its contract, and the formats contract.
-- Subscribes `FormatManagerInputTopic`; publishes `FormatManagerCtlTopic`.
-- Maintains `BTreeMap<i32, String>` format-window assignments.
-- On command `0` (Next):
-  - current = assigned format, else the first format;
-  - next format in the list, wrapping;
-  - update the map and publish the full assignment vector.
-- On command `1` (Select):
-  - validate the format name;
-  - update the map and publish.
-- Ignores unknown commands/formats.
-- Stays alive to retain transient-local control history.
-
-### `format-view-service` (new crate)
-
-Location: `rust/service/format-view-service`.
-
-- Arguments: `--domain`, `--config`, `--topics`.
-- Subscribes `FormatManagerCtlTopic`; publishes `FormatManagerViewTopic`.
-- Forwards the assignment vector.
-- Stays alive so the last view sample is retained for late-joining displays.
-
-## `dds-echo` compatibility
-
-- Add `schema_for` and `TopicWriter` handling for the three new registered types.
-- `FormatManagerInputTopic` is usable from the Send form (command values 0/1, fields editable), enabling manual `Next`/`Select` injection.
-- The control/view topics contain sequences; the Send form marks those fields unsupported, which is acceptable. The registry-coverage test still requires a sender handler.
-
-## Build, launch, and cleanup
-
-- Add the `format-list`, `format-ctl-service`, and `format-view-service` crates to the workspace.
-- Deploy both service executables and `formats.toml`.
-- Add both service source roots to the `dds-contracts` scan.
-- `launch-rust.ps1` starts both services before `lil-d`:
-  - `format-ctl-service`
-  - `format-view-service`
-- `cleanup.ps1` stops both.
-- Add both service contracts to `build/topics.md`.
-
-## Architecture and backlog updates
-
-- In `architecture.md`:
-  - define **format window** explicitly and state that the eyebrow is separate;
-  - document the display-library-owned DDS/event path and that `lil-d` remains format/topic-agnostic;
-  - document the controller/view/display chain, shared formats contract, and single-display first implementation;
-  - name `multi-lil-d` as the follow-up for display identity/scoping and ABI v3.
-- In `backlog.md`:
-  - make `format-ctl-service` the active story;
-  - add `multi-lil-d` immediately after it for two `lil-d` instances and the ABI identity change;
-  - add `random-greeting` as a small `hello-service` change.
-- Move `dds-echo-copy-detail` to `completed_stories.md`.
+- Add models/totals:
+  - `discovery-topics`, `discovery-total`
+  - `rtps-control-topics`, `rtps-control-total`
+  - `unidentified-topics`, `unidentified-total`
+- Add three `TopicGroup`s with titles Discovery, RTPS control, and Unidentified.
+- Keep Known and Unknown groups.
+- The record table's Topic column shows the category label for non-topic records.
+- The detail text includes a `kind:` line and uses the category label for `topic:` where appropriate.
+- Filter selections use the category rows; the existing multi-select and Unselect All behavior remains.
 
 ## Implementation steps
 
-1. **Planning bookkeeping.** Move `dds-echo-copy-detail` to `completed_stories.md` with completion time `2026-11-04 14:25:18`; make `format-ctl-service` active; add `multi-lil-d` and `random-greeting`.
-2. **IDL and contracts.** Add `format_manager.idl`, include it from the root, register the three topics, add the two service contracts, and add `formats.toml`.
-3. **Format list.** Add the `format-list` loader and tests.
-4. **Controller.** Add `format-ctl-service` with the assignment/next/select logic and tests.
-5. **View service.** Add `format-view-service` with forwarding and tests.
-6. **Display library.** Load formats, add names, add view reader/input writer on a shared Node, apply assignments, create logical events from clicks, remove local cycling, and add tests.
-7. **`dds-echo` Send dispatch.** Add the three topic schemas/writers for registry compatibility and manual input testing.
-8. **`dds-echo` detail decoding.** Add decode arms and tests for the three format-manager topics, including sequence-bearing control/view samples, plus registry decoder coverage.
-9. **Build/launch/cleanup.** Add the crates, deploy artifacts, service contracts, launch, cleanup, and scan roots.
-10. **Architecture/backlog.** Record the format-window/eyebrow rule, chain, shared contract, and single-display limitation.
-11. **Verify.** Run the tests/build, the manual fleet click-through, and the capture/detail decode check.
-
-## Detail decoding follow-up (required for completion)
-
-`dds-echo` currently recognizes the new topics but does not decode them because
-`decode.rs` only handles the hello_world types. This story is not complete until
-capture/detail decodes all three format-manager payloads.
-
-- Add decode arms for:
-  - `format_manager::FormatManagerInputTopic`
-  - `format_manager::FormatManagerCtlTopic`
-  - `format_manager::FormatManagerViewTopic`
-- Confirm the `DdsSequence<FormatWindowAssignment>` fields in the control/view
-  topics round-trip through `CdrSerializer`/`CdrDeserializer`.
-- Add tests for the input topic, control/view sequence topics, and a
-  registry-coverage test that fails when a registered type has no decoder.
-- No Send sequence editing in this story; `dds-echo-send-sequences` is queued at
-  the end of the backlog.
+1. **Planning bookkeeping.**
+   - Move `format-ctl-service` to `completed_stories.md` with completion time `2026-11-05 16:19:54`; make `dds-echo-message-classification` active.
+   - Keep `multi-lil-d` next after classification and `dds-echo-send-sequences` at the end of the backlog.
+2. **Model.**
+   - Add `MessageKind`, `Record.kind`, classification, display labels, and discovery fallback.
+   - Extend `TopicCounts`, `TopicRow`, selection matching, and reattribution.
+3. **Main.**
+   - Set `record.kind` after `observe_and_attr` using the known registry.
+   - Remove the synthetic `record.topic = "discovery"` assignment.
+   - Partition rows into the five UI models and update all `refresh_topics` call sites.
+4. **UI.**
+   - Add the three groups/models/totals and category labels.
+5. **Tests.**
+   - Classification priority and each category.
+   - Builtin SPDP/SEDP writer fallback.
+   - Counts/groups, filtering, Hide self, reattribution from unidentified to known.
+6. **Verify.**
+   - `cargo test -p dds-echo`
+   - `.\scripts\build.ps1 -Test`
+   - `.\scripts\build.ps1`
+   - One manual capture run.
 
 ## Acceptance test
 
 Automated:
 
-- Format-list: order, wrap, contains, duplicate/empty rejection.
-- Controller: first `Next` -> second format; wrap; `Select`; invalid select ignored; independent windows.
-- View service: forwards assignments.
-- Display library: click inside/outside a format window creates/does not create a `Next` event; assignment by name applies; unknown names ignored; unassigned window uses the first format.
-- Registry/IDL completeness includes the three topics.
-- `dds-echo` send-dispatch test covers the new registered topics.
-- `dds-echo` detail decode tests cover the input topic and the sequence-bearing control/view topics.
-- A registry-coverage test fails when a registered type lacks a decoder.
+- SPDP/SEDP (decoded or builtin writer) -> Discovery.
+- Heartbeat/ACKNACK-only -> RTPS control.
+- DATA with no topic -> Unidentified data.
+- Known/unregistered topics keep their current grouping.
+- Mixed datagrams follow the priority above.
+- Counts and Hide self affect each category.
+- Reattribution moves a record/count from unidentified to its topic group.
+- The format-manager topics remain decoded under Known.
 
 Manual:
 
-1. `launch-rust.ps1` starts the controller/view services and `lil-d`.
-2. Capture with `dds-echo`; verify the three format-manager topics are registered.
-3. Click inside `lil-d`'s format window; verify `hello-world` -> `default`.
-4. Click again; verify it wraps back.
-5. Select each format-manager record in `dds-echo`; verify the detail decodes the fields and shows the window assignments for the control/view sequences.
-6. Use `dds-echo` Send to publish a `Select` input event; verify the display switches.
-7. Click the console/eyebrow area; verify no format event and no change.
-8. Restart the view service/display; verify transient-local state restores the last assignment.
-9. Stop the controller; verify clicks no longer change the display until restarted.
+1. Capture the fleet and generate format-manager traffic.
+2. Verify format-manager topics decode under Known.
+3. Verify discovery appears under Discovery, not Unknown/unidentified.
+4. Generate control-only traffic; verify RTPS control.
+5. Verify unregistered topic data remains under Unknown.
+6. Verify unattributed DATA appears under Unidentified.
+7. Select each group/row and verify filtering.
+8. Toggle Hide self and verify all groups update.
 
 ## Verification
 
 ```powershell
-cargo test --manifest-path rust/Cargo.toml
+cargo test --manifest-path rust/Cargo.toml -p dds-echo
 .\scripts\build.ps1 -Test
 .\scripts\build.ps1
+.\build\deploy\bin\dds-echo.exe
 ```
 
-Then the manual fleet click-through and `dds-echo` checks.
+One manual capture run. No screenshots and no repeated UI runs.
 
 ## Risks
 
-- **Single-display limitation:** topics are unscoped in this story; multiple `lil-d` instances would cross-talk. `multi-lil-d` adds identity/scoping and ABI v3.
-- **Shared formats contract:** display-library names/order must match `formats.toml`; invalid names fail at startup.
-- **DDS sharing:** the display library must share one Node where practical; separate participants are acceptable but increase discovery traffic.
-- **Startup ordering:** controller/view before `lil-d`; transient-local handles late joiners.
-- **Input loss:** reliable input is not transient-local; a click before matching is lost.
-- **Controller restart:** assignments are in-memory; the display keeps the retained view until changed.
-- **Multi-window:** only window `0` renders in `lil-d`; the assignment model supports future `big-d` windows. The eyebrow is excluded.
-- **Send-form limitations:** control/view sequences are not fully editable; input events are enough for manual testing.
-- **No menu yet:** only `Next` is exercised locally; `Select` via tests and `dds-echo` until `format-menu`.
+- **Mixed datagrams:** classification is per datagram, so the priority above must be explicit and tested.
+- **Discovery parsing:** the builtin-writer fallback is required to avoid misclassifying discovery as control/unidentified.
+- **Reattribution:** counts and kinds must move together when SEDP arrives late.
+- **UI plumbing:** five topic groups/models require updating every `refresh_topics` call site.
+- **Filtering:** category rows must participate in the existing multi-select filter and context menu.
+- **Non-RTPS UDP:** represented as a `udp` row inside Unidentified rather than a sixth group.
 
 ## Files touched
 
-- `DDS/format_manager.idl`
-- `DDS/hello_world.idl`
-- `contracts/topics.toml`
-- `contracts/formats.toml`
-- `contracts/services/format-ctl-service.toml`
-- `contracts/services/format-view-service.toml`
-- `rust/Cargo.toml`
-- `rust/Cargo.lock`
-- `rust/lib/format-list/` (new)
-- `rust/service/format-ctl-service/` (new)
-- `rust/service/format-view-service/` (new)
-- `rust/lib/stations-dds/src/contract.rs`
-- `rust/lib/stations-dds/src/lib.rs`
-- `rust/lib/display-lib/src/lib.rs`
-- `rust/lib/display-lib/src/format_manager.rs`
-- `rust/lib/display-lib/src/formats.rs`
-- `rust/lib/display-lib/src/formats/*.rs`
-- `rust/lib/display-lib/src/view.rs`
-- `rust/lib/display-lib/src/format_source.rs` (new)
-- `rust/tool/dds-echo/src/send.rs`
-- `rust/tool/dds-echo/src/decode.rs`
-- `scripts/build.ps1`
-- `scripts/launch-rust.ps1`
-- `scripts/cleanup.ps1`
-- `planning/architecture.md`
+- `rust/tool/dds-echo/src/model.rs`
+- `rust/tool/dds-echo/src/main.rs`
+- `rust/tool/dds-echo/ui/dds_echo.slint`
 - `planning/backlog.md`
 - `planning/completed_stories.md`
 - `planning/current_story.md`
 
-`lil-d` is intentionally unchanged. The display ABI remains at version 2; the `multi-lil-d` story introduces display identity and ABI v3.
-
 ## Result
 
-Implementation complete and verified by tests/build:
-
-- Added `DDS/format_manager.idl`; the input/control/view topic types are registered and generated with the existing IDL build.
-- Added `contracts/formats.toml`, the shared `format-list` crate, and both service contracts.
-- Added `format-ctl-service` (per-window assignments, next/select, full control publication) and `format-view-service` (assignment forwarding).
-- The display library now owns the format-manager DDS on one shared participant, applies assignments by name, and creates logical `Next` events from local clicks. Local format cycling is removed.
-- `lil-d` is unchanged; the display ABI remains version 2.
-- `dds-echo`'s Send dispatch covers the three new registered topics.
-- Build/deploy/launch/cleanup include both services and deploy `formats.toml`.
-- `cargo test`/`build.ps1 -Test` pass and `build.ps1` deploys.
-- Manual click-through passed: clicking the `lil-d` format window changed `hello-world` to `default` through the display-library -> controller -> view-service -> display-library chain.
-- `dds-echo` now decodes all three format-manager topics; tests cover the input topic and the sequence-bearing control/view payloads, a detail-text test verifies the decoded sequence appears in the detail pane, and a registry-coverage test requires a decoder for every registered type.
-- The wire command is an `i32` (`0` = Next, `1` = Select) because generated enum fields are not usable in the generated topic structs with this fork revision; the constants live in `format-list`.
-- `dds-echo-message-classification` is the next queued story after this one is complete.
-- `multi-lil-d` follows for two displays and ABI v3 identity.
-- `dds-echo-send-sequences` is queued at the end of the backlog.
+Not started.
 
 ## Bookkeeping
 
-- `dds-echo-copy-detail` was completed at `2026-11-04 14:25:18` and moved to `completed_stories.md`.
-- `format-ctl-service` is `in progress` in `backlog.md`; implementation and decode acceptance are complete.
-- `dds-echo-message-classification` is the next queued story after detail decoding is complete.
-- `multi-lil-d` follows for two `lil-d` instances and the ABI identity change.
-- `dds-echo-send-sequences` is queued at the end of the backlog.
-- `random-greeting` is a queued `hello-service` change.
-- Do not move `format-ctl-service` to `completed_stories.md` until the detail-decoding acceptance passes and the user asks to plan the next story.
+- `format-ctl-service` was completed at `2026-11-05 16:19:54` and moved to `completed_stories.md`.
+- `dds-echo-message-classification` is `in progress` in `backlog.md`.
+- `multi-lil-d` follows; `dds-echo-send-sequences` remains at the end of the backlog.
+- Do not move `dds-echo-message-classification` to `completed_stories.md` until the user asks to plan the next story.
