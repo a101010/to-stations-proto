@@ -1,196 +1,292 @@
-# Current story: dds-echo-copy-detail
+# Current story: format-ctl-service
 
 This file is the detailed, living plan for the one active story. It is rewritten for each story. The backlog in `backlog.md` holds all work and the per-story status.
 
 ## Story
 
-Make the `dds-echo` detail pane selectable read-only text so the user can select any portion and copy it with Ctrl+C. Render the selected record's time, protocol, sender (including `self`), participant and writer GUIDs, size, topic, submessages, decoded fields, and hex in one selectable text view. No copy button is added.
+Create the per-display format-manager controller and view services. The display library creates logical format events from local input and publishes them; `format-ctl-service` consumes them, owns per-format-window assignments using the shared formats contract, and publishes control; `format-view-service` forwards the assignments to the display library. `lil-d` remains format- and topic-agnostic; the display library owns all format-manager DDS.
 
 - **Depends on:** none.
-- **Minimal test:** select a record, select sender lines in the detail pane, press Ctrl+C, and paste into an editor; the pasted text is the selected portion.
+- **Minimal test:** launch the Rust fleet, click in `lil-d`'s format window, and verify the display switches `hello-world` <-> `default` while `dds-echo` shows the input/control/view topics.
+
+## Terms
+
+- **Format window** = a square region that displays a format: one on `lil-d`, three on `big-d`.
+- The **eyebrow** is not a format, is not a format window, and is not controlled by the format manager.
 
 ## Context
 
-The detail pane is built from plain `Text` elements, so nothing can be selected or copied. Users need to copy sender information and decoded fields into reports and issues.
+The display library currently owns the format registry and switches formats locally when `lil-d` forwards a left click. This story moves the format-selection logic into a separate controller service and adds the view service that forwards assignments to the display library.
 
-Slint's read-only `TextEdit` supports mouse selection and Ctrl+C; copy is accepted even when `read-only` is true. No clipboard crate or copy control is needed.
+The display application remains intentionally ignorant of formats and topics: it loads the display library, renders the regions the library is given, and forwards local input events. The display library handles all format-manager DDS and turns local input into logical events.
 
-The selected record already exists in `state.history`; a single plain-text formatter can produce the detail view from `model::Record` and `KnownTopics`.
+This story is **single-display and unscoped**: there is one `lil-d` and one controller/view pair, so the topics do not yet carry `station`/`display` fields. The follow-up `multi-lil-d` story adds display identity, topic scoping, and the display ABI change.
 
 ## Decisions
 
-1. **One selectable detail view.** Replace the structured detail elements with a single read-only `TextEdit` containing the formatted detail text.
-2. **Native copy only.** No copy button, no copy-sender/copy-all action. The user selects text and presses Ctrl+C.
-3. **No clipboard dependency.** Do not add `arboard` or other clipboard crates.
-4. **Plain-text formatter.** Generate one string from the selected `model::Record` and `KnownTopics`.
-5. **TextEdit owns scrolling.** Remove the outer detail `ScrollView` to avoid nested scroll areas.
-6. **Hex stays the displayed preview.** The text includes `Record::hex_string()` (the truncated preview), matching the current pane.
-7. **No architecture change.** This is a `dds-echo` tool feature.
+1. **Logical events.** The display library creates `Next`/`Select` events for a format window from local input. `lil-d` does not create format events or know format names.
+2. **Single-display, unscoped topics.** No `station`/`display` fields in this story; one controller/view pair. `multi-lil-d` adds identity/scoping and ABI v3 later.
+3. **No ABI change.** `lil-d` continues to use the existing ABI; the display library handles the new DDS work internally.
+4. **Shared formats contract.** Add `contracts/formats.toml` with the ordered format names. The controller uses it for next/select; the display library uses it to name/order formats.
+5. **Controller owns per-window assignments.** It stores format-window ID -> format name, starting from the first format for unassigned windows.
+6. **View service is a pass-through.** It receives controller assignments and republishes them on the view topic. It can add view-specific data later.
+7. **Display library owns the DDS.** It subscribes to assignments, publishes logical input events, and applies assignments. It shares one DDS `Node` with the hello_world view reader where practical.
+8. **Format windows only.** No event, assignment, or format ID is created for the eyebrow.
+9. **`dds-echo` compatibility.** The three new topics are registered, so `dds-echo`'s Send dispatch gains schemas and typed writers for them to keep the registry-coverage test passing.
+10. **One controller/view instance.** The services are per display by design, but this increment runs one of each for the single `lil-d`.
 
-## Interfaces
+## Topics and IDL
 
-### Rust formatter
+Create `DDS/format_manager.idl`:
 
-Add in `rust/tool/dds-echo/src/main.rs`:
+```idl
+module format_manager {
+  enum FormatCommand {
+    Next,
+    Select
+  };
 
-```rust
-fn detail_text(r: &model::Record, known: &KnownTopics) -> String;
+  struct FormatWindowAssignment {
+    int32 window;
+    string format;
+  };
+
+  struct FormatManagerInputTopic {
+    int32 window;
+    FormatCommand command;
+    string format;   // Select only; empty for Next
+  };
+
+  struct FormatManagerCtlTopic {
+    sequence<FormatWindowAssignment> windows;
+  };
+
+  struct FormatManagerViewTopic {
+    sequence<FormatWindowAssignment> windows;
+  };
+};
 ```
 
-Output format:
+- Add `#include "format_manager.idl"` to the generated root (`DDS/hello_world.idl`).
+- Add all three `*Topic` types to `stations-dds::contract::known_types()`.
+- Add the `format_manager` module to generated-type tests.
 
-```text
-time: ...
-protocol: ...
-source: self (<address>)    // or the address for remote senders
-participant: ...
-writer: ...
-size: ...
-topic: ...
-submessages: ...
+Registry entries:
 
-submessages:
-  <frame line>
-  <frame announcement detail>
-  ...
+| Topic | Type | QoS |
+|---|---|---|
+| `FormatManagerInputTopic` | `format_manager::FormatManagerInputTopic` | `reliable` |
+| `FormatManagerCtlTopic` | `format_manager::FormatManagerCtlTopic` | `transient_local` |
+| `FormatManagerViewTopic` | `format_manager::FormatManagerViewTopic` | `transient_local` |
 
-decoded:
-  ...
+Service contracts:
 
-hex:
-  ...
+- `contracts/services/format-ctl-service.toml`: publish `FormatManagerCtlTopic`, subscribe `FormatManagerInputTopic`.
+- `contracts/services/format-view-service.toml`: publish `FormatManagerViewTopic`, subscribe `FormatManagerCtlTopic`.
+
+## Shared formats contract
+
+Add `contracts/formats.toml`:
+
+```toml
+[[formats]]
+name = "hello-world"
+
+[[formats]]
+name = "default"
 ```
 
-Reuse the existing `frame_line`, `frame_detail`, `decoded_text`, and `Record::hex_string()` helpers.
+Add a shared loader, for example `rust/lib/format-list` (`format_list`):
 
-### UI model
+- loads the ordered list;
+- validates non-empty/unique names;
+- provides `first()`, `contains()`, and `next()`.
 
-Add to `ui::Record`:
+Consumers:
 
-```slint
-text: string,
-```
+- `format-ctl-service`: next/select logic and validation.
+- `display-library`: build its format renderer registry in contract order and expose names.
+- Later: `format-menu` and `format-chooser-format`.
 
-- `to_detail` sets `text` from `detail_text(r, known)`.
-- `empty_record` sets `text: ""`.
-- Existing fields may remain for compatibility even if the detail pane no longer renders them separately.
+Deploy `formats.toml` to `build/deploy/config/`.
 
-### Detail UI (`ui/dds_echo.slint`)
+## Responsibilities
 
-- Import `TextEdit`.
-- Replace the detail pane's `ScrollView` content with a read-only `TextEdit`:
+### Display library
 
-```slint
-VerticalLayout {
-    padding: 8px;
-    spacing: 4px;
+- Load `formats.toml`; build format renderers in contract order.
+- Add `name()` to the `Format` trait; names for `hello-world`/`default`.
+- Replace the single active format with per-format-window assignments:
+  - unassigned window -> first format;
+  - unknown name -> ignore;
+  - render window `0` from the single region for `lil-d`.
+- Share one DDS `Node` for:
+  - the existing `HelloWorldViewTopic` reader;
+  - a `FormatManagerViewTopic` reader;
+  - a `FormatManagerInputTopic` writer.
+- On a left press inside a format window, publish a logical `Next` event for that window (window `0` for `lil-d`).
+- Apply assignments from the view reader before rendering.
+- Remove local format cycling from the format manager.
+- Keep the eyebrow out of all format-manager paths.
 
-    Text { text: "Detail"; color: #ffffff; font-weight: 700; }
+### `lil-d`
 
-    detail-text := TextEdit {
-        text: root.selected.text;
-        read-only: true;
-        font-family: "Courier New";
-        font-size: 12px;
-        wrap: no-wrap;
-        vertical-stretch: 1;
-    }
-}
-```
+- Unchanged: load the display library, render, and forward unconsumed pointer events.
+- No knowledge of formats, format names, format events, topics, or contracts.
 
-The read-only `TextEdit` provides selection, Ctrl+A, Ctrl+C, and its own scrolling. No copy control is added.
+### `format-ctl-service` (new crate)
+
+Location: `rust/service/format-ctl-service`.
+
+- Arguments: `--domain`, `--config`, `--topics` only. No format/input identity or selection from the CLI.
+- Loads topics registry, its contract, and the formats contract.
+- Subscribes `FormatManagerInputTopic`; publishes `FormatManagerCtlTopic`.
+- Maintains `BTreeMap<i32, String>` format-window assignments.
+- On `Next`:
+  - current = assigned format, else the first format;
+  - next format in the list, wrapping;
+  - update the map and publish the full assignment vector.
+- On `Select`:
+  - validate the format name;
+  - update the map and publish.
+- Ignores unknown formats.
+- Stays alive to retain transient-local control history.
+
+### `format-view-service` (new crate)
+
+Location: `rust/service/format-view-service`.
+
+- Arguments: `--domain`, `--config`, `--topics`.
+- Subscribes `FormatManagerCtlTopic`; publishes `FormatManagerViewTopic`.
+- Forwards the assignment vector.
+- Stays alive so the last view sample is retained for late-joining displays.
+
+## `dds-echo` compatibility
+
+- Add `schema_for` and `TopicWriter` handling for the three new registered types.
+- `FormatManagerInputTopic` is usable from the Send form (enum as numeric, fields editable), enabling manual `Next`/`Select` injection.
+- The control/view topics contain sequences; the Send form marks those fields unsupported, which is acceptable. The registry-coverage test still requires a sender handler.
+
+## Build, launch, and cleanup
+
+- Add the `format-list`, `format-ctl-service`, and `format-view-service` crates to the workspace.
+- Deploy both service executables and `formats.toml`.
+- Add both service source roots to the `dds-contracts` scan.
+- `launch-rust.ps1` starts both services before `lil-d`:
+  - `format-ctl-service`
+  - `format-view-service`
+- `cleanup.ps1` stops both.
+- Add both service contracts to `build/topics.md`.
+
+## Architecture and backlog updates
+
+- In `architecture.md`:
+  - define **format window** explicitly and state that the eyebrow is separate;
+  - document the display-library-owned DDS/event path and that `lil-d` remains format/topic-agnostic;
+  - document the controller/view/display chain, shared formats contract, and single-display first implementation;
+  - name `multi-lil-d` as the follow-up for display identity/scoping and ABI v3.
+- In `backlog.md`:
+  - make `format-ctl-service` the active story;
+  - add `multi-lil-d` immediately after it for two `lil-d` instances and the ABI identity change;
+  - add `random-greeting` as a small `hello-service` change.
+- Move `dds-echo-copy-detail` to `completed_stories.md`.
 
 ## Implementation steps
 
-1. **Planning bookkeeping.**
-   - The completed `gui-single-instance` story has been moved to `completed_stories.md` with completion time `2026-11-04 13:48:29` and removed from `backlog.md`; `dds-echo-copy-detail` is the active story.
-2. **Add the formatter.**
-   - Implement `detail_text` in `main.rs`.
-   - Include the self/remote source rule and all required sections.
-3. **Extend the UI model.**
-   - Add `text` to `ui::Record`.
-   - Set it in `to_detail` and `empty_record`.
-4. **Replace the detail pane.**
-   - Import `TextEdit`.
-   - Remove the detail `ScrollView` and replace its contents with the read-only `TextEdit`.
-   - Do not add a copy button or copy-status line.
-5. **Tests.**
-   - Unit-test `detail_text` for all required sections.
-   - Test a self-origin record and a discovery record.
-   - Add a decoded-sample case if practical.
-6. **Documentation.**
-   - Add a short `README.md` note that detail text is selectable and Ctrl+C works.
-7. **Verify once.**
-   - `cargo test -p dds-echo`
-   - `.\scripts\build.ps1 -Test`
-   - `.\scripts\build.ps1`
-   - One manual selection/Ctrl+C run.
-8. **Record completion** in `current_story.md` while leaving the backlog status `in progress` until the user asks to plan the next story.
+1. **Planning bookkeeping.** Move `dds-echo-copy-detail` to `completed_stories.md` with completion time `2026-11-04 14:25:18`; make `format-ctl-service` active; add `multi-lil-d` and `random-greeting`.
+2. **IDL and contracts.** Add `format_manager.idl`, include it from the root, register the three topics, add the two service contracts, and add `formats.toml`.
+3. **Format list.** Add the `format-list` loader and tests.
+4. **Controller.** Add `format-ctl-service` with the assignment/next/select logic and tests.
+5. **View service.** Add `format-view-service` with forwarding and tests.
+6. **Display library.** Load formats, add names, add view reader/input writer on a shared Node, apply assignments, create logical events from clicks, remove local cycling, and add tests.
+7. **`dds-echo`.** Add the three topic schemas/writers for registry compatibility and manual input testing.
+8. **Build/launch/cleanup.** Add the crates, deploy artifacts, service contracts, launch, cleanup, and scan roots.
+9. **Architecture/backlog.** Record the format-window/eyebrow rule, chain, shared contract, and single-display limitation.
+10. **Verify.** Run the tests/build and the manual fleet click-through.
 
 ## Acceptance test
 
-Automated, in `main.rs` tests:
+Automated:
 
-- `detail_text` includes time, protocol, sender, participant, writer, size, topic, submessages, decoded fields, and hex.
-- A self-origin record renders `source: self (<address>)`.
-- A discovery record includes its frame/announcement lines.
-- A record with a decodable payload includes decoded fields.
+- Format-list: order, wrap, contains, duplicate/empty rejection.
+- Controller: first `Next` -> second format; wrap; `Select`; invalid select ignored; independent windows.
+- View service: forwards assignments.
+- Display library: click inside/outside a format window creates/does not create a `Next` event; assignment by name applies; unknown names ignored; unassigned window uses the first format.
+- Registry/IDL completeness includes the three topics.
+- `dds-echo` send-dispatch test covers the new registered topics.
 
-Manual, one run:
+Manual:
 
-1. Start `dds-echo` and capture traffic.
-2. Select a record.
-3. Select the sender and GUID lines, press Ctrl+C, and paste; verify only that selection appears.
-4. Select part of the hex or decoded text, press Ctrl+C, and paste.
-5. Select a different record and verify the detail text updates.
-6. Verify long detail content scrolls correctly.
-7. Press Ctrl+A then Ctrl+C and verify the whole detail text is copied.
+1. `launch-rust.ps1` starts the controller/view services and `lil-d`.
+2. Capture with `dds-echo`; verify the three format-manager topics are registered.
+3. Click inside `lil-d`'s format window; verify `hello-world` -> `default`.
+4. Click again; verify it wraps back.
+5. Use `dds-echo` Send to publish a `Select` input event; verify the display switches.
+6. Click the console/eyebrow area; verify no format event and no change.
+7. Restart the view service/display; verify transient-local state restores the last assignment.
+8. Stop the controller; verify clicks no longer change the display until restarted.
 
 ## Verification
 
 ```powershell
-cargo test --manifest-path rust/Cargo.toml -p dds-echo
+cargo test --manifest-path rust/Cargo.toml
 .\scripts\build.ps1 -Test
 .\scripts\build.ps1
-.\build\deploy\bin\dds-echo.exe
 ```
 
-- `build.ps1 -Test` must pass once.
-- `build.ps1` must deploy once.
-- One manual selection/Ctrl+C run.
-- No screenshots and no repeated UI runs.
+Then the manual fleet click-through and `dds-echo` checks.
 
 ## Risks
 
-- **TextEdit appearance:** the standard read-only `TextEdit` may differ visually from the surrounding dark pane; acceptable for this tool.
-- **Scrolling:** the `TextEdit` owns scrolling; remove the outer detail `ScrollView` to avoid nested scrolling.
-- **Large records:** the copied hex matches the truncated preview, not the full datagram.
-- **Selection updates:** selecting a different record replaces the text and clears the old selection.
-- **Read-only behavior:** Slint accepts Copy in read-only `TextEdit`; paste and cut remain disabled.
+- **Single-display limitation:** topics are unscoped in this story; multiple `lil-d` instances would cross-talk. `multi-lil-d` adds identity/scoping and ABI v3.
+- **Shared formats contract:** display-library names/order must match `formats.toml`; invalid names fail at startup.
+- **DDS sharing:** the display library must share one Node where practical; separate participants are acceptable but increase discovery traffic.
+- **Startup ordering:** controller/view before `lil-d`; transient-local handles late joiners.
+- **Input loss:** reliable input is not transient-local; a click before matching is lost.
+- **Controller restart:** assignments are in-memory; the display keeps the retained view until changed.
+- **Multi-window:** only window `0` renders in `lil-d`; the assignment model supports future `big-d` windows. The eyebrow is excluded.
+- **Send-form limitations:** control/view sequences are not fully editable; input events are enough for manual testing.
+- **No menu yet:** only `Next` is exercised locally; `Select` via tests and `dds-echo` until `format-menu`.
 
 ## Files touched
 
-- `planning/current_story.md`
+- `DDS/format_manager.idl`
+- `DDS/hello_world.idl`
+- `contracts/topics.toml`
+- `contracts/formats.toml`
+- `contracts/services/format-ctl-service.toml`
+- `contracts/services/format-view-service.toml`
+- `rust/Cargo.toml`
+- `rust/Cargo.lock`
+- `rust/lib/format-list/` (new)
+- `rust/service/format-ctl-service/` (new)
+- `rust/service/format-view-service/` (new)
+- `rust/lib/stations-dds/src/contract.rs`
+- `rust/lib/stations-dds/src/lib.rs`
+- `rust/lib/display-lib/src/lib.rs`
+- `rust/lib/display-lib/src/format_manager.rs`
+- `rust/lib/display-lib/src/formats.rs`
+- `rust/lib/display-lib/src/formats/*.rs`
+- `rust/lib/display-lib/src/view.rs`
+- `rust/tool/dds-echo/src/send.rs`
+- `scripts/build.ps1`
+- `scripts/launch-rust.ps1`
+- `scripts/cleanup.ps1`
+- `planning/architecture.md`
 - `planning/backlog.md`
 - `planning/completed_stories.md`
-- `rust/tool/dds-echo/src/main.rs`
-- `rust/tool/dds-echo/ui/dds_echo.slint`
-- `README.md`
+- `planning/current_story.md`
+
+`lil-d` is intentionally unchanged. The display ABI remains at version 2; the `multi-lil-d` story introduces display identity and ABI v3.
 
 ## Result
 
-Implemented and verified by tests/build:
-
-- The detail pane is now a single read-only `TextEdit` showing the plain-text record detail.
-- `detail_text` renders time, protocol, sender (`self (...)` when applicable), participant, writer, size, topic, submessages, frames/announcements, decoded fields, and hex preview.
-- Native mouse selection, Ctrl+A, and Ctrl+C work through `TextEdit`; no copy control or clipboard dependency was added.
-- Unit tests cover self-sender fields, discovery announcements, and decoded fields.
-- `cargo test -p dds-echo` passed (78 tests), `.\scripts\build.ps1 -Test` passed, and `.\scripts\build.ps1` deployed.
-- The release binary starts successfully.
-- The manual selection/Ctrl+C click-through remains for the user.
+Not started.
 
 ## Bookkeeping
 
-- `gui-single-instance` was completed at `2026-11-04 13:48:29` and moved to `completed_stories.md`.
-- `dds-echo-copy-detail` is `in progress` in `backlog.md`.
-- Do not move `dds-echo-copy-detail` to `completed_stories.md` until the user asks to plan the next story.
+- `dds-echo-copy-detail` was completed at `2026-11-04 14:25:18` and moved to `completed_stories.md`.
+- `format-ctl-service` is `in progress` in `backlog.md`.
+- `multi-lil-d` is the follow-up story for two `lil-d` instances and the ABI identity change.
+- `random-greeting` is a queued `hello-service` change.
+- Do not move `format-ctl-service` to `completed_stories.md` until the user asks to plan the next story.

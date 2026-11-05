@@ -37,18 +37,18 @@ Third-party libraries are built/installed to an external prefix (for example `C:
 
 **Done when.** `launch-rust.ps1` brings up the model service, the view service, and `lil-d` from `build/deploy`; `lil-d` shows the tilted, cube-mapped earth lit from the upper right with the greeting text rendered in the loaded font, its power button works, and the format manager switches between the default and hello-world formats. `dds-echo` observes every topic in the registry, `--topics` and `build/topics.md` match `contracts/`, and `cleanup.ps1` stops everything.
 
-### dds-echo-copy-detail
-Make the `dds-echo` detail pane selectable read-only text so the user can select any portion and copy it with Ctrl+C. Render the selected record's time, protocol, sender (including `self`), participant and writer GUIDs, size, topic, submessages, decoded fields, and hex in one selectable text view. No copy button is added.
-- **Depends on:** none.
-- **Minimal test:** select a record, select sender lines in the detail pane, press Ctrl+C, and paste into an editor; the pasted text is the selected portion.
-- **Status:** in progress.
-
 ## Later increments
 
 ### format-ctl-service
-Create the format-manager controller service: the controller of the per-display format-manager constellation, controlling which format each display shows.
+Create the per-display format-manager controller and view services. The display library creates logical format events from local input and publishes them; `format-ctl-service` consumes them, owns per-format-window assignments using the shared formats contract, and publishes control; `format-view-service` forwards the assignments to the display library. `lil-d` remains format- and topic-agnostic; the display library owns all format-manager DDS. This story is single-display and unscoped; display identity/scoping comes in multi-lil-d.
 - **Depends on:** none.
-- **Minimal test:** the service controls the active format on a display.
+- **Minimal test:** launch the fleet, click in `lil-d`'s format window, and verify the display switches `hello-world` <-> `default` while `dds-echo` shows the input/control/view topics.
+- **Status:** in progress.
+
+### multi-lil-d
+Add display identity/scoping to the format-manager chain so two `lil-d` instances with different `--station` values can be controlled independently. Add station/display fields to the format-manager topics, identity to the controller/view services, `display_lib_set_identity` and ABI v3, and stamp/filter in the display library; update launch/cleanup for multiple displays.
+- **Depends on:** format-ctl-service.
+- **Minimal test:** run `lil-d` for station 0 and station 1; clicking one format window changes only that display's format.
 - **Status:** todo.
 
 ### format-menu
@@ -61,6 +61,12 @@ Add a three-dot menu to the format manager, drawn in the upper left over all for
 Create the format-chooser-format: a format for choosing formats.
 - **Depends on:** format-menu.
 - **Minimal test:** a format can be chosen from the format.
+- **Status:** todo.
+
+### random-greeting
+Change `hello-service` to choose greetings randomly from its Latin-script list instead of advancing through a fixed sequence; avoid repeating the same greeting twice in a row where practical.
+- **Depends on:** none.
+- **Minimal test:** run `hello-service` and observe greetings change over the configured interval in a non-fixed order.
 - **Status:** todo.
 
 ### hello-ctl-service

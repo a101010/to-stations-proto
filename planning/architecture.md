@@ -67,15 +67,20 @@ View and controller elements of a constellation can be system-wide, per station,
 The hello_world format is global (system-wide) in the first increment; the ability to select the view per station comes in a later increment.
 
 ## Format windows and the format manager
-A *format window* is a place where a format can be displayed: one square format window on the small display, three square format windows and an eyebrow window on the large display.
+A *format window* is a place where a format can be displayed: one on the small display (`lil-d`) and three on the large display (`big-d`). The eyebrow on `big-d` is a separate window; it is not a format window and is not controlled by the format manager.
 
-The format manager is **per display** (not per station) and is itself a model-view-controller constellation. It tells that display's display library which format to display in each format window, and that combination is different for each display. It runs as a separate service process, not inside the display application. Its first form lives inside the display library and switches the active format on a click in the region delegated to it (the display application forwards the pointer events egui did not consume); it becomes a separate service later.
+The format manager is **per display** (not per station) and is itself a model-view-controller constellation. It tells that display's display library which format to display in each format window, and that combination is different for each display. It runs as separate controller and view service processes (`format-ctl-service` and `format-view-service`), not inside the display application.
+
+The display application remains format- and topic-agnostic: it loads the display library, gives it the render regions, and forwards local pointer events. The display library owns the format-manager DDS: it subscribes to assignments, hit-tests local input against the format windows, creates logical `Next`/`Select` events, and publishes them to the controller. The controller owns the per-format-window assignments, using the shared `contracts/formats.toml`; it publishes control to the view service, which forwards assignments to the display library.
+
+The first format-manager increment is single-display and unscoped. The `multi-lil-d` follow-up adds station/display scoping, display identity, and the display ABI v3 identity function needed to control multiple `lil-d` instances independently.
 
 ## Topic contracts
 Every service declares the topics it publishes and subscribes to so that the contract of a service is easy to read:
 
 * `contracts/topics.toml` - the topic registry: the short wire/registry name, the scoped IDL type name, QoS, and key fields. The wire name ends in `Topic` (for example `HelloWorldTopic`); the IDL type is its fully-qualified scope (`hello_world::HelloWorldTopic`, the value of `DdsType::type_name()`).
 * `contracts/services/<app>.toml` - for each service, the topics it publishes and the topics it subscribes to.
+* `contracts/formats.toml` - the ordered format names shared by the format-manager controller, the display library, and the format menu/chooser.
 
 Contracts are validated when a service starts, each service can print its own contract with `--topics`, and `scripts/build.ps1` regenerates a readable summary into `build/topics.md`.
 
@@ -115,7 +120,7 @@ to-stations-proto/
   DDS/                 authored: math.idl, hello_world.idl,
                        input.idl, control.idl, format_manager.idl,
                        cyclonedds-config.xml
-  contracts/           authored: topics.toml, services/<app>.toml
+  contracts/           authored: topics.toml, formats.toml, services/<app>.toml
   include/             authored: display_lib.h (shared C ABI)
   scripts/             authored: build.ps1, verify-loopback.ps1, cleanup.ps1,
                        launch-rust.ps1, launch-cpp.ps1, launch-hybrid.ps1,
@@ -124,8 +129,9 @@ to-stations-proto/
   .cargo/              authored: config.toml (Cargo target dir, REPO_ROOT)
   rust/                authored: Cargo workspace
     ui/                big-d, lil-d, tentacles, paws
-    service/           hello-service, hello-view-service, hello-ctl-service
-    lib/               stations-dds, display-lib, and other shared libraries
+    service/           hello-service, hello-view-service, hello-ctl-service,
+                       format-ctl-service, format-view-service
+    lib/               stations-dds, display-lib, format-list, and other shared libraries
     tool/              dds-echo (Slint GUI), dds-contracts, equirect-to-cubemap
     test/              (deferred)
   cpp/                 authored: CMake project
@@ -184,7 +190,7 @@ Manually launched singleton GUI tools use a Windows named-mutex guard from the s
 The guard is not used by fleet-launched applications or by per-station/per-display windows (`lil-d`, `big-d`, `paws`, the services, or the launch scripts), because multiple instances are legitimate there. Window titles are the activation key, so every tool opting in must keep a stable title.
 
 ## Deferred decisions
-* displayLib internal architecture: its top-level modules are `formats` (one submodule per format), the rendering capabilities `text`, `earth`, and `shader`, and `format_manager`; `mesh` is added later. `shader` holds the shader compile/link helpers shared by `text` and `earth`; `mesh` is extracted when a second mesh user appears. `format_manager` owns the format registry (the default and hello-world formats) and the active format, and hit-tests forwarded pointer input against the region it was last asked to render. A format's unique details (colors, geometry, strings, its mesh and shaders) live in its own submodule; shared code is extracted only when a second format needs it. The default format is retained at `formats/default.rs` and reactivated by the format manager. It may still split into smaller libraries. The format manager has a view service, a control service, and one or more displayLib modules.
+* displayLib internal architecture: its top-level modules are `formats` (one submodule per format), the rendering capabilities `text`, `earth`, and `shader`, and `format_manager`; `mesh` is added later. `shader` holds the shader compile/link helpers shared by `text` and `earth`; `mesh` is extracted when a second mesh user appears. `format_manager` owns the format renderers and applies assignments from the format-manager view service; it hit-tests forwarded pointer input against the format windows it last rendered to create logical `Next`/`Select` events. The controller owns the distributed format-window assignments. A format's unique details (colors, geometry, strings, its mesh and shaders) live in its own submodule; shared code is extracted only when a second format needs it. The default format is retained at `formats/default.rs` and reactivated by assignment. It may still split into smaller libraries. The format manager has a view service, a control service, and one or more displayLib modules. The eyebrow is separate and is not a format window.
 * `test/` layout.
 * The C++ side mirroring the `ui/service/lib/tool/test` layout.
 

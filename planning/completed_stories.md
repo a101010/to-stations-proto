@@ -207,3 +207,9 @@ Add a reusable Windows named-mutex single-instance guard for manually launched s
 - **Completed:** 2026-11-04 13:48:29.
 - **Depends on:** none.
 - **Minimal test:** start `dds-echo`, minimize it, and launch a second `dds-echo`; the first window comes to the foreground, the second exits, and only one process/participant remains.
+
+### dds-echo-copy-detail
+Make the `dds-echo` detail pane selectable read-only text so the user can select any portion and copy it with Ctrl+C. Render the selected record's time, protocol, sender (including `self`), participant and writer GUIDs, size, topic, submessages, decoded fields, and hex in one selectable text view. No copy button is added.
+- **Completed:** 2026-11-04 14:25:18.
+- **Depends on:** none.
+- **Minimal test:** select a record, select sender lines in the detail pane, press Ctrl+C, and paste into an editor; the pasted text is the selected portion.
