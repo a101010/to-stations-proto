@@ -7,7 +7,7 @@ This file is the detailed, living plan for the one active story. It is rewritten
 Create the per-display format-manager controller and view services. The display library creates logical format events from local input and publishes them; `format-ctl-service` consumes them, owns per-format-window assignments using the shared formats contract, and publishes control; `format-view-service` forwards the assignments to the display library. `lil-d` remains format- and topic-agnostic; the display library owns all format-manager DDS.
 
 - **Depends on:** none.
-- **Minimal test:** launch the Rust fleet, click in `lil-d`'s format window, and verify the display switches `hello-world` <-> `default` while `dds-echo` shows the input/control/view topics.
+- **Minimal test:** launch the Rust fleet, click in `lil-d`'s format window, and verify the display switches `hello-world` <-> `default` while `dds-echo` shows and decodes the input/control/view topics, including the sequence-bearing control/view payloads.
 
 ## Terms
 
@@ -194,10 +194,28 @@ Location: `rust/service/format-view-service`.
 4. **Controller.** Add `format-ctl-service` with the assignment/next/select logic and tests.
 5. **View service.** Add `format-view-service` with forwarding and tests.
 6. **Display library.** Load formats, add names, add view reader/input writer on a shared Node, apply assignments, create logical events from clicks, remove local cycling, and add tests.
-7. **`dds-echo`.** Add the three topic schemas/writers for registry compatibility and manual input testing.
-8. **Build/launch/cleanup.** Add the crates, deploy artifacts, service contracts, launch, cleanup, and scan roots.
-9. **Architecture/backlog.** Record the format-window/eyebrow rule, chain, shared contract, and single-display limitation.
-10. **Verify.** Run the tests/build and the manual fleet click-through.
+7. **`dds-echo` Send dispatch.** Add the three topic schemas/writers for registry compatibility and manual input testing.
+8. **`dds-echo` detail decoding.** Add decode arms and tests for the three format-manager topics, including sequence-bearing control/view samples, plus registry decoder coverage.
+9. **Build/launch/cleanup.** Add the crates, deploy artifacts, service contracts, launch, cleanup, and scan roots.
+10. **Architecture/backlog.** Record the format-window/eyebrow rule, chain, shared contract, and single-display limitation.
+11. **Verify.** Run the tests/build, the manual fleet click-through, and the capture/detail decode check.
+
+## Detail decoding follow-up (required for completion)
+
+`dds-echo` currently recognizes the new topics but does not decode them because
+`decode.rs` only handles the hello_world types. This story is not complete until
+capture/detail decodes all three format-manager payloads.
+
+- Add decode arms for:
+  - `format_manager::FormatManagerInputTopic`
+  - `format_manager::FormatManagerCtlTopic`
+  - `format_manager::FormatManagerViewTopic`
+- Confirm the `DdsSequence<FormatWindowAssignment>` fields in the control/view
+  topics round-trip through `CdrSerializer`/`CdrDeserializer`.
+- Add tests for the input topic, control/view sequence topics, and a
+  registry-coverage test that fails when a registered type has no decoder.
+- No Send sequence editing in this story; `dds-echo-send-sequences` is queued at
+  the end of the backlog.
 
 ## Acceptance test
 
@@ -209,6 +227,8 @@ Automated:
 - Display library: click inside/outside a format window creates/does not create a `Next` event; assignment by name applies; unknown names ignored; unassigned window uses the first format.
 - Registry/IDL completeness includes the three topics.
 - `dds-echo` send-dispatch test covers the new registered topics.
+- `dds-echo` detail decode tests cover the input topic and the sequence-bearing control/view topics.
+- A registry-coverage test fails when a registered type lacks a decoder.
 
 Manual:
 
@@ -216,10 +236,11 @@ Manual:
 2. Capture with `dds-echo`; verify the three format-manager topics are registered.
 3. Click inside `lil-d`'s format window; verify `hello-world` -> `default`.
 4. Click again; verify it wraps back.
-5. Use `dds-echo` Send to publish a `Select` input event; verify the display switches.
-6. Click the console/eyebrow area; verify no format event and no change.
-7. Restart the view service/display; verify transient-local state restores the last assignment.
-8. Stop the controller; verify clicks no longer change the display until restarted.
+5. Select each format-manager record in `dds-echo`; verify the detail decodes the fields and shows the window assignments for the control/view sequences.
+6. Use `dds-echo` Send to publish a `Select` input event; verify the display switches.
+7. Click the console/eyebrow area; verify no format event and no change.
+8. Restart the view service/display; verify transient-local state restores the last assignment.
+9. Stop the controller; verify clicks no longer change the display until restarted.
 
 ## Verification
 
@@ -265,6 +286,7 @@ Then the manual fleet click-through and `dds-echo` checks.
 - `rust/lib/display-lib/src/view.rs`
 - `rust/lib/display-lib/src/format_source.rs` (new)
 - `rust/tool/dds-echo/src/send.rs`
+- `rust/tool/dds-echo/src/decode.rs`
 - `scripts/build.ps1`
 - `scripts/launch-rust.ps1`
 - `scripts/cleanup.ps1`
@@ -277,7 +299,7 @@ Then the manual fleet click-through and `dds-echo` checks.
 
 ## Result
 
-Implemented and verified:
+Core implementation complete; the story remains in progress until `dds-echo` decodes the sequence-bearing format-manager payloads:
 
 - Added `DDS/format_manager.idl`; the input/control/view topic types are registered and generated with the existing IDL build.
 - Added `contracts/formats.toml`, the shared `format-list` crate, and both service contracts.
@@ -289,12 +311,17 @@ Implemented and verified:
 - `cargo test`/`build.ps1 -Test` pass and `build.ps1` deploys.
 - Manual click-through passed: clicking the `lil-d` format window changed `hello-world` to `default` through the display-library -> controller -> view-service -> display-library chain.
 - The wire command is an `i32` (`0` = Next, `1` = Select) because generated enum fields are not usable in the generated topic structs with this fork revision; the constants live in `format-list`.
-- `multi-lil-d` remains the follow-up for two displays and ABI v3 identity.
+- Pending completion: `dds-echo` detail decoding for the three format-manager topics, including control/view sequence fields.
+- `dds-echo-message-classification` is the next queued story after this one is complete.
+- `multi-lil-d` follows for two displays and ABI v3 identity.
+- `dds-echo-send-sequences` is queued at the end of the backlog.
 
 ## Bookkeeping
 
 - `dds-echo-copy-detail` was completed at `2026-11-04 14:25:18` and moved to `completed_stories.md`.
 - `format-ctl-service` is `in progress` in `backlog.md`.
-- `multi-lil-d` is the follow-up story for two `lil-d` instances and the ABI identity change.
+- `dds-echo-message-classification` is the next queued story after detail decoding is complete.
+- `multi-lil-d` follows for two `lil-d` instances and the ABI identity change.
+- `dds-echo-send-sequences` is queued at the end of the backlog.
 - `random-greeting` is a queued `hello-service` change.
-- Do not move `format-ctl-service` to `completed_stories.md` until the user asks to plan the next story.
+- Do not move `format-ctl-service` to `completed_stories.md` until the detail-decoding acceptance passes and the user asks to plan the next story.

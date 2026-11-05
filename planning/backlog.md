@@ -42,8 +42,14 @@ Third-party libraries are built/installed to an external prefix (for example `C:
 ### format-ctl-service
 Create the per-display format-manager controller and view services. The display library creates logical format events from local input and publishes them; `format-ctl-service` consumes them, owns per-format-window assignments using the shared formats contract, and publishes control; `format-view-service` forwards the assignments to the display library. `lil-d` remains format- and topic-agnostic; the display library owns all format-manager DDS. This story is single-display and unscoped; display identity/scoping comes in multi-lil-d.
 - **Depends on:** none.
-- **Minimal test:** launch the fleet, click in `lil-d`'s format window, and verify the display switches `hello-world` <-> `default` while `dds-echo` shows the input/control/view topics.
+- **Minimal test:** launch the fleet, click in `lil-d`'s format window, and verify the display switches `hello-world` <-> `default` while `dds-echo` shows and decodes the input/control/view topics, including sequence-bearing payloads.
 - **Status:** in progress.
+
+### dds-echo-message-classification
+Classify `dds-echo` capture records into separate groups: known topics, unregistered topics, DDS discovery, RTPS control, and unidentified data. Show Discovery, RTPS control, and Unidentified as their own topics-pane groups; keep the Known and Unknown topic rows; update counts, filtering, table labels, detail category, and Hide self. Use builtin discovery writer IDs as a fallback for discovery detection.
+- **Depends on:** none.
+- **Minimal test:** capture a known topic, an unregistered topic, SPDP/SEDP discovery, a heartbeat-only datagram, and an unattributed DATA datagram; each appears in its own group and filters correctly.
+- **Status:** todo.
 
 ### multi-lil-d
 Add display identity/scoping to the format-manager chain so two `lil-d` instances with different `--station` values can be controlled independently. Add station/display fields to the format-manager topics, identity to the controller/view services, `display_lib_set_identity` and ABI v3, and stamp/filter in the display library; update launch/cleanup for multiple displays.
@@ -116,6 +122,12 @@ A communication layer in the DDS stack (`stations-dds`) through which a controll
 Add a known-message inspector/injector as a bottom panel of the `tentacles` launcher GUI. Unlike `dds-echo`, which originates stand-alone samples, it does not send messages of its own: it intercepts the messages a service is about to publish and overrides individual fields of them, leaving the rest of the real flow intact. The panel reuses the per-topic field knowledge from `topic-field-metadata` and drives the `dds-override-layer`.
 - **Depends on:** tentacles; topic-field-metadata; dds-override-layer.
 - **Minimal test:** in the tentacles panel, select a known topic, override one field, and observe the published sample carrying the overridden value while every other field is unchanged.
+- **Status:** todo.
+
+### dds-echo-send-sequences
+Extend the `dds-echo` Send form to edit and send sequence-bearing topics, including `FormatManagerCtlTopic` and `FormatManagerViewTopic`. Render sequence elements as addable/removable rows and write the typed sample.
+- **Depends on:** none.
+- **Minimal test:** add a window-assignment element in the Send form, publish it, and verify the sample carries the sequence.
 - **Status:** todo.
 
 Not yet broken into stories:
