@@ -39,10 +39,11 @@ Current behavior:
    1. known registered topic
    2. unregistered identified topic
    3. discovery announcement or builtin discovery writer
-   4. RTPS DATA without an attributed topic -> unidentified data
-   5. RTPS without DATA -> RTPS control
-   6. non-RTPS -> UDP
-4. **Discovery fallback:** recognize SPDP/SEDP by builtin writer entity IDs (`000100c2`, `000003c2`, `000004c2`) in addition to decoded announcements, so failed payload parsing does not misclassify discovery.
+   4. builtin non-topic control/liveliness writer -> RTPS control
+   5. RTPS DATA without an attributed topic -> unidentified data
+   6. RTPS without DATA -> RTPS control
+   7. non-RTPS -> UDP
+4. **Builtin-writer fallback:** recognize SPDP/SEDP by their builtin writer entity IDs in addition to decoded announcements, so failed payload parsing does not misclassify discovery. Recognize builtin non-topic control/liveliness writers (`000200c2`, `000201c3`, `000300c3`, `000301c3`, and secure variants) as RTPS control before the DATA fallback.
 5. **Keep filtering and Hide self** working across all groups.
 6. **No DDS/service changes.** This is a `dds-echo` model/UI story.
 7. **No Send-sequence work.** That remains `dds-echo-send-sequences` at the end of the backlog.
@@ -53,7 +54,8 @@ In `rust/tool/dds-echo/src/model.rs`:
 
 - Add `MessageKind` and a `Record.kind` field.
 - Add `Record::classify(&KnownTopics) -> MessageKind`.
-- Extend `is_discovery()` with the builtin writer entity IDs.
+- Extend `is_discovery()` with the builtin discovery writer entity IDs.
+- Add `has_builtin_control_writer()` for non-topic DDS control/liveliness writers.
 - Add `Record::display_topic()` returning:
   - the topic for known/unregistered topics;
   - `discovery`, `rtps control`, `unidentified`, or `udp` for categories.
@@ -114,7 +116,8 @@ Automated:
 
 - SPDP/SEDP (decoded or builtin writer) -> Discovery.
 - Heartbeat/ACKNACK-only -> RTPS control.
-- DATA with no topic -> Unidentified data.
+- Builtin participant-message/liveliness DATA+HEARTBEAT -> RTPS control.
+- DATA with no topic from a normal writer -> Unidentified data.
 - Known/unregistered topics keep their current grouping.
 - Mixed datagrams follow the priority above.
 - Counts and Hide self affect each category.
@@ -126,9 +129,9 @@ Manual:
 1. Capture the fleet and generate format-manager traffic.
 2. Verify format-manager topics decode under Known.
 3. Verify discovery appears under Discovery, not Unknown/unidentified.
-4. Generate control-only traffic; verify RTPS control.
+4. Generate control-only traffic; verify heartbeat-only and builtin participant-message/liveliness traffic appear under RTPS control.
 5. Verify unregistered topic data remains under Unknown.
-6. Verify unattributed DATA appears under Unidentified.
+6. Verify unattributed DATA from a normal writer appears under Unidentified.
 7. Select each group/row and verify filtering.
 8. Toggle Hide self and verify all groups update.
 
@@ -146,7 +149,7 @@ One manual capture run. No screenshots and no repeated UI runs.
 ## Risks
 
 - **Mixed datagrams:** classification is per datagram, so the priority above must be explicit and tested.
-- **Discovery parsing:** the builtin-writer fallback is required to avoid misclassifying discovery as control/unidentified.
+- **Builtin writers:** discovery IDs must be checked before control, and non-topic control IDs before the DATA fallback, so participant messages are not reported as unidentified data.
 - **Reattribution:** counts and kinds must move together when SEDP arrives late.
 - **UI plumbing:** five topic groups/models require updating every `refresh_topics` call site.
 - **Filtering:** category rows must participate in the existing multi-select filter and context menu.
@@ -165,11 +168,13 @@ One manual capture run. No screenshots and no repeated UI runs.
 
 Implemented and verified by tests/build:
 
-- Added `MessageKind`, `Record.kind`, classification priority, display labels, and the builtin SPDP/SEDP writer fallback.
+- Added `MessageKind`, `Record.kind`, classification priority, display labels, and builtin discovery writer fallback.
+- Added builtin non-topic control/liveliness writer detection so participant-message DATA+HEARTBEAT records classify as RTPS control.
+- The reported `DATA+HEARTBEAT` record from builtin writer `000200c2` now classifies as RTPS control.
 - Reworked `TopicCounts`, `TopicRow`, filtering, and reattribution for topic and non-topic categories.
 - Added separate Discovery, RTPS control, and Unidentified topics-pane groups while keeping Known and Unknown.
 - The detail text now shows the message kind and category label.
-- Added model tests for discovery by announcement and writer ID, control/unidentified/UDP classification, priority, category counts, Hide self, and reattribution.
+- Added model tests for discovery by announcement and writer ID, builtin participant-message control, control/unidentified/UDP classification, priority, category counts, Hide self, and reattribution.
 - `cargo test`/`build.ps1 -Test` pass; `build.ps1` deploys; the release `dds-echo` starts successfully.
 - The manual captured-traffic group check remains for the user.
 

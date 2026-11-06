@@ -40,7 +40,7 @@ Third-party libraries are built/installed to an external prefix (for example `C:
 ## Later increments
 
 ### dds-echo-message-classification
-Classify `dds-echo` capture records into separate groups: known topics, unregistered topics, DDS discovery, RTPS control, and unidentified data. Show Discovery, RTPS control, and Unidentified as their own topics-pane groups; keep the Known and Unknown topic rows; update counts, filtering, table labels, detail category, and Hide self. Use builtin discovery writer IDs as a fallback for discovery detection.
+Classify `dds-echo` capture records into separate groups: known topics, unregistered topics, DDS discovery, RTPS control, and unidentified data. Show Discovery, RTPS control, and Unidentified as their own topics-pane groups; keep the Known and Unknown topic rows; update counts, filtering, table labels, detail category, and Hide self. Use builtin writer IDs as a fallback for discovery and non-topic DDS control/liveliness detection.
 - **Depends on:** none.
 - **Minimal test:** capture a known topic, an unregistered topic, SPDP/SEDP discovery, a heartbeat-only datagram, and an unattributed DATA datagram; each appears in its own group and filters correctly.
 - **Status:** in progress.

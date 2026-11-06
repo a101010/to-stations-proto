@@ -49,12 +49,33 @@ impl MessageKind {
     }
 
     pub fn is_topic(self) -> bool {
-        matches!(self, MessageKind::KnownTopic | MessageKind::UnregisteredTopic)
+        matches!(
+            self,
+            MessageKind::KnownTopic | MessageKind::UnregisteredTopic
+        )
     }
 }
 
-/// The builtin RTPS writer entity IDs used for discovery traffic.
-const DISCOVERY_WRITERS: [&str; 3] = ["000100c2", "000003c2", "000004c2"];
+/// Builtin RTPS writer entity IDs used for discovery traffic.
+const DISCOVERY_WRITERS: [&str; 7] = [
+    "000100c2", // SPDP participant
+    "000002c2", // SEDP topic
+    "000003c2", // SEDP publications
+    "000004c2", // SEDP subscriptions
+    "ff0003c2", // secure SEDP publications
+    "ff0004c2", // secure SEDP subscriptions
+    "ff0101c2", // secure SPDP participant
+];
+
+/// Builtin RTPS writer entity IDs for non-topic DDS control/liveliness traffic.
+const CONTROL_WRITERS: [&str; 6] = [
+    "000200c2", // participant message (liveliness)
+    "000201c3", // participant stateless message
+    "000300c3", // type-lookup service request
+    "000301c3", // type-lookup service reply
+    "ff0200c2", // secure participant message
+    "ff0202c3", // secure participant volatile message
+];
 
 /// One decoded RTPS submessage, formatted for display.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -152,6 +173,14 @@ impl Record {
         })
     }
 
+    /// Whether this record comes from a builtin non-topic control/liveliness
+    /// writer.
+    pub fn has_builtin_control_writer(&self) -> bool {
+        self.frames
+            .iter()
+            .any(|frame| CONTROL_WRITERS.contains(&frame.writer.as_str()))
+    }
+
     /// Classify this record for the topics pane.
     pub fn classify(&self, known: &KnownTopics) -> MessageKind {
         if self.class == Class::Udp {
@@ -166,6 +195,9 @@ impl Record {
         }
         if self.is_discovery() {
             return MessageKind::Discovery;
+        }
+        if self.has_builtin_control_writer() {
+            return MessageKind::RtpsControl;
         }
         if self
             .frames
@@ -204,7 +236,12 @@ impl Record {
     /// `MM:SS.mmm` since capture started.
     pub fn time_label(&self) -> String {
         let ms = self.elapsed_ms;
-        format!("{:02}:{:02}.{:03}", ms / 60_000, (ms / 1000) % 60, ms % 1000)
+        format!(
+            "{:02}:{:02}.{:03}",
+            ms / 60_000,
+            (ms / 1000) % 60,
+            ms % 1000
+        )
     }
 
     /// Lowercase hex pairs, first [`HEX_PREVIEW`] bytes, pre-wrapped at
@@ -481,10 +518,7 @@ impl TopicCounts {
         }
 
         if change.new_kind.is_topic() {
-            *self
-                .counts
-                .entry(change.new_topic.clone())
-                .or_insert(0) += 1;
+            *self.counts.entry(change.new_topic.clone()).or_insert(0) += 1;
             if change.self_origin {
                 *self
                     .self_counts
@@ -688,14 +722,7 @@ impl<T> FrequencyBuffer<T> {
         self.next_id = self.next_id.wrapping_add(1);
         self.bytes += size;
         self.by_key.entry(key.clone()).or_default().push_back(id);
-        self.entries.insert(
-            id,
-            Slot {
-                key,
-                size,
-                value,
-            },
-        );
+        self.entries.insert(id, Slot { key, size, value });
 
         let mut evicted = Vec::new();
         while self.over_cap() {
@@ -762,12 +789,7 @@ impl<T> FrequencyBuffer<T> {
             .by_key
             .iter()
             .filter(|(_, ids)| ids.len() >= 2)
-            .max_by_key(|(_, ids)| {
-                (
-                    ids.len(),
-                    Reverse(ids.front().copied().unwrap_or(u64::MAX)),
-                )
-            })
+            .max_by_key(|(_, ids)| (ids.len(), Reverse(ids.front().copied().unwrap_or(u64::MAX))))
             .map(|(key, _)| key.clone());
 
         let id = match victim {
@@ -964,7 +986,10 @@ mod tests {
     fn known_topics_insert_and_lookup() {
         let k = known();
         assert!(k.contains("HelloWorldTopic"));
-        assert_eq!(k.idl_type("HelloWorldTopic"), Some("hello_world::HelloWorldTopic"));
+        assert_eq!(
+            k.idl_type("HelloWorldTopic"),
+            Some("hello_world::HelloWorldTopic")
+        );
         assert_eq!(k.names().collect::<Vec<_>>(), vec!["HelloWorldTopic"]);
         assert!(!k.contains("Nope"));
         assert_eq!(k.idl_type("Nope"), None);
@@ -1005,9 +1030,9 @@ mod tests {
         assert!(rows
             .iter()
             .any(|r| r.name == "WeatherTopic" && !r.known && r.packets == 1));
-        assert!(rows
-            .iter()
-            .any(|r| r.name == "unidentified" && r.kind == MessageKind::UnidentifiedData && r.packets == 1));
+        assert!(rows.iter().any(|r| r.name == "unidentified"
+            && r.kind == MessageKind::UnidentifiedData
+            && r.packets == 1));
         assert!(rows
             .iter()
             .any(|r| r.name == "udp" && r.kind == MessageKind::Udp && r.packets == 1));
@@ -1023,7 +1048,13 @@ mod tests {
             rtps: 0,
             ..Stats::default()
         };
-        assert_eq!(rt.sample(&stats, 1000), Rates { pps: 100, bps: 1000 });
+        assert_eq!(
+            rt.sample(&stats, 1000),
+            Rates {
+                pps: 100,
+                bps: 1000
+            }
+        );
     }
 
     #[test]
@@ -1164,6 +1195,33 @@ mod tests {
             record(Class::Udp, 0, None).classify(&known),
             MessageKind::Udp
         );
+    }
+
+    #[test]
+    fn classifies_builtin_control_writers_as_rtps_control() {
+        let known = known();
+
+        let mut participant_message = record(Class::Rtps, 116, None);
+        participant_message.frames = vec![
+            frame(0x09, "INFO_TS", "", "", 8),
+            frame(0x15, "DATA", "000200c2", "3", 48),
+            frame(0x07, "HEARTBEAT", "000200c2", "3..3", 28),
+        ];
+        assert!(participant_message.has_builtin_control_writer());
+        assert_eq!(
+            participant_message.classify(&known),
+            MessageKind::RtpsControl
+        );
+
+        let mut sedp_topic = record(Class::Rtps, 0, None);
+        sedp_topic.frames = vec![frame(0x15, "DATA", "000002c2", "1", 20)];
+        assert!(sedp_topic.is_discovery());
+        assert_eq!(sedp_topic.classify(&known), MessageKind::Discovery);
+
+        let mut user_data = record(Class::Rtps, 0, None);
+        user_data.frames = vec![frame(0x15, "DATA", "00000102", "1", 20)];
+        assert!(!user_data.has_builtin_control_writer());
+        assert_eq!(user_data.classify(&known), MessageKind::UnidentifiedData);
     }
 
     #[test]
@@ -1340,7 +1398,9 @@ mod tests {
     fn history_keeps_a_one_shot_topic_while_trimming_fast_records() {
         let mut history = History::default();
         for _ in 0..MAX_RECORDS {
-            assert!(history.push(record(Class::Known, 10, Some("fast"))).is_empty());
+            assert!(history
+                .push(record(Class::Known, 10, Some("fast")))
+                .is_empty());
         }
 
         let evicted = history.push(record(Class::Known, 10, Some("rare")));
@@ -1419,10 +1479,7 @@ mod tests {
 
         let selection = TopicSelection::default();
         let records: Vec<_> = history.matching(&selection, false).collect();
-        assert_eq!(
-            records[0].1.topic.as_deref(),
-            Some("HelloWorldViewTopic")
-        );
+        assert_eq!(records[0].1.topic.as_deref(), Some("HelloWorldViewTopic"));
         assert!(history.reattribute(&discovery, &known).is_empty());
     }
 
