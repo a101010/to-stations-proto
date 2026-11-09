@@ -20,7 +20,7 @@ Conventions:
 * The model service and the view service are separate: the model publishes the greeting and the attitude (a 23.5 degree tilt, as a quaternion; one revolution every twelve minutes is added later); the view publishes the display message.
 * Earth projection: a cube map sampled on a sphere, oriented by the attitude quaternion, lit from the upper right.
 * Font handling (loading and rendering the greeting) is in scope; format text uses HarfBuzz's experimental GPU library (`libharfbuzz-gpu`).
-* Small display (`lil-d`): one square format window plus a console area with a single power button, `--station N`, and `--topics`.
+* Small display (`lil-d`): one square format window plus a console area with a single power button and a unique `--display-id <id>`.
 * The display library hosts a default format and the hello-world format and a format manager that switches the active format on a click in the region delegated to it.
 * Input handling is added per feature; the first is the format-manager click.
 * Out of scope: the C++/hybrid configurations and their launch scripts; joystick control service and `paws`; the format-manager controller service, the three-dot menu, and the format-chooser-format; `big-d` and `tentacles`; real game-controller binding; per-station views.
@@ -39,17 +39,11 @@ Third-party libraries are built/installed to an external prefix (for example `C:
 
 ## Later increments
 
-### dds-echo-message-classification
-Classify `dds-echo` capture records into separate groups: known topics, unregistered topics, DDS discovery, RTPS control, and unidentified data. Show Discovery, RTPS control, and Unidentified as their own topics-pane groups; keep the Known and Unknown topic rows; update counts, filtering, table labels, detail category, and Hide self. Use builtin writer IDs as a fallback for discovery and non-topic DDS control/liveliness detection.
-- **Depends on:** none.
-- **Minimal test:** capture a known topic, an unregistered topic, SPDP/SEDP discovery, a heartbeat-only datagram, and an unattributed DATA datagram; each appears in its own group and filters correctly.
-- **Status:** in progress.
-
 ### multi-lil-d
-Add display identity/scoping to the format-manager chain so two `lil-d` instances with different `--station` values can be controlled independently. Add station/display fields to the format-manager topics, identity to the controller/view services, `display_lib_set_identity` and ABI v3, and stamp/filter in the display library; update launch/cleanup for multiple displays.
+Give every display instance a unique display id and use it for all format-manager routing so multiple displays are independent. Each `big-d` and `lil-d` instance has its own id; there is no station id in the format-manager chain. Add a `display_id` field to the format-manager topics, identity to the controller/view services, `display_lib_set_identity` and ABI v3, and stamp/filter in the display library; update launch/cleanup for multiple displays.
 - **Depends on:** none.
-- **Minimal test:** run `lil-d` for station 0 and station 1; clicking one format window changes only that display's format.
-- **Status:** todo.
+- **Minimal test:** run two `lil-d` instances with distinct `--display-id` values; clicking one format window changes only that display's format.
+- **Status:** in progress.
 
 ### format-menu
 Add a three-dot menu to the format manager, drawn in the upper left over all formats, with one entry per format.

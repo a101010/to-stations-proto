@@ -219,3 +219,12 @@ Create the per-display format-manager controller and view services. The display 
 - **Completed:** 2026-11-05 16:19:54.
 - **Depends on:** none.
 - **Minimal test:** launch the fleet, click in `lil-d`'s format window, and verify the display switches `hello-world` <-> `default` while `dds-echo` shows and decodes the input/control/view topics, including sequence-bearing payloads.
+
+## Later increments
+
+### dds-echo-message-classification
+Classify `dds-echo` capture records into separate groups: known topics, unregistered topics, DDS discovery, RTPS control, and unidentified data. Show Discovery, RTPS control, and Unidentified as their own topics-pane groups; keep the Known and Unknown topic rows; update counts, filtering, table labels, detail category, and Hide self. Use builtin writer IDs as a fallback for discovery and non-topic DDS control/liveliness detection.
+- **Completed:** 2026-11-09 16:47:08.
+- **Depends on:** none.
+- **Minimal test:** capture a known topic, an unregistered topic, SPDP/SEDP discovery, a heartbeat-only datagram, and an unattributed DATA datagram; each appears in its own group and filters correctly.
+- **Note:** the manual captured-traffic group check remains for the user.
