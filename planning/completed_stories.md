@@ -228,3 +228,10 @@ Classify `dds-echo` capture records into separate groups: known topics, unregist
 - **Depends on:** none.
 - **Minimal test:** capture a known topic, an unregistered topic, SPDP/SEDP discovery, a heartbeat-only datagram, and an unattributed DATA datagram; each appears in its own group and filters correctly.
 - **Note:** the manual captured-traffic group check remains for the user.
+
+### multi-lil-d
+Give every display instance a unique numeric display id and use it for all format-manager routing so multiple displays are independent. Each `big-d`/`lil-d` instance has its own id; there is no station id in the format-manager chain. Added `display_id` to the format-manager topics, identity to the controller/view services, `display_lib_set_identity` and ABI v3, and stamping/filtering in the display library. Persisted each display's window position (logical monitor name, resolution, and monitor-relative position) and its format-manager assignment in per-display state files; defaulted the format to hello-world and placed new displays in a cascade on the main monitor. Rejected duplicate service/display instances with the same display id. Updated launch/cleanup for multiple displays, saved display positions on focus loss/monitor changes, and raised the displays to the front.
+- **Completed:** 2026-11-10 16:13:29.
+- **Depends on:** none.
+- **Minimal test:** run two `lil-d` instances with display ids 0 and 1; clicking one format window changes only that display's format; positions and formats restore after restart; a duplicate display id exits with an error.
+- **Note:** the manual click-independence, saved-format restore, and duplicate-`lil-d` dialog checks remain for the user.

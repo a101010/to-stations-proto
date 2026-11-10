@@ -39,17 +39,11 @@ Third-party libraries are built/installed to an external prefix (for example `C:
 
 ## Later increments
 
-### multi-lil-d
-Give every display instance a unique numeric display id and use it for all format-manager routing so multiple displays are independent. Each `big-d`/`lil-d` instance has its own id; there is no station id in the format-manager chain. Add `display_id` to the format-manager topics, identity to the controller/view services, `display_lib_set_identity` and ABI v3, and stamp/filter in the display library. Persist each display's window position (preferred monitor plus monitor-relative position) and its format-manager assignment in per-display state files; default the format to hello-world and place new displays in a cascade on the main monitor. Reject duplicate service/display instances with the same display id. Update launch/cleanup for multiple displays and raise the displays to the front.
-- **Depends on:** none.
-- **Minimal test:** run two `lil-d` instances with display ids 0 and 1; clicking one format window changes only that display's format; positions and formats restore after restart; a duplicate display id exits with an error.
-- **Status:** in progress.
-
 ### format-menu
 Add a three-dot menu to the format manager, drawn in the upper left over all formats, with one entry per format.
 - **Depends on:** none.
 - **Minimal test:** the menu switches the active format.
-- **Status:** todo.
+- **Status:** in progress.
 
 ### format-chooser-format
 Create the format-chooser-format: a format for choosing formats.
