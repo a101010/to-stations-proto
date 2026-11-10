@@ -3,19 +3,20 @@
 //! The display library is not linked in; it is loaded at runtime so the app can
 //! use either the Rust or the C++ implementation (`--display-lib`).
 
-use std::ffi::{c_char, c_int, c_void, CStr};
+use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::path::{Path, PathBuf};
 
 use libloading::Library;
 
 /// ABI version this app expects. Mirrors `DISPLAY_LIB_ABI_VERSION` in
 /// `include/display_lib.h`.
-const EXPECTED_ABI_VERSION: u32 = 2;
+const EXPECTED_ABI_VERSION: u32 = 3;
 
 /// A GL proc-address loader, as passed to the display library.
 pub type GlLoader = extern "C" fn(*const c_char, *mut c_void) -> *const c_void;
 
 type CreateFn = unsafe extern "C" fn(GlLoader, *mut c_void) -> *mut c_void;
+type SetIdentityFn = unsafe extern "C" fn(*mut c_void, *const c_char);
 type RenderFn = unsafe extern "C" fn(*mut c_void, c_int, c_int, c_int, c_int, c_int);
 type MouseButtonFn = unsafe extern "C" fn(*mut c_void, c_int, c_int, c_int, c_int);
 type DestroyFn = unsafe extern "C" fn(*mut c_void);
@@ -32,11 +33,17 @@ pub struct Display {
 }
 
 impl Display {
-    /// Load the display library at `path` and create a handle.
+    /// Load the display library at `path`, create a handle, and set its
+    /// identity.
     ///
     /// `loader` and `userdata` are used only during creation (the library
     /// resolves its GL function pointers then).
-    pub fn load(path: &Path, loader: GlLoader, userdata: *mut c_void) -> Result<Self, String> {
+    pub fn load(
+        path: &Path,
+        loader: GlLoader,
+        userdata: *mut c_void,
+        display_id: &str,
+    ) -> Result<Self, String> {
         let lib = unsafe { Library::new(path) }
             .map_err(|e| format!("failed to load display library {}: {e}", path.display()))?;
 
@@ -54,6 +61,9 @@ impl Display {
             let create: CreateFn = *lib
                 .get(b"display_lib_create\0")
                 .map_err(|e| format!("missing display_lib_create: {e}"))?;
+            let set_identity: SetIdentityFn = *lib
+                .get(b"display_lib_set_identity\0")
+                .map_err(|e| format!("missing display_lib_set_identity: {e}"))?;
             let render: RenderFn = *lib
                 .get(b"display_lib_render\0")
                 .map_err(|e| format!("missing display_lib_render: {e}"))?;
@@ -76,6 +86,10 @@ impl Display {
                     CStr::from_ptr(message).to_string_lossy().into_owned()
                 });
             }
+
+            let display_id = CString::new(display_id)
+                .map_err(|_| "display id must not contain NUL".to_string())?;
+            set_identity(handle, display_id.as_ptr());
 
             Ok(Self {
                 _lib: lib,

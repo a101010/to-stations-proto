@@ -26,6 +26,10 @@ struct Args {
     #[arg(long)]
     config: Option<PathBuf>,
 
+    /// Unique display id this service forwards assignments for.
+    #[arg(long)]
+    display_id: Option<String>,
+
     /// Print this service's contract and exit.
     #[arg(long)]
     topics: bool,
@@ -55,6 +59,12 @@ fn run(args: &Args) -> Result<(), String> {
         return Ok(());
     }
 
+    let display_id = args
+        .display_id
+        .clone()
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| "--display-id is required".to_string())?;
+
     let node = Node::new(args.domain, registry).map_err(|e| e.to_string())?;
     let reader = node
         .reader::<FormatManagerCtlTopic>("FormatManagerCtlTopic")
@@ -66,13 +76,23 @@ fn run(args: &Args) -> Result<(), String> {
     loop {
         let samples = reader.take().map_err(|e| e.to_string())?;
         for sample in samples {
-            let view = FormatManagerViewTopic {
-                windows: sample.windows,
-            };
-            writer.write(&view).map_err(|e| e.to_string())?;
+            if let Some(view) = view_for(&display_id, sample) {
+                writer.write(&view).map_err(|e| e.to_string())?;
+            }
         }
         std::thread::sleep(POLL);
     }
+}
+
+/// Forward a control sample only when it is addressed to `display_id`.
+fn view_for(display_id: &str, sample: FormatManagerCtlTopic) -> Option<FormatManagerViewTopic> {
+    if sample.display_id != display_id {
+        return None;
+    }
+    Some(FormatManagerViewTopic {
+        display_id: display_id.to_string(),
+        windows: sample.windows,
+    })
 }
 
 /// The contracts directory: an explicit `--config`, else `<exe_dir>/../config`,
@@ -93,4 +113,34 @@ fn contracts_dir(explicit: Option<&Path>) -> PathBuf {
     std::env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
         .join("contracts")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use stations_dds::cyclonedds::DdsSequence;
+    use stations_dds::format_manager::FormatWindowAssignment;
+
+    fn control(display_id: &str, format: &str) -> FormatManagerCtlTopic {
+        FormatManagerCtlTopic {
+            display_id: display_id.to_string(),
+            windows: DdsSequence::from_vec(vec![FormatWindowAssignment {
+                window: 0,
+                format: format.to_string(),
+            }])
+            .unwrap(),
+        }
+    }
+
+    #[test]
+    fn matching_control_is_forwarded_with_identity() {
+        let view = view_for("lil-d-a", control("lil-d-a", "default")).expect("forwarded");
+        assert_eq!(view.display_id, "lil-d-a");
+        assert_eq!(view.windows.as_slice()[0].format, "default");
+    }
+
+    #[test]
+    fn other_display_control_is_ignored() {
+        assert!(view_for("lil-d-a", control("lil-d-b", "default")).is_none());
+    }
 }

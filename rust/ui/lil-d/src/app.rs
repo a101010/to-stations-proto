@@ -15,7 +15,6 @@ use crate::display;
 use crate::gl_window::GlWindow;
 use crate::layout;
 
-const WINDOW_TITLE: &str = "lil-d";
 const WINDOW_WIDTH: f64 = 720.0;
 const WINDOW_HEIGHT: f64 = 720.0;
 
@@ -53,10 +52,11 @@ impl App {
     }
 
     fn setup(&mut self, event_loop: &ActiveEventLoop) {
+        let title = format!("lil-d - {}", self.args.display_id);
         let gl_window = unsafe {
             GlWindow::new(
                 event_loop,
-                WINDOW_TITLE,
+                &title,
                 winit::dpi::LogicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT),
             )
         };
@@ -71,7 +71,8 @@ impl App {
         let display = {
             let (loader, userdata) = gl_window.gl_loader();
             let path = display::resolve_path(&self.args.display_lib);
-            display::Display::load(&path, loader, userdata).expect("display-lib load")
+            display::Display::load(&path, loader, userdata, &self.args.display_id)
+                .expect("display-lib load")
         };
 
         self.gl_window = Some(gl_window);
@@ -113,7 +114,7 @@ impl App {
         };
 
         // 2. egui: the console.
-        let station = self.args.station;
+        let display_id = self.args.display_id.clone();
         let format_on = self.state.format_on;
         let mut action = ConsoleAction::default();
         {
@@ -123,7 +124,7 @@ impl App {
                 return;
             };
             egui_glow.run(gl_window.window(), |ui| {
-                action = console::draw(ui, station, format_on, console_height);
+                action = console::draw(ui, &display_id, format_on, console_height);
             });
         }
         if action.toggle_power {

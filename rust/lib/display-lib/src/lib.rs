@@ -17,14 +17,14 @@ mod text;
 mod view;
 
 use std::cell::RefCell;
-use std::ffi::{c_char, c_int, c_void, CString};
+use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use format_list::FormatList;
 use stations_dds::contract::TopicRegistry;
 use stations_dds::dds::Node;
 
 /// ABI version implemented by this library. Mirrors `DISPLAY_LIB_ABI_VERSION`
 /// in `include/display_lib.h`.
-const ABI_VERSION: u32 = 2;
+const ABI_VERSION: u32 = 3;
 
 /// A GL proc-address loader supplied by the display application.
 type GlLoader = extern "C" fn(*const c_char, *mut c_void) -> *const c_void;
@@ -66,6 +66,9 @@ struct Display {
     view: Option<view::ViewSource>,
     /// Format-manager assignments and logical input events.
     format_source: Option<format_source::FormatSource>,
+    /// This display's unique id, used to stamp and filter format-manager
+    /// samples. Empty until the display application sets it.
+    display_id: String,
     /// The latest received view sample, shared with the formats.
     state: view::ViewState,
 }
@@ -95,6 +98,7 @@ impl Display {
             format_manager,
             view,
             format_source,
+            display_id: String::new(),
             state,
         })
     }
@@ -106,7 +110,7 @@ impl Display {
             view.poll(&self.state);
         }
         if let Some(format_source) = &self.format_source {
-            format_source.poll(&mut self.format_manager);
+            format_source.poll(&mut self.format_manager, &self.display_id);
         }
         self.format_manager
             .render(&self.gl, framebuffer_height, x, y, width, height);
@@ -120,7 +124,7 @@ impl Display {
         }
         if let Some(window) = self.format_manager.hit_window(x, y) {
             if let Some(format_source) = &self.format_source {
-                format_source.send_next(window);
+                format_source.send_next(window, &self.display_id);
             }
         }
     }
@@ -184,6 +188,20 @@ pub extern "C" fn display_lib_create(loader: GlLoader, userdata: *mut c_void) ->
             std::ptr::null_mut()
         }
     }
+}
+
+/// Sets this display's unique identity. Must be called after
+/// [`display_lib_create`] and before the first render.
+#[no_mangle]
+pub extern "C" fn display_lib_set_identity(display: *mut c_void, display_id: *const c_char) {
+    if display.is_null() || display_id.is_null() {
+        return;
+    }
+    let display = unsafe { &mut *(display as *mut Display) };
+    let display_id = unsafe { CStr::from_ptr(display_id) }
+        .to_string_lossy()
+        .into_owned();
+    display.display_id = display_id;
 }
 
 /// Renders into `(x, y, width, height)` (physical pixels, top-left origin).

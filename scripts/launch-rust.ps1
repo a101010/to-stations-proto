@@ -4,23 +4,30 @@ Launches the Rust configuration.
 
 .DESCRIPTION
 Starts the applications of the Rust configuration from build/deploy: the
-hello_world model service, the view service, the format-manager services, and
-the small display (lil-d).
+hello_world model service, the view service, one format-manager service pair per
+display, and the small displays (lil-d).
+
+Every display has a unique display id. The same id is given to its format
+controller, format view service, and lil-d.
 
 All participants read the shared DDS configuration; this script sets
 CYCLONEDDS_URI before starting them.
 
 Run scripts/build.ps1 first to populate build/deploy.
 
-.PARAMETER Station
-Station number passed to the display. Defaults to 0.
+.PARAMETER DisplayId
+Display ids to launch. Defaults to two small displays, lil-d-a and lil-d-b.
 #>
 [CmdletBinding()]
 param(
-    [int]$Station = 0
+    [string[]]$DisplayId = @('lil-d-a', 'lil-d-b')
 )
 
 $ErrorActionPreference = 'Stop'
+
+if ($DisplayId.Count -eq 0) {
+    throw 'At least one display id is required.'
+}
 
 # Stop a previous run first: repeated launches must not stack services/displays
 # (which doubles streams and DDS discovery).
@@ -39,7 +46,7 @@ if (-not (Test-Path $model) -or -not (Test-Path $view) -or -not (Test-Path $form
     throw "Not built: run scripts\build.ps1 first."
 }
 
-# All participants (the service and the display library) read the shared
+# All participants (the services and the display libraries) read the shared
 # configuration from CYCLONEDDS_URI; child processes inherit it.
 $env:CYCLONEDDS_URI = 'file://' + ($config -replace '\\', '/')
 
@@ -47,9 +54,14 @@ Start-Process -FilePath $model
 Start-Sleep -Milliseconds 500
 Start-Process -FilePath $view
 Start-Sleep -Milliseconds 500
-Start-Process -FilePath $formatCtl
-Start-Sleep -Milliseconds 300
-Start-Process -FilePath $formatView
-Start-Sleep -Milliseconds 300
-Start-Process -FilePath $display -ArgumentList '--station', $Station
-Write-Host "Started hello-service, hello-view-service, format-ctl-service, format-view-service, and lil-d (station $Station)"
+
+foreach ($id in $DisplayId) {
+    Start-Process -FilePath $formatCtl -ArgumentList '--display-id', $id
+    Start-Sleep -Milliseconds 300
+    Start-Process -FilePath $formatView -ArgumentList '--display-id', $id
+    Start-Sleep -Milliseconds 300
+    Start-Process -FilePath $display -ArgumentList '--display-id', $id
+    Start-Sleep -Milliseconds 300
+}
+
+Write-Host "Started hello-service, hello-view-service, and lil-d for display ids: $($DisplayId -join ', ')"

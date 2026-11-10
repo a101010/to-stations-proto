@@ -142,12 +142,15 @@ mod tests {
         use format_manager::FormatManagerInputTopic;
 
         let sample = FormatManagerInputTopic {
+            display_id: "lil-d-a".to_string(),
             window: 0,
             command: 1,
             format: "default".to_string(),
         };
         let dump =
             decode("format_manager::FormatManagerInputTopic", &framed(&sample)).expect("decoded");
+        assert!(dump.contains("display_id"));
+        assert!(dump.contains("lil-d-a"));
         assert!(dump.contains("window: 0"));
         assert!(dump.contains("command: 1"));
         assert!(dump.contains("default"));
@@ -171,19 +174,23 @@ mod tests {
             },
         ];
         let control = FormatManagerCtlTopic {
+            display_id: "lil-d-a".to_string(),
             windows: DdsSequence::from_vec(windows.clone()).unwrap(),
         };
         let dump = decode("format_manager::FormatManagerCtlTopic", &framed(&control))
             .expect("decoded control");
+        assert!(dump.contains("lil-d-a"));
         assert!(dump.contains("window: 0"));
         assert!(dump.contains("default"));
         assert!(dump.contains("hello-world"));
 
         let view = FormatManagerViewTopic {
+            display_id: "lil-d-b".to_string(),
             windows: DdsSequence::from_vec(windows).unwrap(),
         };
         let dump =
             decode("format_manager::FormatManagerViewTopic", &framed(&view)).expect("decoded view");
+        assert!(dump.contains("lil-d-b"));
         assert!(dump.contains("window: 1"));
         assert!(dump.contains("hello-world"));
     }

@@ -34,6 +34,10 @@ struct Args {
     #[arg(long)]
     config: Option<PathBuf>,
 
+    /// Unique display id this service controls.
+    #[arg(long)]
+    display_id: Option<String>,
+
     /// Print this service's contract and exit.
     #[arg(long)]
     topics: bool,
@@ -64,6 +68,12 @@ fn run(args: &Args) -> Result<(), String> {
         return Ok(());
     }
 
+    let display_id = args
+        .display_id
+        .clone()
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| "--display-id is required".to_string())?;
+
     let node = Node::new(args.domain, registry).map_err(|e| e.to_string())?;
     let reader = node
         .reader::<FormatManagerInputTopic>("FormatManagerInputTopic")
@@ -76,23 +86,44 @@ fn run(args: &Args) -> Result<(), String> {
     loop {
         let samples = reader.take().map_err(|e| e.to_string())?;
         for sample in samples {
-            let changed = apply(&formats, &mut assignments, sample);
+            let changed = apply_for(&display_id, &formats, &mut assignments, sample);
             if changed {
-                let windows = assignments
-                    .iter()
-                    .map(|(&window, format)| FormatWindowAssignment {
-                        window,
-                        format: format.clone(),
-                    })
-                    .collect();
-                let control = FormatManagerCtlTopic {
-                    windows: DdsSequence::from_vec(windows).map_err(|e| e.to_string())?,
-                };
+                let control = control_topic(&display_id, &assignments)?;
                 writer.write(&control).map_err(|e| e.to_string())?;
             }
         }
         std::thread::sleep(POLL);
     }
+}
+
+fn control_topic(
+    display_id: &str,
+    assignments: &BTreeMap<i32, String>,
+) -> Result<FormatManagerCtlTopic, String> {
+    let windows = assignments
+        .iter()
+        .map(|(&window, format)| FormatWindowAssignment {
+            window,
+            format: format.clone(),
+        })
+        .collect();
+    Ok(FormatManagerCtlTopic {
+        display_id: display_id.to_string(),
+        windows: DdsSequence::from_vec(windows).map_err(|e| e.to_string())?,
+    })
+}
+
+/// Apply an event only when it is addressed to `display_id`.
+fn apply_for(
+    display_id: &str,
+    formats: &FormatList,
+    assignments: &mut BTreeMap<i32, String>,
+    event: FormatManagerInputTopic,
+) -> bool {
+    if event.display_id != display_id {
+        return false;
+    }
+    apply(formats, assignments, event)
 }
 
 fn apply(
@@ -164,8 +195,9 @@ name = "default"
         FormatList::from_toml(FORMATS).unwrap()
     }
 
-    fn input(window: i32, command: i32, format: &str) -> FormatManagerInputTopic {
+    fn input(display_id: &str, window: i32, command: i32, format: &str) -> FormatManagerInputTopic {
         FormatManagerInputTopic {
+            display_id: display_id.to_string(),
             window,
             command,
             format: format.to_string(),
@@ -176,16 +208,18 @@ name = "default"
     fn next_advances_from_the_default_and_wraps() {
         let formats = formats();
         let mut assignments = BTreeMap::new();
-        assert!(apply(
+        assert!(apply_for(
+            "lil-d-a",
             &formats,
             &mut assignments,
-            input(0, FORMAT_COMMAND_NEXT, "")
+            input("lil-d-a", 0, FORMAT_COMMAND_NEXT, "")
         ));
         assert_eq!(assignments.get(&0).map(String::as_str), Some("default"));
-        assert!(apply(
+        assert!(apply_for(
+            "lil-d-a",
             &formats,
             &mut assignments,
-            input(0, FORMAT_COMMAND_NEXT, "")
+            input("lil-d-a", 0, FORMAT_COMMAND_NEXT, "")
         ));
         assert_eq!(assignments.get(&0).map(String::as_str), Some("hello-world"));
     }
@@ -194,16 +228,18 @@ name = "default"
     fn select_validates_and_applies() {
         let formats = formats();
         let mut assignments = BTreeMap::new();
-        assert!(apply(
+        assert!(apply_for(
+            "lil-d-a",
             &formats,
             &mut assignments,
-            input(0, FORMAT_COMMAND_SELECT, "default")
+            input("lil-d-a", 0, FORMAT_COMMAND_SELECT, "default")
         ));
         assert_eq!(assignments.get(&0).map(String::as_str), Some("default"));
-        assert!(!apply(
+        assert!(!apply_for(
+            "lil-d-a",
             &formats,
             &mut assignments,
-            input(0, FORMAT_COMMAND_SELECT, "missing")
+            input("lil-d-a", 0, FORMAT_COMMAND_SELECT, "missing")
         ));
     }
 
@@ -211,15 +247,17 @@ name = "default"
     fn windows_are_independent() {
         let formats = formats();
         let mut assignments = BTreeMap::new();
-        apply(
+        apply_for(
+            "lil-d-a",
             &formats,
             &mut assignments,
-            input(0, FORMAT_COMMAND_SELECT, "default"),
+            input("lil-d-a", 0, FORMAT_COMMAND_SELECT, "default"),
         );
-        apply(
+        apply_for(
+            "lil-d-a",
             &formats,
             &mut assignments,
-            input(1, FORMAT_COMMAND_SELECT, "hello-world"),
+            input("lil-d-a", 1, FORMAT_COMMAND_SELECT, "hello-world"),
         );
         assert_eq!(assignments.get(&0).map(String::as_str), Some("default"));
         assert_eq!(assignments.get(&1).map(String::as_str), Some("hello-world"));
@@ -229,7 +267,40 @@ name = "default"
     fn unknown_command_is_ignored() {
         let formats = formats();
         let mut assignments = BTreeMap::new();
-        assert!(!apply(&formats, &mut assignments, input(0, 99, "default")));
+        assert!(!apply_for(
+            "lil-d-a",
+            &formats,
+            &mut assignments,
+            input("lil-d-a", 0, 99, "default")
+        ));
         assert!(assignments.is_empty());
+    }
+
+    #[test]
+    fn other_display_events_are_ignored() {
+        let formats = formats();
+        let mut assignments = BTreeMap::new();
+        assert!(!apply_for(
+            "lil-d-a",
+            &formats,
+            &mut assignments,
+            input("lil-d-b", 0, FORMAT_COMMAND_SELECT, "default")
+        ));
+        assert!(assignments.is_empty());
+    }
+
+    #[test]
+    fn control_carries_the_display_id() {
+        let formats = formats();
+        let mut assignments = BTreeMap::new();
+        apply_for(
+            "lil-d-a",
+            &formats,
+            &mut assignments,
+            input("lil-d-a", 0, FORMAT_COMMAND_SELECT, "default"),
+        );
+        let control = control_topic("lil-d-a", &assignments).unwrap();
+        assert_eq!(control.display_id, "lil-d-a");
+        assert_eq!(control.windows.as_slice()[0].format, "default");
     }
 }

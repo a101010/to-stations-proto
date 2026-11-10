@@ -1,4 +1,4 @@
-//! The console strip: the station label and the power button.
+//! The console strip: the display id label and the power button.
 
 use egui::{Color32, Frame, Panel};
 
@@ -15,7 +15,7 @@ pub struct ConsoleAction {
 ///
 /// `height` is the console strip height in logical points, taken from the
 /// computed layout so the egui panel matches the GL geometry.
-pub fn draw(ui: &mut egui::Ui, station: u32, format_on: bool, height: f32) -> ConsoleAction {
+pub fn draw(ui: &mut egui::Ui, display_id: &str, format_on: bool, height: f32) -> ConsoleAction {
     let mut action = ConsoleAction::default();
 
     Panel::bottom("lil-d-console")
@@ -23,7 +23,7 @@ pub fn draw(ui: &mut egui::Ui, station: u32, format_on: bool, height: f32) -> Co
         .frame(Frame::new().fill(CONSOLE_FILL))
         .show(ui, |ui| {
             ui.horizontal_centered(|ui| {
-                ui.label(format!("station {station}"));
+                ui.label(format!("display {display_id}"));
                 ui.separator();
                 let label = if format_on { "Power: on" } else { "Power: off" };
                 if ui.button(label).clicked() {
