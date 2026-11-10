@@ -57,6 +57,12 @@ Create the format-chooser-format: a format for choosing formats.
 - **Minimal test:** a format can be chosen from the format.
 - **Status:** todo.
 
+### paws
+Create the game-controller window application (`paws`): a (Slint) window with a virtual controller that can be bound to a game controller.
+- **Depends on:** none.
+- **Minimal test:** the window shows a virtual controller.
+- **Status:** todo.
+
 ### random-greeting
 Change `hello-service` to choose greetings randomly from its Latin-script list instead of advancing through a fixed sequence; avoid repeating the same greeting twice in a row where practical.
 - **Depends on:** none.
@@ -79,12 +85,6 @@ Create the large display application (`big-d`): a large rectangular window with 
 Create the launcher application (`tentacles`): a Slint window that can start and stop the applications for a configuration, with an option to launch services with or without console windows.
 - **Depends on:** none.
 - **Minimal test:** the launcher starts and stops a configuration; services can be launched with or without console windows.
-- **Status:** todo.
-
-### paws
-Create the game-controller window application (`paws`): a (Slint) window with a virtual controller that can be bound to a game controller.
-- **Depends on:** none.
-- **Minimal test:** the window shows a virtual controller.
 - **Status:** todo.
 
 ### sdl3-imgui
