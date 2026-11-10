@@ -20,6 +20,9 @@ const INITIAL_ATLAS_BYTES: usize = 4096;
 /// + `glyph_loc` (u32).
 const VERTEX_STRIDE: i32 = 32;
 
+/// The font used by format text and the format-manager menu.
+pub(crate) const FONT_FILE: &str = "fonts/FiraSans-Regular.ttf";
+
 /// A loaded font, shaped at the face's units per em.
 pub(crate) struct Font {
     _blob: harfbuzz::Blob,
@@ -215,6 +218,51 @@ impl TextRenderer {
         color: [f32; 4],
         font_size_px: f32,
     ) {
+        self.draw_with(
+            gl,
+            width,
+            height,
+            text,
+            color,
+            font_size_px,
+            TextPlacement::Center,
+        );
+    }
+
+    /// Draw `text` with its top-left corner at `(left, top)` in region pixels.
+    /// The viewport is assumed to be set to that region.
+    pub(crate) fn draw_at(
+        &mut self,
+        gl: &glow::Context,
+        width: i32,
+        height: i32,
+        text: &str,
+        color: [f32; 4],
+        font_size_px: f32,
+        left: f32,
+        top: f32,
+    ) {
+        self.draw_with(
+            gl,
+            width,
+            height,
+            text,
+            color,
+            font_size_px,
+            TextPlacement::TopLeft { left, top },
+        );
+    }
+
+    fn draw_with(
+        &mut self,
+        gl: &glow::Context,
+        width: i32,
+        height: i32,
+        text: &str,
+        color: [f32; 4],
+        font_size_px: f32,
+        placement: TextPlacement,
+    ) {
         if width <= 0 || height <= 0 || font_size_px <= 0.0 {
             return;
         }
@@ -229,6 +277,7 @@ impl TextRenderer {
             width,
             height,
             font_size_px,
+            placement,
         );
         if self.vertices.is_empty() {
             return;
@@ -262,6 +311,12 @@ impl TextRenderer {
             gl.disable(glow::BLEND);
             gl.use_program(None);
         }
+    }
+
+    /// The width of `text` in pixels at `font_size_px`.
+    pub(crate) fn text_width(&self, text: &str, font_size_px: f32) -> f32 {
+        let advance: f32 = self.font.shape(text).iter().map(|g| g.x_advance).sum();
+        width_for_advance(advance, self.font.upem, font_size_px)
     }
 
     /// The font size, no larger than `max_size`, at which `text` fits within
@@ -314,6 +369,15 @@ impl TextRenderer {
     }
 }
 
+/// Convert font-unit advance to pixels at `font_size_px`.
+fn width_for_advance(advance: f32, upem: f32, font_size_px: f32) -> f32 {
+    if advance <= 0.0 || upem <= 0.0 || font_size_px <= 0.0 {
+        0.0
+    } else {
+        advance * font_size_px / upem
+    }
+}
+
 /// The largest font size that fits `advance` font units into `max_width`
 /// pixels, capped at `max_size`.
 fn font_size_for_advance(advance: f32, upem: f32, max_width: f32, max_size: f32) -> f32 {
@@ -326,7 +390,14 @@ fn font_size_for_advance(advance: f32, upem: f32, max_width: f32, max_size: f32)
     (max_width * upem / advance).min(max_size)
 }
 
-/// Lay out `glyphs` centered in the region and emit their quad vertices.
+/// Where the text box starts.
+#[derive(Clone, Copy, Debug)]
+enum TextPlacement {
+    Center,
+    TopLeft { left: f32, top: f32 },
+}
+
+/// Lay out `glyphs` and emit their quad vertices.
 fn build_vertices(
     upem: f32,
     atlas: &HashMap<u32, AtlasGlyph>,
@@ -334,12 +405,18 @@ fn build_vertices(
     width: i32,
     height: i32,
     font_size_px: f32,
+    placement: TextPlacement,
 ) -> Vec<Vertex> {
     let scale = font_size_px / upem;
     let em_per_pos = upem / font_size_px;
     let total: f32 = glyphs.iter().map(|g| g.x_advance).sum::<f32>() * scale;
-    let mut pen_x = (width as f32 - total) / 2.0;
-    let pen_y = height as f32 / 2.0 + 0.5 * font_size_px;
+    let (mut pen_x, pen_y) = match placement {
+        TextPlacement::Center => (
+            (width as f32 - total) / 2.0,
+            height as f32 / 2.0 + 0.5 * font_size_px,
+        ),
+        TextPlacement::TopLeft { left, top } => (left, top + font_size_px),
+    };
 
     let mut vertices = Vec::with_capacity(glyphs.len() * 6);
     for glyph in glyphs {
@@ -501,7 +578,15 @@ mod tests {
             },
         ];
 
-        let vertices = build_vertices(upem, &atlas, &glyphs, 1000, 400, 100.0);
+        let vertices = build_vertices(
+            upem,
+            &atlas,
+            &glyphs,
+            1000,
+            400,
+            100.0,
+            TextPlacement::Center,
+        );
 
         // The empty glyph contributes no quad: two non-empty glyphs, six each.
         assert_eq!(vertices.len(), 12);
@@ -518,6 +603,45 @@ mod tests {
         let fit = font_size_for_advance(20000.0, 1000.0, 900.0, 100.0);
         assert!((fit - 45.0).abs() < 1e-3);
         assert!((font_size_for_advance(20000.0, 1000.0, 900.0, 40.0) - 40.0).abs() < 1e-3);
+        assert!((width_for_advance(2000.0, 1000.0, 50.0) - 100.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn top_left_layout_starts_at_origin() {
+        let upem = 1000.0;
+        let mut atlas = HashMap::new();
+        atlas.insert(
+            1u32,
+            AtlasGlyph {
+                loc: 0,
+                min_x: 0.0,
+                max_x: 100.0,
+                min_y: -200.0,
+                max_y: 0.0,
+                empty: false,
+            },
+        );
+        let glyphs = vec![Glyph {
+            id: 1,
+            x_advance: 500.0,
+            y_advance: 0.0,
+            x_offset: 0.0,
+            y_offset: 0.0,
+        }];
+        let vertices = build_vertices(
+            upem,
+            &atlas,
+            &glyphs,
+            1000,
+            400,
+            100.0,
+            TextPlacement::TopLeft {
+                left: 100.0,
+                top: 50.0,
+            },
+        );
+        assert_eq!(vertices.len(), 6);
+        assert!((vertices[0].pos[0] - 100.0).abs() < 1e-3);
     }
 
     #[test]

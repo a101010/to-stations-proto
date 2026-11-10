@@ -4,7 +4,7 @@
 //! format events on `FormatManagerInputTopic`. The display application knows
 //! nothing about these topics.
 
-use format_list::FORMAT_COMMAND_NEXT;
+use format_list::{FORMAT_COMMAND_NEXT, FORMAT_COMMAND_SELECT};
 use stations_dds::cyclonedds::{DataReader, DataWriter};
 use stations_dds::dds::Node;
 use stations_dds::format_manager::{FormatManagerInputTopic, FormatManagerViewTopic};
@@ -40,14 +40,23 @@ impl FormatSource {
 
     /// Publish a logical `Next` event for a format window.
     pub(crate) fn send_next(&self, window: i32, display_id: Option<u32>) {
+        self.send(window, FORMAT_COMMAND_NEXT, String::new(), display_id);
+    }
+
+    /// Publish a logical `Select` event for a format window.
+    pub(crate) fn send_select(&self, window: i32, format: &str, display_id: Option<u32>) {
+        self.send(window, FORMAT_COMMAND_SELECT, format.to_string(), display_id);
+    }
+
+    fn send(&self, window: i32, command: i32, format: String, display_id: Option<u32>) {
         let Some(display_id) = display_id else {
             return;
         };
         let event = FormatManagerInputTopic {
             display_id,
             window,
-            command: FORMAT_COMMAND_NEXT,
-            format: String::new(),
+            command,
+            format,
         };
         if let Err(error) = self.writer.write(&event) {
             eprintln!("display-lib: format input write failed: {error}");

@@ -10,6 +10,7 @@
 
 mod earth;
 mod format_manager;
+mod format_menu;
 mod format_source;
 mod formats;
 mod shader;
@@ -117,14 +118,23 @@ impl Display {
     }
 
     /// Forward a mouse button event (physical pixels, top-left origin). A left
-    /// press inside a format window publishes a logical `Next` event.
+    /// press may toggle the menu, select a format, or publish a logical `Next`
+    /// event.
     fn mouse_button(&mut self, x: i32, y: i32, button: i32, pressed: bool) {
         if button != 0 || !pressed {
             return;
         }
-        if let Some(window) = self.format_manager.hit_window(x, y) {
-            if let Some(format_source) = &self.format_source {
-                format_source.send_next(window, self.display_id);
+        let Some(action) = self.format_manager.mouse_button(x, y) else {
+            return;
+        };
+        if let Some(format_source) = &self.format_source {
+            match action {
+                format_manager::FormatAction::Next { window } => {
+                    format_source.send_next(window, self.display_id);
+                }
+                format_manager::FormatAction::Select { window, format } => {
+                    format_source.send_select(window, &format, self.display_id);
+                }
             }
         }
     }

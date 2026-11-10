@@ -200,6 +200,19 @@ One manual two-display run; no screenshots and no repeated UI runs.
 - `planning/completed_stories.md`
 - `planning/current_story.md`
 
+## Result
+
+Implemented and verified by tests/build:
+
+- Added `format_menu` with the three-dot button, panel, format rows, active-format highlight, and pure layout/hit-test state.
+- Extended `TextRenderer` with `draw_at` and `text_width`, plus a shared font path constant.
+- `FormatManager` now owns the menu, draws it over the active format, and produces `Next`/`Select` actions.
+- `format_source` sends `Select` events; the controller and view service persist them without changes.
+- Added menu layout/state tests and text-layout tests.
+- `cargo test`/`build.ps1 -Test` pass; release `build.ps1` deploys.
+- A live launch opened the menu over `hello-world`, and choosing `default` wrote `format = "default"` to the display's view-service state file.
+- Remaining manual checks: two-display independence, outside-click/Next behavior, and saved-format restore after restart.
+
 ## Bookkeeping
 
 - `multi-lil-d` was completed at `2026-11-10 16:13:29` and moved to `completed_stories.md` under "Later increments".

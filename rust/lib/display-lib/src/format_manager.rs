@@ -12,16 +12,25 @@ use std::path::Path;
 use format_list::FormatList;
 use stations_dds::format_manager::FormatWindowAssignment;
 
+use crate::format_menu::{FormatMenu, MenuAction};
 use crate::formats::{self, Format};
 use crate::DisplayError;
 
 /// The active formats by format-window id.
 pub(crate) struct FormatManager {
     formats: Vec<Box<dyn Format>>,
+    menu: Option<FormatMenu>,
     assignments: BTreeMap<i32, String>,
     /// The last region `render` was given, as `(x, y, width, height)` in
     /// physical pixels with a top-left origin.
     region: (i32, i32, i32, i32),
+}
+
+/// A logical format-manager event produced by local input.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum FormatAction {
+    Next { window: i32 },
+    Select { window: i32, format: String },
 }
 
 impl FormatManager {
@@ -31,8 +40,11 @@ impl FormatManager {
         state: crate::view::ViewState,
         formats: &FormatList,
     ) -> Result<Self, DisplayError> {
+        let renderers = formats::registry(gl, assets_root, state, formats)?;
+        let menu = FormatMenu::new(gl, assets_root, formats.names())?;
         Ok(Self {
-            formats: formats::registry(gl, assets_root, state, formats)?,
+            formats: renderers,
+            menu: Some(menu),
             assignments: BTreeMap::new(),
             region: (0, 0, 0, 0),
         })
@@ -53,12 +65,30 @@ impl FormatManager {
         let name = self
             .assignments
             .get(&0)
-            .map(String::as_str)
-            .or_else(|| self.formats.first().map(|format| format.name()))
-            .unwrap_or("");
-        if let Some(format) = self.formats.iter_mut().find(|format| format.name() == name) {
+            .cloned()
+            .or_else(|| self.formats.first().map(|format| format.name().to_string()))
+            .unwrap_or_default();
+        if let Some(format) = self.formats.iter_mut().find(|format| format.name() == name.as_str()) {
             format.render(gl, framebuffer_height, x, y, width, height);
         }
+        if let Some(menu) = &mut self.menu {
+            menu.render(gl, framebuffer_height, self.region, 0, &name);
+        }
+    }
+
+    /// Handle a left-button press in window coordinates.
+    pub(crate) fn mouse_button(&mut self, x: i32, y: i32) -> Option<FormatAction> {
+        if let Some(menu) = &mut self.menu {
+            match menu.click(0, self.region, x, y) {
+                MenuAction::Consumed => return None,
+                MenuAction::Select(format) => {
+                    return Some(FormatAction::Select { window: 0, format })
+                }
+                MenuAction::Ignored => {}
+            }
+        }
+        self.hit_window(x, y)
+            .map(|window| FormatAction::Next { window })
     }
 
     /// Replace the current assignments with a view sample. Unknown format
@@ -87,6 +117,7 @@ impl FormatManager {
     fn with_region(formats: Vec<Box<dyn Format>>, region: (i32, i32, i32, i32)) -> Self {
         Self {
             formats,
+            menu: None,
             assignments: BTreeMap::new(),
             region,
         }

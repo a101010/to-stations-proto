@@ -8,7 +8,7 @@ use std::path::Path;
 use glow::HasContext as _;
 
 use crate::earth::Earth;
-use crate::text::TextRenderer;
+use crate::text::{TextRenderer, FONT_FILE};
 use crate::view::{View, ViewState};
 use crate::DisplayError;
 
@@ -20,8 +20,6 @@ const NO_DATA_BACKGROUND: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
 const TEXT_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
 /// Light direction (view space): upper right, toward the viewer.
 const LIGHT_DIR: [f32; 3] = [0.6, 0.8, 0.7];
-/// Font, relative to the assets root.
-const FONT_FILE: &str = "fonts/FiraSans-Regular.ttf";
 /// Text size as a fraction of the region height.
 const FONT_SIZE_FRACTION: f32 = 0.15;
 /// Fraction of the region width available to centered text.
