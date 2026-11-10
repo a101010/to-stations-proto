@@ -20,10 +20,10 @@ Conventions:
 * The model service and the view service are separate: the model publishes the greeting and the attitude (a 23.5 degree tilt, as a quaternion; one revolution every twelve minutes is added later); the view publishes the display message.
 * Earth projection: a cube map sampled on a sphere, oriented by the attitude quaternion, lit from the upper right.
 * Font handling (loading and rendering the greeting) is in scope; format text uses HarfBuzz's experimental GPU library (`libharfbuzz-gpu`).
-* Small display (`lil-d`): one square format window plus a console area with a single power button and a unique `--display-id <id>`.
+* Small display (`lil-d`): one square format window plus a console area with a single power button, a unique numeric `--display-id <id>`, and a remembered per-display window position.
 * The display library hosts a default format and the hello-world format and a format manager that switches the active format on a click in the region delegated to it.
 * Input handling is added per feature; the first is the format-manager click.
-* Out of scope: the C++/hybrid configurations and their launch scripts; joystick control service and `paws`; the format-manager controller service, the three-dot menu, and the format-chooser-format; `big-d` and `tentacles`; real game-controller binding; per-station views.
+* Out of scope: the C++/hybrid configurations and their launch scripts; joystick control service and `paws`; the format-manager controller service, the three-dot menu, and the format-chooser-format; `big-d` and `tentacles`; real game-controller binding; per-display views.
 
 **Prerequisites** (environment, installed once, not built by `scripts/build.ps1`):
 * MSVC (Visual Studio Build Tools) and CMake.
@@ -40,9 +40,9 @@ Third-party libraries are built/installed to an external prefix (for example `C:
 ## Later increments
 
 ### multi-lil-d
-Give every display instance a unique display id and use it for all format-manager routing so multiple displays are independent. Each `big-d` and `lil-d` instance has its own id; there is no station id in the format-manager chain. Add a `display_id` field to the format-manager topics, identity to the controller/view services, `display_lib_set_identity` and ABI v3, and stamp/filter in the display library; update launch/cleanup for multiple displays.
+Give every display instance a unique numeric display id and use it for all format-manager routing so multiple displays are independent. Each `big-d`/`lil-d` instance has its own id; there is no station id in the format-manager chain. Add `display_id` to the format-manager topics, identity to the controller/view services, `display_lib_set_identity` and ABI v3, and stamp/filter in the display library. Persist each display's window position (preferred monitor plus monitor-relative position) and its format-manager assignment in per-display state files; default the format to hello-world and place new displays in a cascade on the main monitor. Reject duplicate service/display instances with the same display id. Update launch/cleanup for multiple displays and raise the displays to the front.
 - **Depends on:** none.
-- **Minimal test:** run two `lil-d` instances with distinct `--display-id` values; clicking one format window changes only that display's format.
+- **Minimal test:** run two `lil-d` instances with display ids 0 and 1; clicking one format window changes only that display's format; positions and formats restore after restart; a duplicate display id exits with an error.
 - **Status:** in progress.
 
 ### format-menu
@@ -76,9 +76,9 @@ Create the large display application (`big-d`): a large rectangular window with 
 - **Status:** todo.
 
 ### tentacles
-Create the launcher application (`tentacles`): a Slint window that can start and stop the applications for a configuration.
+Create the launcher application (`tentacles`): a Slint window that can start and stop the applications for a configuration, with an option to launch services with or without console windows.
 - **Depends on:** none.
-- **Minimal test:** the launcher starts and stops a configuration.
+- **Minimal test:** the launcher starts and stops a configuration; services can be launched with or without console windows.
 - **Status:** todo.
 
 ### paws
@@ -121,6 +121,6 @@ Extend the `dds-echo` Send form to edit and send sequence-bearing topics, includ
 Not yet broken into stories:
 * C++ mirror of the Rust libraries, tools, and apps and the `c++` configuration.
 * Hybrid configuration and `launch-hybrid.ps1`; `launch-cpp.ps1`.
-* Remaining top-level module IDL (control, joystick, per-station/display) and the full topic registry (input, control, joystick, format window/mapping).
+* Remaining top-level module IDL (control, joystick, display) and the full topic registry (input, control, joystick, format window/mapping).
 * Joystick control service and real game-controller binding.
-* Per-station views.
+* Per-display views.

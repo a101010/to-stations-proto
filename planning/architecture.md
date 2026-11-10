@@ -13,9 +13,9 @@ Each configuration has two display applications.
 
 Each application is in charge of rendering the console. It delegates rendering the window to a display library.
 
-Display applications take a parameter on the command line that indicates their 'station number'.
+Display applications take a unique numeric display id on the command line.
 
-Each configuration launches a large and a small display for stations 0 and 1.
+Each configuration launches a large and a small display, each with its own unique numeric display id.
 
 Each station has a service that represents a joystick controller. For each of these services, a separate window application with a virtual controller will be launched. This window can also be bound to one game controller.
 
@@ -54,26 +54,38 @@ A *format* is a distributable model-view-controller constellation. Each format o
 
 The display applications themselves know very little; most of their work is delegated to the display library instance each of them hosts.
 
-Each format has its own instance of this constellation, so formats are independent and can be distributed across the system. An editor format, for example, could display different data on different displays for the same station by using station- or display-scoped view services.
+Each format has its own instance of this constellation, so formats are independent and can be distributed across the system. An editor format, for example, could display different data on different displays by using display-scoped view services.
 
-### Scope: system, station, or display
-View and controller elements of a constellation can be system-wide, per station, or per display, depending on the requirements of that format.
+### Scope: system or display
+View and controller elements of a constellation can be system-wide or per display, depending on the requirements of that format.
 
 * All topics travel over IPv6 multicast, so every topic is reachable everywhere on the network.
-* A topic that varies carries the relevant `station` and/or `display` field in its IDL type; a system-wide topic carries neither. Fields are added to a type only when a format requires them.
-* A view or controller service that serves one station or display receives that id as a command-line argument and publishes the corresponding field.
-* A display library receives its station (and display) id from its display application's command line; the format's own implementation decides which instances of a topic it listens to. That choice is part of the format's implementation, not separate run-time configuration.
+* A topic that varies carries the relevant `display_id` field in its IDL type; a system-wide topic carries none. Fields are added to a type only when a format requires them.
+* A view or controller service that serves one display receives that display id as a command-line argument and publishes the corresponding field.
+* A display library receives its display id from its display application's command line; the format's own implementation decides which instances of a topic it listens to. That choice is part of the format's implementation, not separate run-time configuration.
 
-The hello_world format is global (system-wide) in the first increment; the ability to select the view per station comes in a later increment.
+The hello_world format is global (system-wide) in the first increment; the ability to select the view per display comes in a later increment.
 
 ## Format windows and the format manager
 A *format window* is a place where a format can be displayed: one on the small display (`lil-d`) and three on the large display (`big-d`). The eyebrow on `big-d` is a separate window; it is not a format window and is not controlled by the format manager.
 
-The format manager is **per display** (not per station) and is itself a model-view-controller constellation. It tells that display's display library which format to display in each format window, and that combination is different for each display. It runs as separate controller and view service processes (`format-ctl-service` and `format-view-service`), not inside the display application.
+The format manager is **per display** and is itself a model-view-controller constellation. It tells that display's display library which format to display in each format window, and that combination is different for each display. It runs as separate controller and view service processes (`format-ctl-service` and `format-view-service`), not inside the display application.
 
 The display application remains format- and topic-agnostic: it loads the display library, gives it the render regions, and forwards local pointer events. The display library owns the format-manager DDS: it subscribes to assignments, hit-tests local input against the format windows, creates logical `Next`/`Select` events, and publishes them to the controller. The controller owns the per-format-window assignments, using the shared `contracts/formats.toml`; it publishes control to the view service, which forwards assignments to the display library.
 
-The first format-manager increment is single-display and unscoped. The `multi-lil-d` follow-up adds station/display scoping, display identity, and the display ABI v3 identity function needed to control multiple `lil-d` instances independently.
+Each display has a unique numeric display id. Its controller and view service are launched with that id, and the format-manager topics carry `display_id`; the display library stamps its input events and filters incoming assignments by it. The display ABI v3 adds `display_lib_set_identity` for this purpose.
+
+The format-manager view service persists the current per-window assignments for its display id. It loads `format-view-service\<display_id>.toml` at startup; if the file is missing, unreadable, or names an unknown format, the effective assignment is `hello-world` for every format window. It publishes the loaded/default assignments immediately and writes the file after every accepted control assignment. The controller reads the same file once at startup, without writing it, so Next/Select start from the restored state; the view service is the only writer. The display library treats an unassigned window as `hello-world`.
+
+## Service and display instances
+Every service and display process acquires a per-instance Windows named-mutex guard from the `single-instance` library before creating DDS participants, opening a window, or reading or writing runtime state. If the guard is already held, the process prints a diagnostic and exits with a failure status. The guard name is `Local\to-stations-<application>` for a singleton and `Local\to-stations-<application>-<discriminator>` when multiple instances are legitimate. The only discriminator in the first increment is the numeric display id: `format-ctl-service-display-<id>`, `format-view-service-display-<id>`, and `lil-d-display-<id>`. `hello-service` and `hello-view-service` are singletons. Argument-only diagnostics such as `--topics` do not start an instance and do not acquire the guard.
+
+## Runtime state
+Per-user runtime state is not deploy configuration. It lives under `%LOCALAPPDATA%\to-stations\<application>\<discriminator>.toml`, where the discriminator is the numeric display id for per-display applications. Distinct instances use distinct files, so they do not contend, and the per-instance guards prevent two processes from sharing one discriminator. Files are written atomically so readers never observe a partial update.
+
+Examples:
+* `lil-d\<display_id>.toml` - preferred monitor and monitor-relative window position.
+* `format-view-service\<display_id>.toml` - current per-window format assignments for that display.
 
 ## Topic contracts
 Every service declares the topics it publishes and subscribes to so that the contract of a service is easy to read:
@@ -184,10 +196,8 @@ The repository is therefore required to live at a short path on Windows. `script
 
 Each configuration has a launch script; all configurations share `cleanup.ps1`. `scripts/verify-loopback.ps1` verifies the loopback adapter and its IPv6 prerequisites; creating the adapter is a documented manual step (see `docs/`). Launch and cleanup scripts operate only on `build/deploy/`.
 
-### Single-instance guard for manually launched GUI tools
-Manually launched singleton GUI tools use a Windows named-mutex guard from the shared `single-instance` library (`rust/lib/single-instance`). `dds-echo` is the first user; future manually launched singleton tools opt in. The mutex name is `Local\to-stations-<tool>`, scoped to the Windows session. A second launch finds the existing window by its stable title, restores and foregrounds it, then exits without creating DDS participants, logging a second startup, or creating another window. `--help` and `--version` still work because argument parsing happens before the guard.
-
-The guard is not used by fleet-launched applications or by per-station/per-display windows (`lil-d`, `big-d`, `paws`, the services, or the launch scripts), because multiple instances are legitimate there. Window titles are the activation key, so every tool opting in must keep a stable title.
+### Single-instance guards
+The shared `single-instance` library provides the named-mutex guard and a best-effort window-activation helper. `dds-echo` uses the guard as a manually launched singleton: a second launch finds the existing window by its stable title, restores and foregrounds it, then exits without creating DDS participants, logging a second startup, or creating another window. Fleet-launched services and displays use the same guard only to reject a duplicate instance with the same identity; they exit with an error instead of foregrounding another window. The guard name includes the identity described in "Service and display instances". Argument parsing happens before the guard, so `--help` and `--version` still work. Window titles are the activation key for the GUI tools that foreground an existing window, so those tools must keep a stable title.
 
 ## Deferred decisions
 * displayLib internal architecture: its top-level modules are `formats` (one submodule per format), the rendering capabilities `text`, `earth`, and `shader`, and `format_manager`; `mesh` is added later. `shader` holds the shader compile/link helpers shared by `text` and `earth`; `mesh` is extracted when a second mesh user appears. `format_manager` owns the format renderers and applies assignments from the format-manager view service; it hit-tests forwarded pointer input against the format windows it last rendered to create logical `Next`/`Select` events. The controller owns the distributed format-window assignments. A format's unique details (colors, geometry, strings, its mesh and shaders) live in its own submodule; shared code is extracted only when a second format needs it. The default format is retained at `formats/default.rs` and reactivated by assignment. It may still split into smaller libraries. The format manager has a view service, a control service, and one or more displayLib modules. The eyebrow is separate and is not a format window.
