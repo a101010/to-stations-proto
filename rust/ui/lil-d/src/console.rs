@@ -15,7 +15,7 @@ pub struct ConsoleAction {
 ///
 /// `height` is the console strip height in logical points, taken from the
 /// computed layout so the egui panel matches the GL geometry.
-pub fn draw(ui: &mut egui::Ui, display_id: &str, format_on: bool, height: f32) -> ConsoleAction {
+pub fn draw(ui: &mut egui::Ui, display_id: u32, format_on: bool, height: f32) -> ConsoleAction {
     let mut action = ConsoleAction::default();
 
     Panel::bottom("lil-d-console")

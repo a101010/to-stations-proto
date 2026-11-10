@@ -256,6 +256,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "app-state"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "arboard"
 version = "3.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1600,8 +1608,10 @@ dependencies = [
 name = "format-ctl-service"
 version = "0.0.0"
 dependencies = [
+ "app-state",
  "clap",
  "format-list",
+ "single-instance",
  "stations-dds",
 ]
 
@@ -1617,7 +1627,10 @@ dependencies = [
 name = "format-view-service"
 version = "0.0.0"
 dependencies = [
+ "app-state",
  "clap",
+ "format-list",
+ "single-instance",
  "stations-dds",
 ]
 
@@ -2013,6 +2026,7 @@ name = "hello-service"
 version = "0.0.0"
 dependencies = [
  "clap",
+ "single-instance",
  "stations-dds",
 ]
 
@@ -2021,6 +2035,7 @@ name = "hello-view-service"
 version = "0.0.0"
 dependencies = [
  "clap",
+ "single-instance",
  "stations-dds",
 ]
 
@@ -2878,6 +2893,7 @@ dependencies = [
 name = "lil-d"
 version = "0.0.0"
 dependencies = [
+ "app-state",
  "clap",
  "egui",
  "egui_glow",
@@ -2885,6 +2901,9 @@ dependencies = [
  "glutin",
  "glutin-winit",
  "libloading",
+ "serde",
+ "single-instance",
+ "windows-sys 0.59.0",
  "winit",
 ]
 

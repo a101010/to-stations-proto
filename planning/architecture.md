@@ -84,8 +84,10 @@ Every service and display process acquires a per-instance Windows named-mutex gu
 Per-user runtime state is not deploy configuration. It lives under `%LOCALAPPDATA%\to-stations\<application>\<discriminator>.toml`, where the discriminator is the numeric display id for per-display applications. Distinct instances use distinct files, so they do not contend, and the per-instance guards prevent two processes from sharing one discriminator. Files are written atomically so readers never observe a partial update.
 
 Examples:
-* `lil-d\<display_id>.toml` - preferred monitor and monitor-relative window position.
+* `lil-d\<display_id>.toml` - logical monitor name, monitor resolution, and monitor-relative window position.
 * `format-view-service\<display_id>.toml` - current per-window format assignments for that display.
+
+A `lil-d` position is restored only when the named monitor is present with the same resolution and the window rectangle remains sufficiently visible there. Otherwise it falls back to a validated position on the main monitor, then to the cascade. The resolved state (including the resolution) is rewritten on startup, so stale or legacy state self-heals.
 
 ## Topic contracts
 Every service declares the topics it publishes and subscribes to so that the contract of a service is easy to read:
@@ -194,7 +196,7 @@ Windows limits file paths to 260 characters unless long-path support is enabled.
 
 The repository is therefore required to live at a short path on Windows. `scripts/subst-repo.ps1` maps the repository root to a short drive letter (`T:` by default), and `scripts/install-subst-startup.ps1` installs that mapping to run at logon via a wrapper in the Startup folder; alternatively the repository can simply be cloned to a short real path such as `C:\t\to-stations-proto`. These scripts are separate from the build and are never run by `scripts/build.ps1`, which is location-agnostic (it resolves the repository root from its own location, uses repository-relative paths, and hardcodes no drive letter). The Rust binding's CycloneDDS build is additionally redirected to the external prefix (`CYCLONEDDS_SRC`, `CYCLONEDDS_BUILD`) so it is built static there rather than inside the target directory. The requirement is restated in `README.md`.
 
-Each configuration has a launch script; all configurations share `cleanup.ps1`. `scripts/verify-loopback.ps1` verifies the loopback adapter and its IPv6 prerequisites; creating the adapter is a documented manual step (see `docs/`). Launch and cleanup scripts operate only on `build/deploy/`.
+Each configuration has a launch script; all configurations share `cleanup.ps1`. `scripts/verify-loopback.ps1` verifies the loopback adapter and its IPv6 prerequisites; creating the adapter is a documented manual step (see `docs/`). Launch and cleanup scripts operate only on `build/deploy/`. `cleanup.ps1` asks the displays to close first so they can persist their per-display state, then force-stops any remaining processes.
 
 ### Single-instance guards
 The shared `single-instance` library provides the named-mutex guard and a best-effort window-activation helper. `dds-echo` uses the guard as a manually launched singleton: a second launch finds the existing window by its stable title, restores and foregrounds it, then exits without creating DDS participants, logging a second startup, or creating another window. Fleet-launched services and displays use the same guard only to reject a duplicate instance with the same identity; they exit with an error instead of foregrounding another window. The guard name includes the identity described in "Service and display instances". Argument parsing happens before the guard, so `--help` and `--version` still work. Window titles are the activation key for the GUI tools that foreground an existing window, so those tools must keep a stable title.

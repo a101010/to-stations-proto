@@ -1,17 +1,21 @@
 //! The format-manager view service.
 //!
-//! It forwards the controller's format-window assignments to the display
-//! library on `FormatManagerViewTopic`. It is a pass-through in the first
-//! increment.
+//! It persists and forwards the controller's format-window assignments to the
+//! display library on `FormatManagerViewTopic`.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
 
 use clap::Parser;
+use format_list::{FormatList, SavedAssignment, SavedAssignments};
+use single_instance::Acquire;
 use stations_dds::contract::{ServiceContract, TopicRegistry};
+use stations_dds::cyclonedds::DdsSequence;
 use stations_dds::dds::Node;
-use stations_dds::format_manager::{FormatManagerCtlTopic, FormatManagerViewTopic};
+use stations_dds::format_manager::{
+    FormatManagerCtlTopic, FormatManagerViewTopic, FormatWindowAssignment,
+};
 
 const POLL: Duration = Duration::from_millis(10);
 
@@ -26,9 +30,9 @@ struct Args {
     #[arg(long)]
     config: Option<PathBuf>,
 
-    /// Unique display id this service forwards assignments for.
+    /// Numeric display id this service forwards assignments for.
     #[arg(long)]
-    display_id: Option<String>,
+    display_id: Option<u32>,
 
     /// Print this service's contract and exit.
     #[arg(long)]
@@ -59,11 +63,24 @@ fn run(args: &Args) -> Result<(), String> {
         return Ok(());
     }
 
+    let formats = FormatList::load(&dir.join("formats.toml")).map_err(|e| e.to_string())?;
     let display_id = args
         .display_id
-        .clone()
-        .filter(|id| !id.is_empty())
         .ok_or_else(|| "--display-id is required".to_string())?;
+
+    let _guard = match single_instance::acquire(&format!(
+        "format-view-service-display-{display_id}"
+    )) {
+        Acquire::Primary(guard) => guard,
+        Acquire::Duplicate => return Err("an instance is already running".to_string()),
+    };
+
+    let state_path = app_state::state_path("format-view-service", &display_id.to_string());
+    let saved = state_path
+        .as_deref()
+        .and_then(|path| app_state::load::<SavedAssignments>(path))
+        .unwrap_or_else(SavedAssignments::hello_world)
+        .validated(&formats);
 
     let node = Node::new(args.domain, registry).map_err(|e| e.to_string())?;
     let reader = node
@@ -73,25 +90,59 @@ fn run(args: &Args) -> Result<(), String> {
         .writer::<FormatManagerViewTopic>("FormatManagerViewTopic")
         .map_err(|e| e.to_string())?;
 
+    writer
+        .write(&view_topic(display_id, &saved)?)
+        .map_err(|e| e.to_string())?;
+
     loop {
         let samples = reader.take().map_err(|e| e.to_string())?;
         for sample in samples {
-            if let Some(view) = view_for(&display_id, sample) {
-                writer.write(&view).map_err(|e| e.to_string())?;
+            if sample.display_id != display_id {
+                continue;
             }
+            let saved = saved_from_control(&sample).validated(&formats);
+            if let Some(path) = &state_path {
+                if let Err(error) = app_state::save(path, &saved) {
+                    eprintln!("format-view-service: state save failed: {error}");
+                }
+            }
+            writer
+                .write(&view_topic(display_id, &saved)?)
+                .map_err(|e| e.to_string())?;
         }
         std::thread::sleep(POLL);
     }
 }
 
-/// Forward a control sample only when it is addressed to `display_id`.
-fn view_for(display_id: &str, sample: FormatManagerCtlTopic) -> Option<FormatManagerViewTopic> {
-    if sample.display_id != display_id {
-        return None;
+fn saved_from_control(sample: &FormatManagerCtlTopic) -> SavedAssignments {
+    SavedAssignments {
+        windows: sample
+            .windows
+            .as_slice()
+            .iter()
+            .map(|assignment| SavedAssignment {
+                window: assignment.window,
+                format: assignment.format.clone(),
+            })
+            .collect(),
     }
-    Some(FormatManagerViewTopic {
-        display_id: display_id.to_string(),
-        windows: sample.windows,
+}
+
+fn view_topic(
+    display_id: u32,
+    saved: &SavedAssignments,
+) -> Result<FormatManagerViewTopic, String> {
+    let windows = saved
+        .windows
+        .iter()
+        .map(|assignment| FormatWindowAssignment {
+            window: assignment.window,
+            format: assignment.format.clone(),
+        })
+        .collect();
+    Ok(FormatManagerViewTopic {
+        display_id,
+        windows: DdsSequence::from_vec(windows).map_err(|e| e.to_string())?,
     })
 }
 
@@ -118,12 +169,10 @@ fn contracts_dir(explicit: Option<&Path>) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use stations_dds::cyclonedds::DdsSequence;
-    use stations_dds::format_manager::FormatWindowAssignment;
 
-    fn control(display_id: &str, format: &str) -> FormatManagerCtlTopic {
+    fn control(display_id: u32, format: &str) -> FormatManagerCtlTopic {
         FormatManagerCtlTopic {
-            display_id: display_id.to_string(),
+            display_id,
             windows: DdsSequence::from_vec(vec![FormatWindowAssignment {
                 window: 0,
                 format: format.to_string(),
@@ -132,15 +181,31 @@ mod tests {
         }
     }
 
+    fn formats() -> FormatList {
+        FormatList::from_toml(
+            r#"
+[[formats]]
+name = "hello-world"
+
+[[formats]]
+name = "default"
+"#,
+        )
+        .unwrap()
+    }
+
     #[test]
-    fn matching_control_is_forwarded_with_identity() {
-        let view = view_for("lil-d-a", control("lil-d-a", "default")).expect("forwarded");
-        assert_eq!(view.display_id, "lil-d-a");
+    fn matching_control_becomes_a_view_with_identity() {
+        let saved = saved_from_control(&control(0, "default")).validated(&formats());
+        let view = view_topic(0, &saved).unwrap();
+        assert_eq!(view.display_id, 0);
         assert_eq!(view.windows.as_slice()[0].format, "default");
     }
 
     #[test]
-    fn other_display_control_is_ignored() {
-        assert!(view_for("lil-d-a", control("lil-d-b", "default")).is_none());
+    fn unknown_formats_fall_back_to_hello_world() {
+        let saved = saved_from_control(&control(0, "missing")).validated(&formats());
+        let view = view_topic(0, &saved).unwrap();
+        assert_eq!(view.windows.as_slice()[0].format, "hello-world");
     }
 }

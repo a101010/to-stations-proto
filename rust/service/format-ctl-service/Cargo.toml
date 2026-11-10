@@ -11,4 +11,6 @@ path = "src/main.rs"
 [dependencies]
 stations-dds = { workspace = true }
 format-list = { workspace = true }
+app-state = { workspace = true }
 clap = { workspace = true }
+single-instance = { workspace = true }

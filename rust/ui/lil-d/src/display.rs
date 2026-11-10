@@ -3,7 +3,7 @@
 //! The display library is not linked in; it is loaded at runtime so the app can
 //! use either the Rust or the C++ implementation (`--display-lib`).
 
-use std::ffi::{c_char, c_int, c_void, CStr, CString};
+use std::ffi::{c_char, c_int, c_void, CStr};
 use std::path::{Path, PathBuf};
 
 use libloading::Library;
@@ -16,7 +16,7 @@ const EXPECTED_ABI_VERSION: u32 = 3;
 pub type GlLoader = extern "C" fn(*const c_char, *mut c_void) -> *const c_void;
 
 type CreateFn = unsafe extern "C" fn(GlLoader, *mut c_void) -> *mut c_void;
-type SetIdentityFn = unsafe extern "C" fn(*mut c_void, *const c_char);
+type SetIdentityFn = unsafe extern "C" fn(*mut c_void, u32);
 type RenderFn = unsafe extern "C" fn(*mut c_void, c_int, c_int, c_int, c_int, c_int);
 type MouseButtonFn = unsafe extern "C" fn(*mut c_void, c_int, c_int, c_int, c_int);
 type DestroyFn = unsafe extern "C" fn(*mut c_void);
@@ -42,7 +42,7 @@ impl Display {
         path: &Path,
         loader: GlLoader,
         userdata: *mut c_void,
-        display_id: &str,
+        display_id: u32,
     ) -> Result<Self, String> {
         let lib = unsafe { Library::new(path) }
             .map_err(|e| format!("failed to load display library {}: {e}", path.display()))?;
@@ -87,9 +87,7 @@ impl Display {
                 });
             }
 
-            let display_id = CString::new(display_id)
-                .map_err(|_| "display id must not contain NUL".to_string())?;
-            set_identity(handle, display_id.as_ptr());
+            set_identity(handle, display_id);
 
             Ok(Self {
                 _lib: lib,

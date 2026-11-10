@@ -4,8 +4,9 @@
 //! receives [`Acquire::Duplicate`], can call [`activate_existing_window`] to
 //! restore and foreground the primary window, and then exits.
 //!
-//! This crate is intentionally not used by fleet-launched applications or
-//! per-station/per-display windows, where multiple instances are legitimate.
+//! Fleet-launched services and displays use the same guard to reject a
+//! duplicate instance with the same identity; instances with different
+//! discriminators (for example different display ids) remain legitimate.
 
 /// The result of trying to acquire the single-instance mutex.
 pub enum Acquire {
@@ -150,6 +151,20 @@ fn wide(value: &str) -> Vec<u16> {
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn distinct_names_are_independent() {
+        let first = match acquire(&format!("first-{}", std::process::id())) {
+            Acquire::Primary(guard) => guard,
+            Acquire::Duplicate => panic!("first name should be primary"),
+        };
+        let second = match acquire(&format!("second-{}", std::process::id())) {
+            Acquire::Primary(guard) => guard,
+            Acquire::Duplicate => panic!("second name should be primary"),
+        };
+        drop(first);
+        drop(second);
+    }
 
     #[test]
     fn detects_a_second_acquire_and_releases_on_drop() {

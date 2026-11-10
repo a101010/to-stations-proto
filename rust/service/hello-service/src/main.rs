@@ -9,6 +9,7 @@ use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 use clap::Parser;
+use single_instance::Acquire;
 use stations_dds::contract::{ServiceContract, TopicRegistry};
 use stations_dds::dds::Node;
 use stations_dds::hello_world::HelloWorldTopic;
@@ -59,6 +60,11 @@ fn run(args: &Args) -> Result<(), String> {
         print!("{}", contract.render());
         return Ok(());
     }
+
+    let _guard = match single_instance::acquire("hello-service") {
+        Acquire::Primary(guard) => guard,
+        Acquire::Duplicate => return Err("an instance is already running".to_string()),
+    };
 
     let node = Node::new(args.domain, registry).map_err(|e| e.to_string())?;
     let writer = node

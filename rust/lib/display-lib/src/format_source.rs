@@ -28,21 +28,23 @@ impl FormatSource {
     }
 
     /// Apply the latest view assignment for `display_id`, if one arrived.
-    pub(crate) fn poll(&self, manager: &mut FormatManager, display_id: &str) {
+    pub(crate) fn poll(&self, manager: &mut FormatManager, display_id: Option<u32>) {
         if let Ok(samples) = self.reader.take() {
-            if let Some(sample) = latest_matching(samples, display_id) {
-                manager.set_assignments(sample.windows.as_slice());
+            if let Some(display_id) = display_id {
+                if let Some(sample) = latest_matching(samples, display_id) {
+                    manager.set_assignments(sample.windows.as_slice());
+                }
             }
         }
     }
 
     /// Publish a logical `Next` event for a format window.
-    pub(crate) fn send_next(&self, window: i32, display_id: &str) {
-        if display_id.is_empty() {
+    pub(crate) fn send_next(&self, window: i32, display_id: Option<u32>) {
+        let Some(display_id) = display_id else {
             return;
-        }
+        };
         let event = FormatManagerInputTopic {
-            display_id: display_id.to_string(),
+            display_id,
             window,
             command: FORMAT_COMMAND_NEXT,
             format: String::new(),
@@ -53,14 +55,11 @@ impl FormatSource {
     }
 }
 
-/// The latest sample addressed to `display_id`. An empty id matches nothing.
+/// The latest sample addressed to `display_id`.
 fn latest_matching(
     samples: Vec<FormatManagerViewTopic>,
-    display_id: &str,
+    display_id: u32,
 ) -> Option<FormatManagerViewTopic> {
-    if display_id.is_empty() {
-        return None;
-    }
     samples
         .into_iter()
         .filter(|sample| sample.display_id == display_id)
@@ -73,9 +72,9 @@ mod tests {
     use stations_dds::cyclonedds::DdsSequence;
     use stations_dds::format_manager::FormatWindowAssignment;
 
-    fn view(display_id: &str, format: &str) -> FormatManagerViewTopic {
+    fn view(display_id: u32, format: &str) -> FormatManagerViewTopic {
         FormatManagerViewTopic {
-            display_id: display_id.to_string(),
+            display_id,
             windows: DdsSequence::from_vec(vec![FormatWindowAssignment {
                 window: 0,
                 format: format.to_string(),
@@ -86,18 +85,9 @@ mod tests {
 
     #[test]
     fn latest_matching_ignores_other_displays() {
-        let samples = vec![
-            view("lil-d-a", "hello-world"),
-            view("lil-d-b", "default"),
-            view("lil-d-a", "default"),
-        ];
-        let sample = latest_matching(samples, "lil-d-a").expect("matching sample");
-        assert_eq!(sample.display_id, "lil-d-a");
+        let samples = vec![view(0, "hello-world"), view(1, "default"), view(0, "default")];
+        let sample = latest_matching(samples, 0).expect("matching sample");
+        assert_eq!(sample.display_id, 0);
         assert_eq!(sample.windows.as_slice()[0].format, "default");
-    }
-
-    #[test]
-    fn latest_matching_ignores_empty_identity() {
-        assert!(latest_matching(vec![view("", "default")], "").is_none());
     }
 }

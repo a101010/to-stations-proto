@@ -16,6 +16,31 @@ param()
 
 $ErrorActionPreference = 'Stop'
 
+# Ask displays to close first so they can persist their per-display state.
+$displays = Get-Process -Name 'lil-d' -ErrorAction SilentlyContinue
+if ($displays) {
+    foreach ($process in $displays) {
+        try {
+            if (-not $process.HasExited) {
+                [void]$process.CloseMainWindow()
+            }
+        }
+        catch {
+            # The process may have exited between the query and the close.
+        }
+    }
+
+    $deadline = (Get-Date).AddSeconds(1)
+    while ((Get-Date) -lt $deadline) {
+        $remaining = Get-Process -Name 'lil-d' -ErrorAction SilentlyContinue
+        if (-not $remaining) {
+            break
+        }
+        Start-Sleep -Milliseconds 50
+    }
+    Write-Host "Closed lil-d"
+}
+
 # Every application launched by a configuration launch script. Later stories
 # append the services and the other displays as they are added.
 $apps = @('lil-d', 'hello-service', 'hello-view-service', 'format-ctl-service', 'format-view-service')

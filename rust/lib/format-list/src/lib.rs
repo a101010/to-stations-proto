@@ -6,12 +6,57 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// `FormatManagerInputTopic.command`: advance to the next format.
 pub const FORMAT_COMMAND_NEXT: i32 = 0;
 /// `FormatManagerInputTopic.command`: select the named format.
 pub const FORMAT_COMMAND_SELECT: i32 = 1;
+
+/// One saved format-window assignment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavedAssignment {
+    pub window: i32,
+    pub format: String,
+}
+
+/// The persisted per-window assignments for one display.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavedAssignments {
+    #[serde(default)]
+    pub windows: Vec<SavedAssignment>,
+}
+
+impl SavedAssignments {
+    /// The effective default: window 0 is hello-world; other windows remain
+    /// unassigned and fall back to hello-world in the display library.
+    pub fn hello_world() -> Self {
+        Self {
+            windows: vec![SavedAssignment {
+                window: 0,
+                format: "hello-world".to_string(),
+            }],
+        }
+    }
+
+    /// Drop duplicate windows, sort by window, and replace unknown formats
+    /// with hello-world.
+    pub fn validated(self, formats: &FormatList) -> Self {
+        let mut windows = Vec::new();
+        let mut seen = HashSet::new();
+        for mut assignment in self.windows {
+            if !seen.insert(assignment.window) {
+                continue;
+            }
+            if !formats.contains(&assignment.format) {
+                assignment.format = "hello-world".to_string();
+            }
+            windows.push(assignment);
+        }
+        windows.sort_by_key(|assignment| assignment.window);
+        Self { windows }
+    }
+}
 
 #[derive(Debug)]
 pub enum FormatListError {
@@ -146,5 +191,51 @@ name = "a"
             FormatList::from_toml(text),
             Err(FormatListError::Duplicate(name)) if name == "a"
         ));
+    }
+
+    #[test]
+    fn saved_assignments_default_and_validate() {
+        let list = FormatList::from_toml(FORMATS).unwrap();
+        assert_eq!(
+            SavedAssignments::hello_world(),
+            SavedAssignments {
+                windows: vec![SavedAssignment {
+                    window: 0,
+                    format: "hello-world".to_string(),
+                }],
+            }
+        );
+
+        let saved = SavedAssignments {
+            windows: vec![
+                SavedAssignment {
+                    window: 1,
+                    format: "missing".to_string(),
+                },
+                SavedAssignment {
+                    window: 0,
+                    format: "default".to_string(),
+                },
+                SavedAssignment {
+                    window: 0,
+                    format: "hello-world".to_string(),
+                },
+            ],
+        };
+        assert_eq!(
+            saved.validated(&list),
+            SavedAssignments {
+                windows: vec![
+                    SavedAssignment {
+                        window: 0,
+                        format: "default".to_string(),
+                    },
+                    SavedAssignment {
+                        window: 1,
+                        format: "hello-world".to_string(),
+                    },
+                ],
+            }
+        );
     }
 }

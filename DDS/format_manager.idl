@@ -5,19 +5,19 @@ module format_manager {
   };
 
   struct FormatManagerInputTopic {
-    string display_id;
+    unsigned long display_id;
     long window;
     long command;   // 0 = Next, 1 = Select
     string format;
   };
 
   struct FormatManagerCtlTopic {
-    string display_id;
+    unsigned long display_id;
     sequence<FormatWindowAssignment> windows;
   };
 
   struct FormatManagerViewTopic {
-    string display_id;
+    unsigned long display_id;
     sequence<FormatWindowAssignment> windows;
   };
 };

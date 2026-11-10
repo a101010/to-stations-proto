@@ -8,9 +8,9 @@ use clap::Parser;
 #[derive(Parser, Debug)]
 #[command(name = "lil-d", about = "to-stations small display")]
 pub struct Args {
-    /// Unique display id, for example `lil-d-a`.
+    /// Unique numeric display id.
     #[arg(long)]
-    pub display_id: String,
+    pub display_id: u32,
 
     /// Path to the display library DLL (default: display_lib.dll next to the exe).
     #[arg(long, default_value = "display_lib.dll")]

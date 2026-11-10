@@ -10,7 +10,10 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use clap::Parser;
-use format_list::{FormatList, FORMAT_COMMAND_NEXT, FORMAT_COMMAND_SELECT};
+use format_list::{
+    FormatList, SavedAssignments, FORMAT_COMMAND_NEXT, FORMAT_COMMAND_SELECT,
+};
+use single_instance::Acquire;
 use stations_dds::contract::{ServiceContract, TopicRegistry};
 use stations_dds::cyclonedds::DdsSequence;
 use stations_dds::dds::Node;
@@ -34,9 +37,9 @@ struct Args {
     #[arg(long)]
     config: Option<PathBuf>,
 
-    /// Unique display id this service controls.
+    /// Numeric display id this service controls.
     #[arg(long)]
-    display_id: Option<String>,
+    display_id: Option<u32>,
 
     /// Print this service's contract and exit.
     #[arg(long)]
@@ -70,9 +73,20 @@ fn run(args: &Args) -> Result<(), String> {
 
     let display_id = args
         .display_id
-        .clone()
-        .filter(|id| !id.is_empty())
         .ok_or_else(|| "--display-id is required".to_string())?;
+
+    let _guard = match single_instance::acquire(&format!(
+        "format-ctl-service-display-{display_id}"
+    )) {
+        Acquire::Primary(guard) => guard,
+        Acquire::Duplicate => return Err("an instance is already running".to_string()),
+    };
+
+    let saved = app_state::state_path("format-view-service", &display_id.to_string())
+        .and_then(|path| app_state::load::<SavedAssignments>(&path))
+        .unwrap_or_else(SavedAssignments::hello_world)
+        .validated(&formats);
+    let mut assignments = assignments_from_saved(&saved);
 
     let node = Node::new(args.domain, registry).map_err(|e| e.to_string())?;
     let reader = node
@@ -81,14 +95,12 @@ fn run(args: &Args) -> Result<(), String> {
     let writer = node
         .writer::<FormatManagerCtlTopic>("FormatManagerCtlTopic")
         .map_err(|e| e.to_string())?;
-
-    let mut assignments: BTreeMap<i32, String> = BTreeMap::new();
     loop {
         let samples = reader.take().map_err(|e| e.to_string())?;
         for sample in samples {
-            let changed = apply_for(&display_id, &formats, &mut assignments, sample);
+            let changed = apply_for(display_id, &formats, &mut assignments, sample);
             if changed {
-                let control = control_topic(&display_id, &assignments)?;
+                let control = control_topic(display_id, &assignments)?;
                 writer.write(&control).map_err(|e| e.to_string())?;
             }
         }
@@ -96,26 +108,34 @@ fn run(args: &Args) -> Result<(), String> {
     }
 }
 
+fn assignments_from_saved(saved: &SavedAssignments) -> BTreeMap<i32, String> {
+    saved
+        .windows
+        .iter()
+        .map(|assignment| (assignment.window, assignment.format.clone()))
+        .collect()
+}
+
 fn control_topic(
-    display_id: &str,
+    display_id: u32,
     assignments: &BTreeMap<i32, String>,
 ) -> Result<FormatManagerCtlTopic, String> {
     let windows = assignments
         .iter()
-        .map(|(&window, format)| FormatWindowAssignment {
-            window,
+        .map(|(window, format)| FormatWindowAssignment {
+            window: *window,
             format: format.clone(),
         })
         .collect();
     Ok(FormatManagerCtlTopic {
-        display_id: display_id.to_string(),
+        display_id,
         windows: DdsSequence::from_vec(windows).map_err(|e| e.to_string())?,
     })
 }
 
 /// Apply an event only when it is addressed to `display_id`.
 fn apply_for(
-    display_id: &str,
+    display_id: u32,
     formats: &FormatList,
     assignments: &mut BTreeMap<i32, String>,
     event: FormatManagerInputTopic,
@@ -195,9 +215,9 @@ name = "default"
         FormatList::from_toml(FORMATS).unwrap()
     }
 
-    fn input(display_id: &str, window: i32, command: i32, format: &str) -> FormatManagerInputTopic {
+    fn input(display_id: u32, window: i32, command: i32, format: &str) -> FormatManagerInputTopic {
         FormatManagerInputTopic {
-            display_id: display_id.to_string(),
+            display_id,
             window,
             command,
             format: format.to_string(),
@@ -209,17 +229,17 @@ name = "default"
         let formats = formats();
         let mut assignments = BTreeMap::new();
         assert!(apply_for(
-            "lil-d-a",
+            0,
             &formats,
             &mut assignments,
-            input("lil-d-a", 0, FORMAT_COMMAND_NEXT, "")
+            input(0, 0, FORMAT_COMMAND_NEXT, "")
         ));
         assert_eq!(assignments.get(&0).map(String::as_str), Some("default"));
         assert!(apply_for(
-            "lil-d-a",
+            0,
             &formats,
             &mut assignments,
-            input("lil-d-a", 0, FORMAT_COMMAND_NEXT, "")
+            input(0, 0, FORMAT_COMMAND_NEXT, "")
         ));
         assert_eq!(assignments.get(&0).map(String::as_str), Some("hello-world"));
     }
@@ -229,17 +249,17 @@ name = "default"
         let formats = formats();
         let mut assignments = BTreeMap::new();
         assert!(apply_for(
-            "lil-d-a",
+            0,
             &formats,
             &mut assignments,
-            input("lil-d-a", 0, FORMAT_COMMAND_SELECT, "default")
+            input(0, 0, FORMAT_COMMAND_SELECT, "default")
         ));
         assert_eq!(assignments.get(&0).map(String::as_str), Some("default"));
         assert!(!apply_for(
-            "lil-d-a",
+            0,
             &formats,
             &mut assignments,
-            input("lil-d-a", 0, FORMAT_COMMAND_SELECT, "missing")
+            input(0, 0, FORMAT_COMMAND_SELECT, "missing")
         ));
     }
 
@@ -248,16 +268,16 @@ name = "default"
         let formats = formats();
         let mut assignments = BTreeMap::new();
         apply_for(
-            "lil-d-a",
+            0,
             &formats,
             &mut assignments,
-            input("lil-d-a", 0, FORMAT_COMMAND_SELECT, "default"),
+            input(0, 0, FORMAT_COMMAND_SELECT, "default"),
         );
         apply_for(
-            "lil-d-a",
+            0,
             &formats,
             &mut assignments,
-            input("lil-d-a", 1, FORMAT_COMMAND_SELECT, "hello-world"),
+            input(0, 1, FORMAT_COMMAND_SELECT, "hello-world"),
         );
         assert_eq!(assignments.get(&0).map(String::as_str), Some("default"));
         assert_eq!(assignments.get(&1).map(String::as_str), Some("hello-world"));
@@ -268,10 +288,10 @@ name = "default"
         let formats = formats();
         let mut assignments = BTreeMap::new();
         assert!(!apply_for(
-            "lil-d-a",
+            0,
             &formats,
             &mut assignments,
-            input("lil-d-a", 0, 99, "default")
+            input(0, 0, 99, "default")
         ));
         assert!(assignments.is_empty());
     }
@@ -281,10 +301,10 @@ name = "default"
         let formats = formats();
         let mut assignments = BTreeMap::new();
         assert!(!apply_for(
-            "lil-d-a",
+            0,
             &formats,
             &mut assignments,
-            input("lil-d-b", 0, FORMAT_COMMAND_SELECT, "default")
+            input(1, 0, FORMAT_COMMAND_SELECT, "default")
         ));
         assert!(assignments.is_empty());
     }
@@ -294,13 +314,27 @@ name = "default"
         let formats = formats();
         let mut assignments = BTreeMap::new();
         apply_for(
-            "lil-d-a",
+            0,
             &formats,
             &mut assignments,
-            input("lil-d-a", 0, FORMAT_COMMAND_SELECT, "default"),
+            input(0, 0, FORMAT_COMMAND_SELECT, "default"),
         );
-        let control = control_topic("lil-d-a", &assignments).unwrap();
-        assert_eq!(control.display_id, "lil-d-a");
+        let control = control_topic(0, &assignments).unwrap();
+        assert_eq!(control.display_id, 0);
         assert_eq!(control.windows.as_slice()[0].format, "default");
+    }
+
+    #[test]
+    fn saved_assignments_initialize_the_map() {
+        use format_list::SavedAssignment;
+
+        let saved = SavedAssignments {
+            windows: vec![SavedAssignment {
+                window: 0,
+                format: "default".to_string(),
+            }],
+        };
+        let assignments = assignments_from_saved(&saved);
+        assert_eq!(assignments.get(&0).map(String::as_str), Some("default"));
     }
 }

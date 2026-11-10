@@ -334,6 +334,28 @@ One manual two-display run; no screenshots and no repeated UI runs.
 - `planning/backlog.md`
 - `planning/current_story.md`
 
+## Result
+
+Implemented and verified by tests/build:
+
+- Converted format-manager display ids to numeric `u32`/`unsigned long` across the IDL, ABI, display library, services, `dds-echo` tests, and launch script.
+- Added `app-state` for per-user state paths and atomic TOML writes, and `SavedAssignments`/`SavedAssignment` to `format-list`.
+- `lil-d` now persists its monitor-relative position per display id, restores the preferred monitor, falls back to the main monitor, and uses the literal `(0,0)`, `(10,5)`, `(20,10)` cascade rows.
+- Position state now records the logical monitor name plus resolution; a saved position is restored only if the name and resolution match and the window remains sufficiently visible. Negative edge offsets such as `x = -5` are preserved; off-screen placements fall back to a validated main-monitor position or the cascade.
+- Saved `x`/`y` remain relative to the monitor; the monitor's current virtual origin is added on restore. A small negative `x` can therefore represent a window at the monitor's left edge, not a wrong absolute position.
+- Legacy state without resolution fields is restored by name when visible and rewritten with resolution on startup.
+- Position writes also happen immediately on focus loss and monitor changes; failed writes keep the position dirty for retry.
+- `cleanup.ps1` closes `lil-d` gracefully before force-stopping, so the final position is saved even when cleanup follows a move immediately.
+- `lil-d` rejects a duplicate display id with an error dialog.
+- `format-view-service` loads and republishes saved assignments, defaults to hello-world, validates formats, and saves accepted assignments.
+- `format-ctl-service` initializes its assignment map from the view-service state file.
+- `hello-service`, `hello-view-service`, `format-ctl-service`, and `format-view-service` reject duplicate instances with the same identity.
+- `launch-rust.ps1` starts numeric display ids and raises the `lil-d` windows above the service consoles.
+- `cargo test`/`build.ps1 -Test` pass; release `build.ps1` deploys.
+- Launch checks verified cascade positions, foreground activation, position save/restore across a force-kill, and duplicate-service rejection.
+- Moving a display to another monitor and immediately running cleanup/relaunch now restores the new monitor position; cleanup closes displays gracefully before force-stopping.
+- Remaining manual checks: clicking each display independently, saved-format restore after a real format change, and the duplicate-`lil-d` error dialog.
+
 ## Bookkeeping
 
 - `dds-echo-message-classification` was completed at `2026-11-09 16:47:08` and moved to `completed_stories.md` under a new "Later increments" section.

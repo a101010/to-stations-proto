@@ -36,9 +36,9 @@ uint32_t display_lib_abi_version(void);
 /* Returns a handle, or NULL on failure (see display_lib_last_error). */
 display_lib* display_lib_create(display_lib_gl_loader loader, void* userdata);
 
-/* Sets the display's unique identity. Call after create and before the first
- * render. The string is copied; the pointer need only be valid for the call. */
-void display_lib_set_identity(display_lib* d, const char* display_id);
+/* Sets the display's numeric identity. Call after create and before the first
+ * render. */
+void display_lib_set_identity(display_lib* d, uint32_t display_id);
 
 /* framebuffer_height flips the top-left region into GL's bottom-left origin. */
 void display_lib_render(display_lib* d, int framebuffer_height,

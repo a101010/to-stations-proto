@@ -1884,7 +1884,7 @@ mod copy_detail_tests {
     #[test]
     fn detail_text_shows_format_manager_sequence() {
         let sample = FormatManagerCtlTopic {
-            display_id: "lil-d-a".to_string(),
+            display_id: 0,
             windows: DdsSequence::from_vec(vec![FormatWindowAssignment {
                 window: 0,
                 format: "default".to_string(),
@@ -1908,7 +1908,7 @@ mod copy_detail_tests {
         );
         let text = detail_text(&r, &known);
         assert!(text.contains("decoded:"));
-        assert!(text.contains("lil-d-a"));
+        assert!(text.contains("display_id: 0"));
         assert!(text.contains("default"));
         assert!(text.contains("window: 0"));
     }

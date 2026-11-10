@@ -1,6 +1,7 @@
 //! The `lil-d` application: window, render loop, console, and state.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use egui_glow::EguiGlow;
 use glow::HasContext as _;
@@ -14,6 +15,7 @@ use crate::console::{self, ConsoleAction};
 use crate::display;
 use crate::gl_window::GlWindow;
 use crate::layout;
+use crate::position;
 
 const WINDOW_WIDTH: f64 = 720.0;
 const WINDOW_HEIGHT: f64 = 720.0;
@@ -36,6 +38,14 @@ pub struct App {
     /// The last cursor position (physical pixels, top-left origin), needed to
     /// place mouse button events.
     cursor: Option<winit::dpi::PhysicalPosition<f64>>,
+    /// The last known outer window position.
+    position: Option<winit::dpi::PhysicalPosition<i32>>,
+    /// Whether the position changed since the last save.
+    position_dirty: bool,
+    /// When the position was last written.
+    last_position_save: Instant,
+    /// The monitor name from the last successful position write.
+    last_saved_monitor: Option<String>,
 }
 
 impl App {
@@ -48,6 +58,10 @@ impl App {
             egui_glow: None,
             display: None,
             cursor: None,
+            position: None,
+            position_dirty: false,
+            last_position_save: Instant::now(),
+            last_saved_monitor: None,
         }
     }
 
@@ -60,6 +74,18 @@ impl App {
                 winit::dpi::LogicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT),
             )
         };
+        let resolved = position::restore_or_cascade(gl_window.window(), self.args.display_id);
+        gl_window.window().set_outer_position(resolved.position);
+        self.position = Some(resolved.position);
+        if let Some(saved) = &resolved.saved {
+            match position::save(self.args.display_id, saved) {
+                Ok(()) => {
+                    self.last_saved_monitor = saved.monitor.clone();
+                    self.last_position_save = Instant::now();
+                }
+                Err(error) => eprintln!("lil-d: position save failed: {error}"),
+            }
+        }
         let gl = unsafe {
             glow::Context::from_loader_function(|s| {
                 let cs = std::ffi::CString::new(s).expect("gl proc name");
@@ -71,7 +97,7 @@ impl App {
         let display = {
             let (loader, userdata) = gl_window.gl_loader();
             let path = display::resolve_path(&self.args.display_lib);
-            display::Display::load(&path, loader, userdata, &self.args.display_id)
+            display::Display::load(&path, loader, userdata, self.args.display_id)
                 .expect("display-lib load")
         };
 
@@ -114,7 +140,7 @@ impl App {
         };
 
         // 2. egui: the console.
-        let display_id = self.args.display_id.clone();
+        let display_id = self.args.display_id;
         let format_on = self.state.format_on;
         let mut action = ConsoleAction::default();
         {
@@ -124,7 +150,7 @@ impl App {
                 return;
             };
             egui_glow.run(gl_window.window(), |ui| {
-                action = console::draw(ui, &display_id, format_on, console_height);
+                action = console::draw(ui, display_id, format_on, console_height);
             });
         }
         if action.toggle_power {
@@ -163,6 +189,35 @@ impl App {
             gl_window.window().request_redraw();
         }
     }
+
+    /// Save the last window position. Monitor changes and forced saves bypass
+    /// the normal write throttle.
+    fn flush_position(&mut self, force: bool) {
+        if !self.position_dirty {
+            return;
+        }
+        let Some(gl_window) = self.gl_window.as_ref() else {
+            return;
+        };
+        let Some(saved) = self
+            .position
+            .and_then(|position| position::saved_from_window(gl_window.window(), position))
+        else {
+            return;
+        };
+        let monitor_changed = saved.monitor != self.last_saved_monitor;
+        if !position::should_save(force, monitor_changed, self.last_position_save.elapsed()) {
+            return;
+        }
+        match position::save(self.args.display_id, &saved) {
+            Ok(()) => {
+                self.last_saved_monitor = saved.monitor;
+                self.position_dirty = false;
+                self.last_position_save = Instant::now();
+            }
+            Err(error) => eprintln!("lil-d: position save failed: {error}"),
+        }
+    }
 }
 
 impl ApplicationHandler for App {
@@ -187,7 +242,17 @@ impl ApplicationHandler for App {
         }
 
         match event {
-            WindowEvent::CloseRequested | WindowEvent::Destroyed => event_loop.exit(),
+            WindowEvent::CloseRequested => {
+                self.flush_position(true);
+                event_loop.exit();
+            }
+            WindowEvent::Destroyed => event_loop.exit(),
+            WindowEvent::Moved(position) => {
+                self.position = Some(position);
+                self.position_dirty = true;
+                self.flush_position(false);
+            }
+            WindowEvent::Focused(false) => self.flush_position(true),
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor = Some(position);
             }
@@ -216,9 +281,11 @@ impl ApplicationHandler for App {
         if let Some(gl_window) = self.gl_window.as_ref() {
             gl_window.window().request_redraw();
         }
+        self.flush_position(false);
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        self.flush_position(true);
         if let Some(egui_glow) = self.egui_glow.as_mut() {
             egui_glow.destroy();
         }
