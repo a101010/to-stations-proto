@@ -39,17 +39,11 @@ Third-party libraries are built/installed to an external prefix (for example `C:
 
 ## Later increments
 
-### format-menu
-Add a three-dot menu to the format manager, drawn in the upper left over all formats, with one entry per format.
-- **Depends on:** none.
-- **Minimal test:** the menu switches the active format.
-- **Status:** in progress.
-
 ### format-chooser-format
-Create the format-chooser-format: a format for choosing formats.
-- **Depends on:** format-menu.
+Create the format-chooser-format: a normal format that presents the other available formats and switches to the chosen one.
+- **Depends on:** none.
 - **Minimal test:** a format can be chosen from the format.
-- **Status:** todo.
+- **Status:** in progress.
 
 ### paws
 Create the game-controller window application (`paws`): a (Slint) window with a virtual controller that can be bound to a game controller.

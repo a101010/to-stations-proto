@@ -235,3 +235,10 @@ Give every display instance a unique numeric display id and use it for all forma
 - **Depends on:** none.
 - **Minimal test:** run two `lil-d` instances with display ids 0 and 1; clicking one format window changes only that display's format; positions and formats restore after restart; a duplicate display id exits with an error.
 - **Note:** the manual click-independence, saved-format restore, and duplicate-`lil-d` dialog checks remain for the user.
+
+### format-menu
+Add a three-dot menu to the format manager, drawn in the upper left over all formats, with one entry per format. Added the menu overlay, format-row selection through the existing `Select` path, active-format highlighting, top-left text drawing, and menu layout/hit-test tests.
+- **Completed:** 2026-11-10 16:55:09.
+- **Depends on:** none.
+- **Minimal test:** open the menu, choose a format, and verify the display switches to it.
+- **Note:** the manual two-display, outside-click/Next, and saved-format restore checks remain for the user.

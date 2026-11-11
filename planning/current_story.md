@@ -1,169 +1,188 @@
-# Current story: format-menu
+# Current story: format-chooser-format
 
 This file is the detailed, living plan for the one active story. It is rewritten for each story. The backlog in `backlog.md` holds all work and the per-story status.
 
 ## Story
 
-Add a three-dot menu to the format manager, drawn in the upper left over the active format, with one entry per format from `contracts/formats.toml`.
+Create the format-chooser format: a normal display format that presents the other available formats and switches to the chosen one.
 
 - **Depends on:** none.
-- **Minimal test:** open the menu, choose a format, and verify the display switches to it.
+- **Minimal test:** open the format chooser, choose a format, and verify the display switches to it.
 
 ## Context
 
-- The display library owns the format manager and all format-manager DDS.
-- `FormatManager` renders the active format for window 0 and publishes `Next` on clicks.
-- `format-ctl-service` already handles `Select`; no controller change is required.
-- `format-view-service` already persists and forwards the resulting assignments.
-- `contracts/formats.toml` already provides the ordered format names.
-- The display library already has HarfBuzz text rendering and GL scissor/clear, so the menu can be drawn without a new mesh or UI toolkit.
+- The display libraries have a three-dot menu over every format.
+- Formats are renderers implementing `Format` in `rust/lib/display-lib/src/formats.rs`.
+- The format manager handles menu input and publishes `Next` for clicks inside the format window.
+- There is no way for an active format to receive pointer input or request a format selection.
+- `contracts/formats.toml` is the shared ordered list used by the menu, controller, and view service.
+- Selecting a format already works end to end: the display library publishes `Select`, the controller applies it, and the view service persists it.
 
 ## Decisions
 
-1. **The menu belongs to the display library**, not `lil-d` or the controller.
-2. **One menu per format window.** The current single-window driver uses window 0; the state and layout take a window id so `big-d` can reuse them later.
-3. **Menu entries are the ordered names from `contracts/formats.toml`**, the same order used to build the format renderers.
-4. **Selection publishes a `Select` event** on `FormatManagerInputTopic`; `Next` remains the behavior for clicks outside the menu when it is closed.
-5. **The menu button is always visible** in the upper-left of each rendered format window, over every format.
-6. **The menu is drawn after the format renderer**, using scissor clears for opaque panel/button/active-row backgrounds and the existing text renderer for labels.
-7. **No new DDS topics, ABI functions, or service changes.** The controller and view service already support `Select`.
+1. **The chooser is a normal format**, named `format-chooser`, added last in `contracts/formats.toml`.
+2. **It lists the other formats**, excluding itself, in `formats.toml` order.
+3. **It renders a title and a grid of large format tiles.**
+4. **Clicking a tile publishes `Select`** for that format; clicking the background is consumed so it does not fall through to `Next`.
+5. **The format manager delegates input to the active format after handling the three-dot menu.**
+6. **No new DDS topics, services, or ABI functions.** The existing `Select` path and format persistence are reused.
+7. **Extract shared 2D helpers** (`Rect`, clear-to-color, size scale) into a small `ui` module used by both `format_menu` and `format_chooser`.
 
-## Files and modules
+## New active-format input API
 
-- New: `rust/lib/display-lib/src/format_menu.rs`
-- `rust/lib/display-lib/src/lib.rs` — add `mod format_menu`, route mouse events.
-- `rust/lib/display-lib/src/format_manager.rs` — own the menu, draw it after the active format, expose menu-aware click handling.
-- `rust/lib/display-lib/src/format_source.rs` — add `send_select`.
-- `rust/lib/display-lib/src/text.rs` — add top-left text drawing and text measurement; share the font path constant.
-- `rust/lib/display-lib/src/formats/hello_world.rs` — use the shared font path constant.
-- `planning/architecture.md` — document the menu and the `format_menu` module.
-- `planning/backlog.md`, `planning/completed_stories.md`, `planning/current_story.md` — bookkeeping.
-
-## Menu behavior
-
-### Layout
-
-Use physical pixels from the format region, scaled from the region height (reference height 720 px, clamped to a reasonable range):
-
-- Button: upper-left inset, approximately 40 × 40 px at reference scale.
-- Button background: dark opaque rectangle.
-- Button icon: three horizontal dots rendered as the font string `"..."`, centered.
-- Panel: below the button, one row per format.
-- Row height: approximately 40 px at reference scale.
-- Panel width: wide enough for the labels, clamped to the format region.
-- Padding: approximately 8–12 px.
-- Active format row: lighter background to show the current selection.
-- Panel/button backgrounds are drawn with `gl.scissor` + `gl.clear(COLOR_BUFFER_BIT)`.
-- No hover state: the display application forwards mouse-button events but not cursor movement.
-
-### Interaction
-
-Left-button press only:
-
-- **Closed menu + button click:** open the menu; consume the click.
-- **Open menu + button click:** close the menu; consume the click.
-- **Open menu + format row click:** publish `Select(window, format)` and close the menu; consume the click.
-- **Open menu + click anywhere else:** close the menu; consume the click so it does not also advance the format.
-- **Closed menu + click in the format window but outside the button:** preserve the existing `Next(window)` behavior.
-- **Right/middle clicks:** ignored.
-
-The menu is per format window. The active format is taken from the format manager’s assignment for that window, falling back to the first format.
-
-## Rendering and text support
-
-### `text.rs`
-
-Add:
-
-- `text_width(text, font_size_px) -> f32`
-- `draw_at(gl, region_width, region_height, text, color, font_size_px, left, top)`
-
-`draw` keeps its current centered behavior for the hello-world greeting. `draw_at` uses the same glyph atlas, shader, and region viewport, but starts the text at a caller-provided top-left point. Factor the vertex-building helper so both centered and left-aligned layout share the glyph positioning code.
-
-Move the font path into a shared constant:
+In `rust/lib/display-lib/src/formats.rs`:
 
 ```rust
-pub(crate) const FONT_FILE: &str = "fonts/FiraSans-Regular.ttf";
-```
+pub(crate) enum FormatInput {
+    Ignored,
+    Consumed,
+    Select(String),
+}
 
-Use it from both `hello_world.rs` and `format_menu.rs`.
+pub(crate) trait Format {
+    fn name(&self) -> &'static str;
+    fn render(...);
 
-### `format_menu.rs`
-
-Keep the pure layout/state separate from the GL renderer:
-
-- `MenuNames`: ordered format names.
-- `MenuState`: open/closed state and per-window state.
-- `MenuLayout`: button rect, panel rect, and row rects computed from the region and names.
-- `MenuAction`: `Ignored`, `Consumed`, or `Select(format)`.
-- `MenuRenderer`: owns a `TextRenderer`; draws the button, panel, active row, dots, and labels.
-
-Pure layout/hit-test functions must be unit-testable without a GL context.
-
-### `format_manager.rs`
-
-- Add a `format_menu::FormatMenu` field.
-- Create it in `FormatManager::new` using the assets root and ordered format names.
-- After rendering the active format, render the menu overlay.
-- Add a menu-aware click method returning:
-
-```rust
-enum FormatAction {
-    Next { window: i32 },
-    Select { window: i32, format: String },
+    fn mouse_button(
+        &mut self,
+        region: (i32, i32, i32, i32),
+        x: i32,
+        y: i32,
+    ) -> FormatInput {
+        let _ = (region, x, y);
+        FormatInput::Ignored
+    }
 }
 ```
 
-The `with_region` test constructor can leave the menu absent so existing tests continue to work.
+Existing formats keep the default `Ignored` behavior, so click-to-`Next` is unchanged for them.
 
-### `format_source.rs`
+## Format manager routing
 
-- Keep `send_next`.
-- Add `send_select(window, format, display_id)` using `FORMAT_COMMAND_SELECT`.
-- The existing `Display::mouse_button` routes `FormatAction` to the correct send method.
+`rust/lib/display-lib/src/format_manager.rs`:
 
-## Controller and view service
+1. Menu handling runs first, exactly as now.
+2. If the menu ignores the click and the point is inside the format window:
+   - find the active format for that window;
+   - call `active_format.mouse_button(region, x, y)`;
+   - map the result:
+     - `Ignored` → existing `FormatAction::Next`
+     - `Consumed` → no DDS action
+     - `Select(name)` → `FormatAction::Select`
+3. If no active format is found, retain the existing `Next` fallback.
 
-No service changes are required:
+Add a small active-format-name helper used by both `render` and `mouse_button`.
 
-- `format-ctl-service::apply` already handles `FORMAT_COMMAND_SELECT` and validates the format name.
-- `format-view-service` already persists and republishes accepted assignments.
+## Shared `ui` module
+
+New `rust/lib/display-lib/src/ui.rs`:
+
+- `Rect { x, y, w, h }` with `contains`.
+- `clear_rect(gl, framebuffer_height, rect, color)` using scissor + color clear.
+- `scale_for_height(height) -> f32` using the 720 px reference and clamped range.
+
+Update `format_menu.rs` to use these helpers instead of its local copies. This keeps the chooser and menu geometry consistent.
+
+## Format chooser
+
+New `rust/lib/display-lib/src/formats/format_chooser.rs`.
+
+### Construction
+
+```rust
+FormatChooser::new(gl, assets_root, all_format_names)
+```
+
+- Filter out `"format-chooser"` from the choices.
+- Load the shared `TextRenderer` font (`text::FONT_FILE`).
+
+### Layout
+
+Pure `ChooserLayout` based on the region and choice count:
+
+- Reserve the upper-left menu-button area; start the chooser content below it.
+- Title: `Choose a format`.
+- Grid:
+  - 1 choice: one tile.
+  - 2 choices: two columns.
+  - 3+ choices: two columns, wrapping into rows.
+- Tiles fill the available content area with margins and gaps; clamp to the format region.
+- Tile labels are the format names, centered.
+- Layout and hit-testing share the same pure layout function.
+
+### Render
+
+- Clear the whole region to the chooser background.
+- Set the region viewport and disable depth testing.
+- Draw the title.
+- Draw each tile background with `ui::clear_rect`.
+- Draw each tile label with `TextRenderer::draw_at`.
+- The normal three-dot menu is drawn after the chooser by `FormatManager`.
+
+### Input
+
+- A left press on a tile returns `FormatInput::Select(name)`.
+- A left press anywhere else inside the chooser returns `FormatInput::Consumed`.
+- The menu still takes precedence because `FormatManager` handles it first.
+
+## Registry and contracts
+
+`contracts/formats.toml`:
+
+```toml
+[[formats]]
+name = "hello-world"
+
+[[formats]]
+name = "default"
+
+[[formats]]
+name = "format-chooser"
+```
+
+`rust/lib/display-lib/src/formats.rs`:
+
+- Add `pub(crate) mod format_chooser;`.
+- Add registry arm:
+  - `"format-chooser" => Box::new(FormatChooser::new(gl, assets_root, formats.names())?)`.
+
+The menu and view-service validation pick up the new format automatically.
 
 ## Tests
 
 Automated:
 
-- Menu layout: button, panel, and row rects stay inside the format region.
-- Button click toggles open/closed.
-- Row click returns `Select` with the correct format name and closes the menu.
-- Click outside an open menu closes it and is consumed.
-- Click in the format window when the menu is closed still returns `Next`.
-- Right/middle clicks are ignored.
-- Menu names preserve `formats.toml` order.
-- Text layout helper places text at the requested top-left origin and `text_width` scales with font size.
-- Existing format manager assignment tests still pass.
+- `ui::Rect::contains` boundary tests.
+- Chooser choices exclude `format-chooser` and preserve contract order.
+- Chooser tile layout stays inside the region.
+- Tile click returns `Select` with the correct format name.
+- Background click returns `Consumed`.
+- `FormatManager` delegates:
+  - active format `Ignored` → `Next`;
+  - active format `Consumed` → no action;
+  - active format `Select` → `Select` action.
+- Existing menu/text/format-manager tests still pass.
 
 Manual:
 
 1. Launch the fleet.
-2. Verify the three-dot button is visible in the upper-left over both `hello-world` and `default`.
-3. Open the menu; verify both format entries appear in contract order.
-4. Select `default`; verify the display changes, the menu closes, and `dds-echo` shows a `Select` input event with the correct display id.
-5. Select `hello-world` the same way.
-6. Click outside the menu while it is open; verify it closes without changing the format.
-7. With the menu closed, click elsewhere in the format window; verify the existing `Next` behavior.
-8. Repeat on the second display; verify only that display changes.
-9. Restart the view service; verify the selected format is restored.
+2. Open the three-dot menu; verify `format-chooser` is listed.
+3. Select `format-chooser`; verify the chooser appears with tiles for `hello-world` and `default`.
+4. Click `default`; verify the display switches and `dds-echo` shows the `Select` input and resulting control/view samples.
+5. Open the menu while the chooser is active; verify the menu still works.
+6. Click the chooser background; verify it does not advance to `Next`.
+7. Repeat on the second display; verify only that display changes.
+8. Restart `format-view-service`; verify the chosen format is restored.
 
 ## Acceptance
 
-- The three-dot menu is drawn over every format in the upper-left.
-- The menu lists exactly one entry per format from `contracts/formats.toml`.
-- Selecting an entry changes the active format for that display only.
-- The menu closes on selection and on outside clicks.
-- Existing click-to-Next behavior is preserved.
-- The controller/view service persist the selection without changes.
-- No ABI or topic changes are required.
+- `format-chooser` appears in `contracts/formats.toml` and the format menu.
+- The chooser lists every other format in contract order and excludes itself.
+- Clicking a tile switches that display to the chosen format.
+- Background clicks do not fall through to `Next`.
+- The menu still takes precedence over the chooser’s input.
+- No DDS, service, or ABI changes are needed.
+- The chosen format persists through the existing view-service state file.
 
 ## Verification
 
@@ -179,42 +198,31 @@ One manual two-display run; no screenshots and no repeated UI runs.
 
 ## Risks
 
-- **GL state:** the menu must set its own viewport, scissor, depth, and blend state after arbitrary format renderers.
-- **Layout drift:** rendering and hit-testing must share the same pure layout function.
-- **Text baseline:** top-left text placement needs a small visual adjustment for font bearings; verify manually.
-- **Small windows:** clamp the panel to the region; no scrolling in this story.
-- **Per-window future:** only window 0 renders today; keep the menu state keyed by window where practical.
-- **Click consumption:** an open-menu outside click must not also trigger `Next`.
-- **Font duplication:** use one shared font path constant rather than duplicating it in format modules.
+- **Input ordering:** menu input must run before active-format input.
+- **Layout drift:** render and hit-test must use the same `ChooserLayout`.
+- **Menu overlap:** reserve the upper-left menu-button area in the chooser layout.
+- **Self-selection:** filter `format-chooser` from its own choices.
+- **Empty choices:** handle a format list containing only the chooser without panicking.
+- **GL state:** the chooser clears the whole region and must set its viewport/depth state before text.
+- **Borrowing:** `FormatManager::mouse_button` must clone the active name before mutably borrowing the format list.
+- **Persistence:** the view service must accept the new format name from `formats.toml`; no code change is expected.
 
 ## Files touched
 
-- `rust/lib/display-lib/src/format_menu.rs` (new)
+- `contracts/formats.toml`
 - `rust/lib/display-lib/src/lib.rs`
+- `rust/lib/display-lib/src/ui.rs` (new)
+- `rust/lib/display-lib/src/format_menu.rs`
 - `rust/lib/display-lib/src/format_manager.rs`
-- `rust/lib/display-lib/src/format_source.rs`
-- `rust/lib/display-lib/src/text.rs`
-- `rust/lib/display-lib/src/formats/hello_world.rs`
+- `rust/lib/display-lib/src/formats.rs`
+- `rust/lib/display-lib/src/formats/format_chooser.rs` (new)
 - `planning/architecture.md`
 - `planning/backlog.md`
 - `planning/completed_stories.md`
 - `planning/current_story.md`
 
-## Result
-
-Implemented and verified by tests/build:
-
-- Added `format_menu` with the three-dot button, panel, format rows, active-format highlight, and pure layout/hit-test state.
-- Extended `TextRenderer` with `draw_at` and `text_width`, plus a shared font path constant.
-- `FormatManager` now owns the menu, draws it over the active format, and produces `Next`/`Select` actions.
-- `format_source` sends `Select` events; the controller and view service persist them without changes.
-- Added menu layout/state tests and text-layout tests.
-- `cargo test`/`build.ps1 -Test` pass; release `build.ps1` deploys.
-- A live launch opened the menu over `hello-world`, and choosing `default` wrote `format = "default"` to the display's view-service state file.
-- Remaining manual checks: two-display independence, outside-click/Next behavior, and saved-format restore after restart.
-
 ## Bookkeeping
 
-- `multi-lil-d` was completed at `2026-11-10 16:13:29` and moved to `completed_stories.md` under "Later increments".
-- `format-menu` is `in progress` in `backlog.md`.
-- Do not move `format-menu` to `completed_stories.md` until the user asks to plan the next story.
+- `format-menu` was completed at `2026-11-10 16:55:09` and moved to `completed_stories.md` under "Later increments".
+- `format-chooser-format` is `in progress` in `backlog.md`; its dependency on the completed `format-menu` was removed.
+- Do not move `format-chooser-format` to `completed_stories.md` until the user asks to plan the next story.
