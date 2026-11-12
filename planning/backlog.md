@@ -9,35 +9,7 @@ Conventions:
 * **Status** is one of `todo` or `in progress`; a story moves to `completed_stories.md` only when the user asks to plan the next story. The active story's detailed plan lives in `current_story.md`.
 * IDs, topic names, and file paths follow `architecture.md`.
 
-## Increment 1 - Rust MVP
-
-**Goal.** The minimum viable code product: the `rust` hello_world constellation end to end on one machine.
-
-**Scope.**
-* Language: Rust only. C++ and hybrid are later increments.
-* DDS: Eclipse Cyclone DDS; all topics over IPv6 multicast on the `StationsDDS` loopback adapter; shared IDL in `DDS/`.
-* Rendering: winit + glutin/glow + egui.
-* The model service and the view service are separate: the model publishes the greeting and the attitude (a 23.5 degree tilt, as a quaternion; one revolution every twelve minutes is added later); the view publishes the display message.
-* Earth projection: a cube map sampled on a sphere, oriented by the attitude quaternion, lit from the upper right.
-* Font handling (loading and rendering the greeting) is in scope; format text uses HarfBuzz's experimental GPU library (`libharfbuzz-gpu`).
-* Small display (`lil-d`): one square format window plus a console area with a single power button, a unique numeric `--display-id <id>`, and a remembered per-display window position.
-* The display library hosts a default format and the hello-world format and a format manager that switches the active format on a click in the region delegated to it.
-* Input handling is added per feature; the first is the format-manager click.
-* Out of scope: the C++/hybrid configurations and their launch scripts; joystick control service and `paws`; the format-manager controller service, the three-dot menu, and the format-chooser-format; `big-d` and `tentacles`; real game-controller binding; per-display views.
-
-**Prerequisites** (environment, installed once, not built by `scripts/build.ps1`):
-* MSVC (Visual Studio Build Tools) and CMake.
-* Rust toolchain `stable-x86_64-pc-windows-msvc`.
-* A short repository path on Windows (`scripts/subst-repo.ps1`; see `architecture.md`, "Path length").
-* Eclipse Cyclone DDS C core (11.x) and the Microsoft loopback adapter named `StationsDDS` with IPv6 multicast.
-* The to-stations fork of `cyclonedds-rust` (`https://github.com/a101010/cyclonedds-rust`, branch `multifile`, rev `952906b`), consumed as a pinned git dependency (`planning/cyclonedds-build-plan.md`).
-* HarfBuzz 14.6.0 with the experimental GPU library (`libharfbuzz-gpu`), installed to the external prefix (see the `harfbuzz` story).
-
-Third-party libraries are built/installed to an external prefix (for example `C:\Libraries`), never committed. Each install story records its component in `docs/versions.md`.
-
-**Done when.** `launch-rust.ps1` brings up the model service, the view service, and `lil-d` from `build/deploy`; `lil-d` shows the tilted, cube-mapped earth lit from the upper right with the greeting text rendered in the loaded font, its power button works, and the format manager switches between the default and hello-world formats. `dds-echo` observes every topic in the registry, `--topics` and `build/topics.md` match `contracts/`, and `cleanup.ps1` stops everything.
-
-## Later increments
+## Stories
 
 ### paws
 Create the game-controller window application (`paws`): a Slint window with an Xbox-style virtual controller, local stick and button interaction, and a reserved controller-selection dropdown that shows `N/A` until binding exists. Add it to the Rust build/deploy and launch/cleanup scripts. Game-controller binding, station identity, and DDS remain later work.
@@ -45,16 +17,33 @@ Create the game-controller window application (`paws`): a Slint window with an X
 - **Minimal test:** `launch-rust.ps1` brings up the `paws` window showing the virtual controller; sticks move and buttons highlight.
 - **Status:** in progress.
 
+### xbox-controller
+Connect an xbox-controller to the paws app. Allow a 'virtual' mode (replacing N/A in the dropdown) and a controller id for any connected xbox-style controller. The paws window controls reflect the connected controller, or can be controlled by mouse if in virtual mode. DDS connectivity remains out of scope.
+
+### paws-format-ctl
+DDS connectivity for the paws app. Show a virtual cursor controlled by the right joystick. An 'A' button press acts the same as a mouse right-click. D-pad moves the current icon selection in the format-chooser-format. The first format is selected by default. paws sends high-level format independent commands to the format manager controller service. The paws app is started with a display id to map it to the appropriate controller services.
+
+### hello-ctl-service
+Create the hello_world control service (`hello-ctl-service`): consume input events from the display libraries; user rotations and changes of the light vector and color, specific controls to be refined later. Also allow control via paws.
+- **Depends on:** paws-format-ctl
+- **Minimal test:** input events change the displayed world.
+- **Status:** todo.
+
+### paws-two
+Create a game controller window application (`paws-two`): a Slint windows with a saitek-x-52 virtual controller. DDS and real controller connectivity are out of scope.
+
+### saitek-x-52
+Connect a saitek x-52 to the paws-two app. Allow a 'virtual' mode (replacing N/A in the dropdown) and a controller id for any connected saitek x-52 controller. DDS connectivity remains out of scope.
+- **Depends on:** paws-two
+
+### paws-two-ctrl
+Determine control bindings to the format-chooser and hello-world formats for paws-two. After this story, any change that affects controller behavior should determine a common abstract command and a binding to that command for both paws and paws2.
+- **Depends on:** paws-two
+
 ### random-greeting
 Change `hello-service` to choose greetings randomly from its Latin-script list instead of advancing through a fixed sequence; avoid repeating the same greeting twice in a row where practical.
 - **Depends on:** none.
 - **Minimal test:** run `hello-service` and observe greetings change over the configured interval in a non-fixed order.
-- **Status:** todo.
-
-### hello-ctl-service
-Create the hello_world control service (`hello-ctl-service`): consume input events from the display libraries; user rotations and changes of the light vector and color, to be refined later.
-- **Depends on:** none.
-- **Minimal test:** input events change the displayed world.
 - **Status:** todo.
 
 ### big-d
@@ -100,9 +89,17 @@ Extend the `dds-echo` Send form to edit and send sequence-bearing topics, includ
 - **Minimal test:** add a window-assignment element in the Send form, publish it, and verify the sample carries the sequence.
 - **Status:** todo.
 
-Not yet broken into stories:
+## Proto-stories
+Here are some backlog items not yet broken into stories.
 * C++ mirror of the Rust libraries, tools, and apps and the `c++` configuration.
 * Hybrid configuration and `launch-hybrid.ps1`; `launch-cpp.ps1`.
 * Remaining top-level module IDL (control, joystick, display) and the full topic registry (input, control, joystick, format window/mapping).
-* Joystick control service and real game-controller binding.
-* Per-display views.
+* more formats
+  * A top-down map view
+  * A waypoint manager
+  * Alpha-numeric entry format overlay (for waypoint mgr and text message format and anything else that needs it)
+  * A text message format
+  * Turret targeting view?
+* A vehicle platform concept (multi-turrent tank-like? helecopter? ship? space ship?)
+* An 'out-the-window' view for big-d, and maybe even lil-d
+
