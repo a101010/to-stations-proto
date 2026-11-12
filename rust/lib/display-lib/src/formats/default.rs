@@ -155,6 +155,14 @@ impl crate::formats::Format for Default {
         "default"
     }
 
+    fn title(&self) -> &'static str {
+        "Default"
+    }
+
+    fn icon_file(&self) -> &'static str {
+        "icons/default.png"
+    }
+
     /// Render into the region (physical pixels, top-left origin).
     /// `framebuffer_height` is the whole framebuffer height.
     fn render(

@@ -6,3 +6,6 @@ name = "hello-world"
 
 [[formats]]
 name = "default"
+
+[[formats]]
+name = "format-chooser"

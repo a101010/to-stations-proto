@@ -4,7 +4,7 @@
 //! format events on `FormatManagerInputTopic`. The display application knows
 //! nothing about these topics.
 
-use format_list::{FORMAT_COMMAND_NEXT, FORMAT_COMMAND_SELECT};
+use format_list::FORMAT_COMMAND_SELECT;
 use stations_dds::cyclonedds::{DataReader, DataWriter};
 use stations_dds::dds::Node;
 use stations_dds::format_manager::{FormatManagerInputTopic, FormatManagerViewTopic};
@@ -36,11 +36,6 @@ impl FormatSource {
                 }
             }
         }
-    }
-
-    /// Publish a logical `Next` event for a format window.
-    pub(crate) fn send_next(&self, window: i32, display_id: Option<u32>) {
-        self.send(window, FORMAT_COMMAND_NEXT, String::new(), display_id);
     }
 
     /// Publish a logical `Select` event for a format window.

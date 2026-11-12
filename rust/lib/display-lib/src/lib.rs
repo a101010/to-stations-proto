@@ -13,8 +13,10 @@ mod format_manager;
 mod format_menu;
 mod format_source;
 mod formats;
+mod icon;
 mod shader;
 mod text;
+mod ui;
 mod view;
 
 use std::cell::RefCell;
@@ -118,8 +120,8 @@ impl Display {
     }
 
     /// Forward a mouse button event (physical pixels, top-left origin). A left
-    /// press may toggle the menu, select a format, or publish a logical `Next`
-    /// event.
+    /// press may toggle the menu, select a format, or be consumed by the active
+    /// format.
     fn mouse_button(&mut self, x: i32, y: i32, button: i32, pressed: bool) {
         if button != 0 || !pressed {
             return;
@@ -129,9 +131,6 @@ impl Display {
         };
         if let Some(format_source) = &self.format_source {
             match action {
-                format_manager::FormatAction::Next { window } => {
-                    format_source.send_next(window, self.display_id);
-                }
                 format_manager::FormatAction::Select { window, format } => {
                     format_source.send_select(window, &format, self.display_id);
                 }

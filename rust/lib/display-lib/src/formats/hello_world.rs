@@ -58,6 +58,14 @@ impl crate::formats::Format for HelloWorld {
         "hello-world"
     }
 
+    fn title(&self) -> &'static str {
+        "Hello World"
+    }
+
+    fn icon_file(&self) -> &'static str {
+        "icons/hello-world.png"
+    }
+
     /// Render into the region (physical pixels, top-left origin).
     /// `framebuffer_height` is the whole framebuffer height.
     fn render(
