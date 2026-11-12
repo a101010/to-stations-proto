@@ -242,3 +242,10 @@ Add a three-dot menu to the format manager, drawn in the upper left over all for
 - **Depends on:** none.
 - **Minimal test:** open the menu, choose a format, and verify the display switches to it.
 - **Note:** the manual two-display, outside-click/Next, and saved-format restore checks remain for the user.
+
+### format-chooser-format
+Create the format-chooser format: a normal format that presents the other formats in a 4x4 grid of 64x64 CRT-green icon-and-title tiles and switches to the chosen one. Added the chooser, its PNG icons, shared `ui`/`icon` modules, the single `Formats` menu row that is hidden while the chooser is active, and the active-format input API; removed display-library `Next` generation while leaving external `Next` support in the controller.
+- **Completed:** 2026-11-12 10:46:13.
+- **Depends on:** none.
+- **Minimal test:** open the three-dot menu, choose `Formats`, choose a format tile, and verify the display switches to it.
+- **Note:** the manual two-display, chooser/menu, and saved-format restore checks remain for the user.

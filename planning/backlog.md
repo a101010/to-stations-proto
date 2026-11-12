@@ -39,17 +39,11 @@ Third-party libraries are built/installed to an external prefix (for example `C:
 
 ## Later increments
 
-### format-chooser-format
-Create the format-chooser-format: a normal format that presents the other available formats in a 4x4 grid of 64x64 CRT-green icon-and-title tiles and switches to the chosen one. The three-dot menu becomes a single `Formats` row that selects the chooser and is hidden while the chooser is active; local click-to-`Next` is removed.
-- **Depends on:** none.
-- **Minimal test:** open the three-dot menu, choose `Formats`, choose a format tile, and verify the display switches to it.
-- **Status:** in progress.
-
 ### paws
-Create the game-controller window application (`paws`): a (Slint) window with a virtual controller that can be bound to a game controller.
+Create the game-controller window application (`paws`): a Slint window with an Xbox-style virtual controller, local stick and button interaction, and a reserved controller-selection dropdown that shows `N/A` until binding exists. Add it to the Rust build/deploy and launch/cleanup scripts. Game-controller binding, station identity, and DDS remain later work.
 - **Depends on:** none.
-- **Minimal test:** the window shows a virtual controller.
-- **Status:** todo.
+- **Minimal test:** `launch-rust.ps1` brings up the `paws` window showing the virtual controller; sticks move and buttons highlight.
+- **Status:** in progress.
 
 ### random-greeting
 Change `hello-service` to choose greetings randomly from its Latin-script list instead of advancing through a fixed sequence; avoid repeating the same greeting twice in a row where practical.
