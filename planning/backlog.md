@@ -40,9 +40,9 @@ Third-party libraries are built/installed to an external prefix (for example `C:
 ## Later increments
 
 ### format-chooser-format
-Create the format-chooser-format: a normal format that presents the other available formats and switches to the chosen one.
+Create the format-chooser-format: a normal format that presents the other available formats in a 4x4 grid of 64x64 CRT-green icon-and-title tiles and switches to the chosen one. The three-dot menu becomes a single `Formats` row that selects the chooser and is hidden while the chooser is active; local click-to-`Next` is removed.
 - **Depends on:** none.
-- **Minimal test:** a format can be chosen from the format.
+- **Minimal test:** open the three-dot menu, choose `Formats`, choose a format tile, and verify the display switches to it.
 - **Status:** in progress.
 
 ### paws
