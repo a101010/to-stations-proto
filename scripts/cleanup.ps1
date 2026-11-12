@@ -43,7 +43,7 @@ if ($displays) {
 
 # Every application launched by a configuration launch script. Later stories
 # append the services and the other displays as they are added.
-$apps = @('lil-d', 'hello-service', 'hello-view-service', 'format-ctl-service', 'format-view-service')
+$apps = @('lil-d', 'paws', 'hello-service', 'hello-view-service', 'format-ctl-service', 'format-view-service')
 
 foreach ($name in $apps) {
     $procs = Get-Process -Name $name -ErrorAction SilentlyContinue

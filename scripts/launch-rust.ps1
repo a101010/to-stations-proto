@@ -5,11 +5,12 @@ Launches the Rust configuration.
 .DESCRIPTION
 Starts the applications of the Rust configuration from build/deploy: the
 hello_world model service, the view service, one format-manager service pair per
-display, and the small displays (lil-d).
+display, the small displays (lil-d), and the paws virtual-controller window.
 
 Every display has a unique numeric display id. The same id is given to its
 format controller, format view service, and lil-d. After everything starts, the
-lil-d windows are raised above the service console windows.
+lil-d windows are raised above the service console windows, then paws is opened
+on top.
 
 All participants read the shared DDS configuration; this script sets
 CYCLONEDDS_URI before starting them.
@@ -43,7 +44,8 @@ $view = Join-Path $bin 'hello-view-service.exe'
 $formatCtl = Join-Path $bin 'format-ctl-service.exe'
 $formatView = Join-Path $bin 'format-view-service.exe'
 $display = Join-Path $bin 'lil-d.exe'
-if (-not (Test-Path $model) -or -not (Test-Path $view) -or -not (Test-Path $formatCtl) -or -not (Test-Path $formatView) -or -not (Test-Path $display) -or -not (Test-Path $config)) {
+$paws = Join-Path $bin 'paws.exe'
+if (-not (Test-Path $model) -or -not (Test-Path $view) -or -not (Test-Path $formatCtl) -or -not (Test-Path $formatView) -or -not (Test-Path $display) -or -not (Test-Path $paws) -or -not (Test-Path $config)) {
     throw "Not built: run scripts\build.ps1 first."
 }
 
@@ -105,4 +107,8 @@ foreach ($process in $displayProcesses) {
     Show-DisplayWindow $process
 }
 
-Write-Host "Started hello-service, hello-view-service, and lil-d for display ids: $($DisplayId -join ', ')"
+$pawsProcess = Start-Process -FilePath $paws -PassThru
+Start-Sleep -Milliseconds 300
+Show-DisplayWindow $pawsProcess
+
+Write-Host "Started hello-service, hello-view-service, lil-d for display ids: $($DisplayId -join ', '), and paws"

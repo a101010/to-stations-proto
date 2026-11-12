@@ -1,0 +1,295 @@
+import { ComboBox } from "std-widgets.slint";
+
+component Stick inherits Rectangle {
+    in-out property <float> value-x: 0;
+    in-out property <float> value-y: 0;
+    callback drag(length, length, length);
+    callback released();
+    property <bool> dragging: false;
+    property <length> knob-size: min(root.width, root.height) * 0.44;
+    property <length> max-offset: max(0px, (root.width - root.knob-size) / 2 - 6px);
+
+    background: #15171b;
+    border-radius: min(self.width, self.height) / 2;
+    border-width: 3px;
+    border-color: #3a4048;
+
+    Rectangle {
+        width: root.knob-size;
+        height: self.width;
+        x: (parent.width - self.width) / 2 + root.value-x * root.max-offset;
+        y: (parent.height - self.height) / 2 + root.value-y * root.max-offset;
+        border-radius: self.width / 2;
+        background: root.dragging ? #6fc2ff : #3a4048;
+        border-width: 2px;
+        border-color: root.dragging ? #a9dfff : #4b535d;
+    }
+
+    TouchArea {
+        width: parent.width;
+        height: parent.height;
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.down) {
+                root.dragging = true;
+                root.drag(
+                    self.mouse-x - self.width / 2,
+                    self.mouse-y - self.height / 2,
+                    root.max-offset,
+                );
+                return EventResult.accept;
+            }
+            if (event.kind == PointerEventKind.move && root.dragging) {
+                root.drag(
+                    self.mouse-x - self.width / 2,
+                    self.mouse-y - self.height / 2,
+                    root.max-offset,
+                );
+                return EventResult.accept;
+            }
+            if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
+                root.dragging = false;
+                root.released();
+                return EventResult.accept;
+            }
+            return EventResult.reject;
+        }
+    }
+}
+
+component ControllerButton inherits Rectangle {
+    in property <string> label;
+    property <bool> down: false;
+
+    width: 44px;
+    height: 44px;
+    border-radius: min(self.width, self.height) / 2;
+    background: root.down ? #6fc2ff : #2e3339;
+    border-width: 2px;
+    border-color: root.down ? #a9dfff : #4b535d;
+
+    Text {
+        text: root.label;
+        color: root.down ? #102030 : #e8edf2;
+        font-size: min(root.width, root.height) * 0.38;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    TouchArea {
+        width: parent.width;
+        height: parent.height;
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.down) {
+                root.down = true;
+                return EventResult.accept;
+            }
+            if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
+                root.down = false;
+                return EventResult.accept;
+            }
+            return EventResult.reject;
+        }
+    }
+}
+
+export component MainWindow inherits Window {
+    title: "paws";
+    preferred-width: 960px;
+    preferred-height: 640px;
+    min-width: 720px;
+    min-height: 480px;
+    background: #121417;
+
+    in-out property <float> left-x: 0;
+    in-out property <float> left-y: 0;
+    in-out property <float> right-x: 0;
+    in-out property <float> right-y: 0;
+
+    callback stick-drag(int, length, length, length);
+    callback stick-release(int);
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 12px;
+
+        HorizontalLayout {
+            spacing: 12px;
+            height: 44px;
+
+            Text {
+                text: "paws";
+                color: #f2f5f8;
+                font-size: 26px;
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+
+            Rectangle { horizontal-stretch: 1; }
+
+            Text {
+                text: "Controller";
+                color: #aab3bd;
+                vertical-alignment: center;
+            }
+
+            ComboBox {
+                model: ["N/A"];
+                current-index: 0;
+                enabled: false;
+                width: 220px;
+                height: 34px;
+            }
+        }
+
+        Rectangle {
+            horizontal-stretch: 1;
+            vertical-stretch: 1;
+            background: transparent;
+
+            body := Rectangle {
+                width: min(parent.width, parent.height * 1.45);
+                height: self.width / 1.45;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                background: #262a2f;
+                border-radius: self.height * 0.22;
+                border-width: 3px;
+                border-color: #3b424b;
+
+                ControllerButton {
+                    label: "LT";
+                    x: body.width * 0.08;
+                    y: body.height * 0.04;
+                    width: body.width * 0.16;
+                    height: body.height * 0.09;
+                }
+                ControllerButton {
+                    label: "RT";
+                    x: body.width * 0.76;
+                    y: body.height * 0.04;
+                    width: body.width * 0.16;
+                    height: body.height * 0.09;
+                }
+                ControllerButton {
+                    label: "LB";
+                    x: body.width * 0.16;
+                    y: body.height * 0.16;
+                    width: body.width * 0.14;
+                    height: body.height * 0.075;
+                }
+                ControllerButton {
+                    label: "RB";
+                    x: body.width * 0.70;
+                    y: body.height * 0.16;
+                    width: body.width * 0.14;
+                    height: body.height * 0.075;
+                }
+
+                Stick {
+                    width: body.width * 0.22;
+                    height: self.width;
+                    x: body.width * 0.13;
+                    y: body.height * 0.36;
+                    value-x: root.left-x;
+                    value-y: root.left-y;
+                    drag(dx, dy, radius) => { root.stick-drag(0, dx, dy, radius); }
+                    released => { root.stick-release(0); }
+                }
+
+                Stick {
+                    width: body.width * 0.22;
+                    height: self.width;
+                    x: body.width * 0.65;
+                    y: body.height * 0.56;
+                    value-x: root.right-x;
+                    value-y: root.right-y;
+                    drag(dx, dy, radius) => { root.stick-drag(1, dx, dy, radius); }
+                    released => { root.stick-release(1); }
+                }
+
+                // D-pad: up, down, left, right around a center point.
+                ControllerButton {
+                    label: "U";
+                    width: body.width * 0.072;
+                    height: self.width;
+                    x: body.width * 0.22 - self.width / 2;
+                    y: body.height * 0.80 - self.height * 1.5;
+                }
+                ControllerButton {
+                    label: "D";
+                    width: body.width * 0.072;
+                    height: self.width;
+                    x: body.width * 0.22 - self.width / 2;
+                    y: body.height * 0.80 + self.height * 0.5;
+                }
+                ControllerButton {
+                    label: "L";
+                    width: body.width * 0.072;
+                    height: self.width;
+                    x: body.width * 0.22 - self.width * 1.5;
+                    y: body.height * 0.80 - self.height / 2;
+                }
+                ControllerButton {
+                    label: "R";
+                    width: body.width * 0.072;
+                    height: self.width;
+                    x: body.width * 0.22 + self.width * 0.5;
+                    y: body.height * 0.80 - self.height / 2;
+                }
+
+                // Face buttons in a diamond.
+                ControllerButton {
+                    label: "Y";
+                    width: body.width * 0.075;
+                    height: self.width;
+                    x: body.width * 0.79 - self.width / 2;
+                    y: body.height * 0.40 - self.height * 1.2;
+                }
+                ControllerButton {
+                    label: "A";
+                    width: body.width * 0.075;
+                    height: self.width;
+                    x: body.width * 0.79 - self.width / 2;
+                    y: body.height * 0.40 + self.height * 0.2;
+                }
+                ControllerButton {
+                    label: "X";
+                    width: body.width * 0.075;
+                    height: self.width;
+                    x: body.width * 0.79 - self.width * 1.2;
+                    y: body.height * 0.40 - self.height / 2;
+                }
+                ControllerButton {
+                    label: "B";
+                    width: body.width * 0.075;
+                    height: self.width;
+                    x: body.width * 0.79 + self.width * 0.2;
+                    y: body.height * 0.40 - self.height / 2;
+                }
+
+                ControllerButton {
+                    label: "Back";
+                    width: body.width * 0.085;
+                    height: body.height * 0.045;
+                    x: body.width * 0.45 - self.width / 2;
+                    y: body.height * 0.47;
+                }
+                ControllerButton {
+                    label: "Start";
+                    width: body.width * 0.085;
+                    height: body.height * 0.045;
+                    x: body.width * 0.55 - self.width / 2;
+                    y: body.height * 0.47;
+                }
+            }
+        }
+
+        Text {
+            text: "Local virtual controller. Game-controller binding and DDS are not connected yet.";
+            color: #858e98;
+            font-size: 13px;
+            horizontal-alignment: center;
+        }
+    }
+}
