@@ -8,18 +8,22 @@ mod stick;
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use clap::Parser;
 use gilrs::{EventType, Gilrs};
 use single_instance::Acquire;
+use slint::winit_030::WinitWindowAccessor;
 use slint::{ComponentHandle as _, ModelRc, SharedString, Timer, TimerMode, VecModel};
+use window_position::{self, SavedPosition};
 
 use controls::Controls;
 use gamepad::{Choice, Selection};
 use state::SavedState;
 
 slint::include_modules!();
+
+const RETRY_INTERVAL: Duration = Duration::from_millis(500);
 
 #[derive(Parser, Debug)]
 #[command(name = "paws", about = "to-stations virtual game controller")]
@@ -30,6 +34,7 @@ struct Args {
 }
 
 struct AppState {
+    display_id: u32,
     gilrs: Option<Gilrs>,
     choices: Vec<Choice>,
     selection: Selection,
@@ -37,6 +42,12 @@ struct AppState {
     state_path: Option<PathBuf>,
     model: Rc<VecModel<SharedString>>,
     last_controls: Controls,
+    last_choice_refresh: Instant,
+    position: Option<SavedPosition>,
+    position_restored: bool,
+    last_position: Option<(i32, i32)>,
+    last_position_save: Instant,
+    position_dirty: bool,
 }
 
 impl AppState {
@@ -47,30 +58,107 @@ impl AppState {
         if let Some(gilrs) = &gilrs {
             choices = gamepad::xbox_choices(gilrs);
         }
-        let selection = saved
-            .controller
+        let mut remembered = saved.controller;
+        let remembered_id = remembered
             .as_ref()
-            .and_then(|saved| gamepad::find_remembered(&choices, saved))
+            .and_then(|saved| gamepad::find_remembered(&choices, saved));
+        let selection = remembered_id
             .map(Selection::Gamepad)
             .unwrap_or(Selection::Virtual);
+        if let Some(id) = remembered_id {
+            if let Some(choice) = choices.iter().find(|choice| choice.id == id) {
+                remembered = Some(choice.saved());
+            }
+        }
         let model = Rc::new(VecModel::default());
         gamepad::update_model(&choices, &model);
+        let now = Instant::now();
         Self {
+            display_id,
             gilrs,
             choices,
             selection,
-            remembered: saved.controller,
+            remembered,
             state_path,
             model,
             last_controls: Controls::neutral(),
+            last_choice_refresh: now,
+            position: saved.position,
+            position_restored: false,
+            last_position: None,
+            last_position_save: Instant::now(),
+            position_dirty: false,
         }
     }
 
     fn save(&self) {
         SavedState {
             controller: self.remembered.clone(),
+            position: self.position.clone(),
         }
         .save(self.state_path.as_deref());
+    }
+
+    fn restore_position(&mut self, ui: &MainWindow) {
+        if self.position_restored {
+            return;
+        }
+        let saved = self.position.clone();
+        let display_id = self.display_id;
+        let resolved = ui.window().with_winit_window(|window| {
+            let resolved =
+                window_position::restore_or_cascade_with(saved.as_ref(), window, display_id);
+            window.set_outer_position(resolved.position);
+            resolved
+        });
+        let Some(resolved) = resolved else {
+            return;
+        };
+        self.position = resolved.saved;
+        self.last_position = Some((resolved.position.x, resolved.position.y));
+        self.position_restored = true;
+        self.position_dirty = false;
+        self.last_position_save = Instant::now();
+        self.save();
+    }
+
+    fn track_position(&mut self, ui: &MainWindow) {
+        if !self.position_restored {
+            self.restore_position(ui);
+            if !self.position_restored {
+                return;
+            }
+        }
+        let position = ui.window().position();
+        let current = (position.x, position.y);
+        if self.last_position == Some(current) {
+            return;
+        }
+        self.last_position = Some(current);
+        self.position_dirty = true;
+        if self.last_position_save.elapsed() >= window_position::SAVE_INTERVAL {
+            self.flush_position(ui, false);
+        }
+    }
+
+    fn flush_position(&mut self, ui: &MainWindow, force: bool) {
+        if !self.position_dirty && !force {
+            return;
+        }
+        let position = ui.window().position();
+        let saved = ui
+            .window()
+            .with_winit_window(|window| {
+                window_position::saved_from_window_at(window, position.x, position.y)
+            })
+            .flatten();
+        let Some(saved) = saved else {
+            return;
+        };
+        self.position = Some(saved);
+        self.position_dirty = false;
+        self.last_position_save = Instant::now();
+        self.save();
     }
 
     fn apply_selection(&self, ui: &MainWindow) {
@@ -116,6 +204,7 @@ impl AppState {
         };
 
         let mut list_changed = false;
+        let mut remembered_changed = false;
         while let Some(event) = gilrs.next_event() {
             match event.event {
                 EventType::Connected => list_changed = true,
@@ -131,13 +220,32 @@ impl AppState {
             }
         }
 
-        if list_changed {
-            gamepad::refresh_choices(gilrs, &mut self.choices, &self.model);
+        let remembered_selected = self.remembered.as_ref().is_some_and(|saved| {
+            gamepad::find_remembered(&self.choices, saved).is_some_and(
+                |id| matches!(self.selection, Selection::Gamepad(selected) if selected == id),
+            )
+        });
+        let now = Instant::now();
+        let retry_due = !remembered_selected
+            && self.remembered.is_some()
+            && self.last_choice_refresh.elapsed() >= RETRY_INTERVAL;
 
+        if list_changed || retry_due {
+            let choices_changed = gamepad::refresh_choices(gilrs, &mut self.choices, &self.model);
+            self.last_choice_refresh = now;
+
+            let previous = self.selection;
             // Only the remembered controller is ever auto-selected.
             if let Some(saved) = &self.remembered {
                 if let Some(id) = gamepad::find_remembered(&self.choices, saved) {
                     self.selection = Selection::Gamepad(id);
+                    if let Some(choice) = self.choices.iter().find(|choice| choice.id == id) {
+                        let current = choice.saved();
+                        if self.remembered.as_ref() != Some(&current) {
+                            self.remembered = Some(current);
+                            remembered_changed = true;
+                        }
+                    }
                 }
             }
 
@@ -147,11 +255,16 @@ impl AppState {
                 }
             }
 
-            ui.set_controller_index(gamepad::index_for_selection(self.selection, &self.choices));
-            ui.set_virtual_mode(matches!(self.selection, Selection::Virtual));
-            let neutral = Controls::neutral();
-            neutral.apply(ui);
-            self.last_controls = neutral;
+            if list_changed || choices_changed || self.selection != previous {
+                ui.set_controller_index(gamepad::index_for_selection(
+                    self.selection,
+                    &self.choices,
+                ));
+                ui.set_virtual_mode(matches!(self.selection, Selection::Virtual));
+                let neutral = Controls::neutral();
+                neutral.apply(ui);
+                self.last_controls = neutral;
+            }
         }
 
         if let Selection::Gamepad(id) = self.selection {
@@ -169,6 +282,10 @@ impl AppState {
                 neutral.apply(ui);
                 self.last_controls = neutral;
             }
+        }
+
+        if remembered_changed {
+            self.save();
         }
     }
 }
@@ -257,14 +374,27 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
+    let weak = ui.as_weak();
+    let close_state = state.clone();
+    ui.window().on_close_requested(move || {
+        if let Some(ui) = weak.upgrade() {
+            close_state.borrow_mut().flush_position(&ui, true);
+        }
+        slint::CloseRequestResponse::HideWindow
+    });
+
     let timer = Timer::default();
     let weak = ui.as_weak();
     let timer_state = state.clone();
     timer.start(TimerMode::Repeated, Duration::from_millis(16), move || {
         if let Some(ui) = weak.upgrade() {
-            timer_state.borrow_mut().poll(&ui);
+            let mut state = timer_state.borrow_mut();
+            state.poll(&ui);
+            state.track_position(&ui);
         }
     });
 
+    ui.show()?;
+    state.borrow_mut().restore_position(&ui);
     ui.run()
 }

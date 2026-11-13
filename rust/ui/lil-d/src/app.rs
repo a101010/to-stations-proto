@@ -15,7 +15,7 @@ use crate::console::{self, ConsoleAction};
 use crate::display;
 use crate::gl_window::GlWindow;
 use crate::layout;
-use crate::position;
+use window_position as position;
 
 const WINDOW_WIDTH: f64 = 720.0;
 const WINDOW_HEIGHT: f64 = 720.0;
@@ -74,11 +74,12 @@ impl App {
                 winit::dpi::LogicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT),
             )
         };
-        let resolved = position::restore_or_cascade(gl_window.window(), self.args.display_id);
+        let resolved =
+            position::restore_or_cascade(gl_window.window(), "lil-d", self.args.display_id);
         gl_window.window().set_outer_position(resolved.position);
         self.position = Some(resolved.position);
         if let Some(saved) = &resolved.saved {
-            match position::save(self.args.display_id, saved) {
+            match position::save("lil-d", self.args.display_id, saved) {
                 Ok(()) => {
                     self.last_saved_monitor = saved.monitor.clone();
                     self.last_position_save = Instant::now();
@@ -171,7 +172,11 @@ impl App {
 
     /// Forward an unconsumed left-button event in the format region to the
     /// display library, then repaint in case the active format changed.
-    fn forward_mouse(&mut self, state: winit::event::ElementState, button: winit::event::MouseButton) {
+    fn forward_mouse(
+        &mut self,
+        state: winit::event::ElementState,
+        button: winit::event::MouseButton,
+    ) {
         if !self.state.format_on || button != winit::event::MouseButton::Left {
             return;
         }
@@ -209,7 +214,7 @@ impl App {
         if !position::should_save(force, monitor_changed, self.last_position_save.elapsed()) {
             return;
         }
-        match position::save(self.args.display_id, &saved) {
+        match position::save("lil-d", self.args.display_id, &saved) {
             Ok(()) => {
                 self.last_saved_monitor = saved.monitor;
                 self.position_dirty = false;

@@ -12,10 +12,11 @@ path = "src/main.rs"
 [dependencies]
 app-state = { workspace = true }
 clap = { workspace = true }
-gilrs = "0.11"
+gilrs = { version = "0.11", default-features = false, features = ["xinput"] }
 serde = { workspace = true }
 single-instance = { workspace = true }
-slint = "1.18"
+slint = { version = "1.18", features = ["unstable-winit-030"] }
+window-position = { workspace = true }
 
 [build-dependencies]
 slint-build = "1.18"

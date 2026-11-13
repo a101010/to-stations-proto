@@ -13,7 +13,6 @@ mod console;
 mod display;
 mod gl_window;
 mod layout;
-mod position;
 
 use clap::Parser;
 use single_instance::Acquire;

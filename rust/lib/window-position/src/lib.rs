@@ -52,48 +52,58 @@ struct MonitorInfo {
     size: PhysicalSize<u32>,
 }
 
-/// The state file for a display id.
-pub fn state_path(display_id: u32) -> Option<PathBuf> {
-    app_state::state_path("lil-d", &display_id.to_string())
+/// The state file for an application and display id.
+pub fn state_path(application: &str, display_id: u32) -> Option<PathBuf> {
+    app_state::state_path(application, &display_id.to_string())
 }
 
-/// Load the saved position for a display id.
-pub fn load(display_id: u32) -> Option<SavedPosition> {
-    let path = state_path(display_id)?;
+/// Load the saved position for an application and display id.
+pub fn load(application: &str, display_id: u32) -> Option<SavedPosition> {
+    let path = state_path(application, display_id)?;
     app_state::load(&path)
 }
 
-/// Save the position for a display id.
-pub fn save(display_id: u32, position: &SavedPosition) -> io::Result<()> {
-    let path = state_path(display_id).ok_or_else(|| {
-        io::Error::new(io::ErrorKind::NotFound, "LOCALAPPDATA is unavailable")
-    })?;
+/// Save the position for an application and display id.
+pub fn save(application: &str, display_id: u32, position: &SavedPosition) -> io::Result<()> {
+    let path = state_path(application, display_id)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "LOCALAPPDATA is unavailable"))?;
     app_state::save(&path, position)
 }
 
 /// Build the saved position for the current window and monitor.
-pub fn saved_from_window(window: &Window, position: PhysicalPosition<i32>) -> Option<SavedPosition> {
+pub fn saved_from_window(
+    window: &Window,
+    position: PhysicalPosition<i32>,
+) -> Option<SavedPosition> {
+    saved_from_window_at(window, position.x, position.y)
+}
+
+/// Build the saved position for the current window and monitor from x/y.
+pub fn saved_from_window_at(window: &Window, x: i32, y: i32) -> Option<SavedPosition> {
     let monitor = monitor_info(window.current_monitor()?);
-    Some(saved_from_monitor(&monitor, position))
+    Some(saved_from_monitor(&monitor, PhysicalPosition::new(x, y)))
 }
 
 /// Restore the saved position, fall back to the main monitor, or cascade by
 /// display id.
-pub fn restore_or_cascade(
+pub fn restore_or_cascade(window: &Window, application: &str, display_id: u32) -> ResolvedPosition {
+    let saved = load(application, display_id);
+    restore_or_cascade_with(saved.as_ref(), window, display_id)
+}
+
+/// Restore `saved`, fall back to the main monitor, or cascade by display id.
+pub fn restore_or_cascade_with(
+    saved: Option<&SavedPosition>,
     window: &Window,
     display_id: u32,
 ) -> ResolvedPosition {
-    let saved = load(display_id);
-    let monitors: Vec<MonitorInfo> = window
-        .available_monitors()
-        .map(monitor_info)
-        .collect();
+    let monitors: Vec<MonitorInfo> = window.available_monitors().map(monitor_info).collect();
     let primary = window
         .primary_monitor()
         .map(monitor_info)
         .or_else(|| monitors.first().cloned());
     choose_position(
-        saved.as_ref(),
+        saved,
         &monitors,
         primary.as_ref(),
         window_size(window),
@@ -149,13 +159,7 @@ fn choose_position(
     }
 
     let (origin_x, origin_y, monitor_width) = primary
-        .map(|monitor| {
-            (
-                monitor.position.x,
-                monitor.position.y,
-                monitor.size.width,
-            )
-        })
+        .map(|monitor| (monitor.position.x, monitor.position.y, monitor.size.width))
         .unwrap_or((0, 0, 0));
     let (x, y) = cascade_position(
         origin_x,
@@ -179,9 +183,7 @@ fn choose_position(
 
 fn resolution_matches(saved: &SavedPosition, monitor: &MonitorInfo) -> bool {
     match (saved.monitor_width, saved.monitor_height) {
-        (Some(width), Some(height)) => {
-            monitor.size.width == width && monitor.size.height == height
-        }
+        (Some(width), Some(height)) => monitor.size.width == width && monitor.size.height == height,
         // Legacy state: the name is all we have.
         _ => true,
     }
@@ -232,9 +234,7 @@ fn visible_enough(
         && position.y >= monitor_top - FRAME_MARGIN
         && position.y < monitor_bottom;
 
-    visible_width >= MIN_VISIBLE
-        && visible_height >= MIN_VISIBLE
-        && top_left_near
+    visible_width >= MIN_VISIBLE && visible_height >= MIN_VISIBLE && top_left_near
 }
 
 /// Cascade slot layout on the main monitor: row `r` starts at `(10r, 5r)`,
@@ -302,7 +302,11 @@ mod tests {
     fn save_triggers_follow_force_monitor_and_interval() {
         assert!(should_save(true, false, Duration::ZERO));
         assert!(should_save(false, true, Duration::ZERO));
-        assert!(!should_save(false, false, SAVE_INTERVAL - Duration::from_millis(1)));
+        assert!(!should_save(
+            false,
+            false,
+            SAVE_INTERVAL - Duration::from_millis(1)
+        ));
         assert!(should_save(false, false, SAVE_INTERVAL));
     }
 

@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 pub(crate) struct SavedState {
     #[serde(default)]
     pub(crate) controller: Option<SavedController>,
+    #[serde(default)]
+    pub(crate) position: Option<window_position::SavedPosition>,
 }
 
 /// The stable identity of a remembered controller.
@@ -61,6 +63,13 @@ mod tests {
                 name: "Xbox Wireless Controller".to_string(),
                 uuid: [7; 16],
                 id: 2,
+            }),
+            position: Some(window_position::SavedPosition {
+                monitor: Some("\\\\.\\DISPLAY1".to_string()),
+                monitor_width: Some(1920),
+                monitor_height: Some(1080),
+                x: 100,
+                y: 50,
             }),
         };
         state.save(Some(&path));

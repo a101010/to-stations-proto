@@ -13,6 +13,6 @@ The pinned version and install location of each external component. Each install
 | cyclonedds / cyclonedds-derive / cyclonedds-rust-sys / cyclonedds-src / cyclonedds-idlc (to-stations fork of `cyclonedds-rust`) | pinned by rev, no semver: fork `https://github.com/a101010/cyclonedds-rust`, branch `multifile`, rev `952906b5018831683c0863cd11001bdac427ee10` (tracks upstream `mzet97/cyclonedds-rust` `main` @ `feb7e7d`); includes generated `DdsFieldMetadata` schemas/conversions | Cargo git dependency; `cyclonedds-idlc` (Rust codegen) built from the same rev by `scripts/build.ps1` into `build/`; static CycloneDDS at `C:\Libraries\cyclonedds-rust` |
 | Rust rendering crates | winit 0.30.13, glutin 0.32.3, glutin-winit 0.5.0, glow 0.17, egui/egui-winit/egui_glow 0.36.2 | Cargo (`rust/Cargo.toml`, `[workspace.dependencies]`) |
 | Slint (tool/launcher GUI) | 1.18.1 | Cargo (`rust/tool/dds-echo/Cargo.toml`; GPL-3.0-only / Slint Royalty-free 2.0 / Commercial) |
-| gilrs (game controller input) | 0.11.2 | Cargo (`rust/ui/paws/Cargo.toml`; Apache-2.0/MIT) |
+| gilrs (game controller input) | 0.11.2 | Cargo (`rust/ui/paws/Cargo.toml`, `xinput` feature; Apache-2.0/MIT) |
 | Rust support crates | serde 1, toml 0.8 | Cargo (`rust/Cargo.toml`, `[workspace.dependencies]`) |
 | dds-echo capture crates | socket2 0.5, if-addrs 0.13, windows-sys 0.59 | Cargo (`rust/tool/dds-echo/Cargo.toml`) |

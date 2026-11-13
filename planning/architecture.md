@@ -44,7 +44,7 @@ Format text is rendered with HarfBuzz's experimental GPU library (`libharfbuzz-g
 The three configurations (`rust`, `c++`, `hybrid`) differ only in which language implementation of each application is launched. Applications interoperate because they share the same IDL types and speak DDSI-RTPS; a hybrid launch simply mixes the two implementations. A display application can also use either language's display library: both implement the same C ABI (`include/display_lib.h`), so a Rust display app can load the C++ display library and vice versa. That in-process interop is the hybrid deployment's other half, alongside the DDS/IDL interop.
 
 ## Paws
-`paws` is the game-controller window application (`rust/ui/paws`), a Slint UI with an Xbox-style virtual controller. One instance is launched per display id; `paws` takes a required `--display-id`. Its controller dropdown lists `Virtual` plus each connected Xbox-style controller with its controller id. `Virtual` mode uses mouse input; controller mode mirrors the selected controller and ignores mouse input. The selected controller is persisted per display id in `paws\<display_id>.toml`: startup restores the remembered controller if it is connected, otherwise `Virtual`; a remembered controller that appears later is selected automatically, and no other controller is auto-selected. Selecting `Virtual` clears the remembered controller. `paws` publishes no DDS, has no station identity, and does not yet send format commands; the joystick control service, station identity, and DDS wiring are later work. Each display id has at most one `paws` instance.
+`paws` is the game-controller window application (`rust/ui/paws`), a Slint UI with an Xbox-style virtual controller. One instance is launched per display id; `paws` takes a required `--display-id`. Its controller dropdown lists `Virtual` plus each connected Xbox-style controller with its controller id, using gilrs's XInput backend on Windows. `Virtual` mode uses mouse input; controller mode mirrors the selected controller and ignores mouse input. The selected controller is persisted per display id in `paws\<display_id>.toml`: startup restores the remembered controller if it is connected, otherwise `Virtual`; a remembered controller that appears later is selected automatically, and no other controller is auto-selected. Selecting `Virtual` clears the remembered controller. The window also restores and remembers its position per display id through the shared `window-position` library, using the same monitor, resolution, visibility, and cascade rules as `lil-d`. `paws` publishes no DDS, has no station identity, and does not yet send format commands; the joystick control service, station identity, and DDS wiring are later work. Each display id has at most one `paws` instance.
 
 ## Formats and the distributed MVC constellation
 A *format* is a distributable model-view-controller constellation. Each format owns the following services:
@@ -91,9 +91,9 @@ Per-user runtime state is not deploy configuration. It lives under `%LOCALAPPDAT
 Examples:
 * `lil-d\<display_id>.toml` - logical monitor name, monitor resolution, and monitor-relative window position.
 * `format-view-service\<display_id>.toml` - current per-window format assignments for that display.
-* `paws\<display_id>.toml` - last selected Xbox-style controller (name, UUID, and gilrs id) or `Virtual`.
+* `paws\<display_id>.toml` - last selected Xbox-style controller (name, UUID, and gilrs id) or `Virtual`, plus the window position.
 
-A `lil-d` position is restored only when the named monitor is present with the same resolution and the window rectangle remains sufficiently visible there. Otherwise it falls back to a validated position on the main monitor, then to the cascade. The resolved state (including the resolution) is rewritten on startup, so stale or legacy state self-heals.
+A `lil-d` or `paws` position is restored only when the named monitor is present with the same resolution and the window rectangle remains sufficiently visible there. Otherwise it falls back to a validated position on the main monitor, then to the cascade. The resolved state (including the resolution) is rewritten on startup, so stale or legacy state self-heals.
 
 ## Topic contracts
 Every service declares the topics it publishes and subscribes to so that the contract of a service is easy to read:
@@ -151,7 +151,8 @@ to-stations-proto/
     ui/                big-d, lil-d, tentacles, paws
     service/           hello-service, hello-view-service, hello-ctl-service,
                        format-ctl-service, format-view-service
-    lib/               stations-dds, display-lib, format-list, and other shared libraries
+    lib/               stations-dds, display-lib, format-list, window-position,
+                       and other shared libraries
     tool/              dds-echo (Slint GUI), dds-contracts, equirect-to-cubemap
     test/              (deferred)
   cpp/                 authored: CMake project
@@ -175,7 +176,7 @@ to-stations-proto/
 * `ui/` holds GUI applications, `service/` holds headless services, `lib/` holds shared libraries, `tool/` holds developer tools; `test/` is deferred.
 * The display applications use egui; GUI tools and launchers (`dds-echo`, `tentacles`, `paws`) use Slint. A tool GUI may live under `tool/` (for example `dds-echo`).
 * A `-service` crate holds a format's model (non-display business logic); `-view-service` and `-ctl-service` crates are services tied to the display library.
-* Common DDS support lives in `stations-dds`; other common support lives in one or more `lib/` crates.
+* Common DDS support lives in `stations-dds`; other common support lives in one or more `lib/` crates. `window-position` holds the shared per-display window-position persistence used by `lil-d` and `paws`.
 * `harfbuzz` (at `rust/lib/harfbuzz`) is an FFI binding to the installed HarfBuzz, including the experimental `libharfbuzz-gpu`; the display library uses it for format text.
 * Rust programs use `clap` for command-line parsing.
 * `stations-dds` lives at `rust/lib/stations-dds`.

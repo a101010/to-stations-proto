@@ -1,0 +1,10 @@
+[package]
+name = "window-position"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+app-state = { workspace = true }
+serde = { workspace = true }
+winit = { workspace = true }

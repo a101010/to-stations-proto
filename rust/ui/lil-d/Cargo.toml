@@ -9,7 +9,6 @@ name = "lil-d"
 path = "src/main.rs"
 
 [dependencies]
-app-state = { workspace = true }
 libloading = { workspace = true }
 winit = { workspace = true }
 glutin = { workspace = true }
@@ -18,8 +17,8 @@ glow = { workspace = true }
 egui = { workspace = true }
 egui_glow = { workspace = true }
 clap = { workspace = true }
-serde = { workspace = true }
 single-instance = { workspace = true }
+window-position = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [

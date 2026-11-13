@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["lib/stations-dds", "lib/display-lib", "lib/harfbuzz", "lib/single-instance", "lib/format-list", "lib/app-state", "service/hello-service", "service/hello-view-service", "service/format-ctl-service", "service/format-view-service", "tool/dds-contracts", "tool/dds-echo", "tool/equirect-to-cubemap", "ui/lil-d", "ui/paws"]
+members = ["lib/stations-dds", "lib/display-lib", "lib/harfbuzz", "lib/single-instance", "lib/format-list", "lib/app-state", "lib/window-position", "service/hello-service", "service/hello-view-service", "service/format-ctl-service", "service/format-view-service", "tool/dds-contracts", "tool/dds-echo", "tool/equirect-to-cubemap", "ui/lil-d", "ui/paws"]
 
 [workspace.dependencies]
 cyclonedds = { git = "https://github.com/a101010/cyclonedds-rust", rev = "952906b5018831683c0863cd11001bdac427ee10", default-features = false, features = ["native"] }
@@ -10,6 +10,7 @@ format-list = { path = "lib/format-list" }
 app-state = { path = "lib/app-state" }
 single-instance = { path = "lib/single-instance" }
 stations-dds = { path = "lib/stations-dds" }
+window-position = { path = "lib/window-position" }
 libloading = "0.8"
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
