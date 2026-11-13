@@ -70,6 +70,8 @@ mod tests {
                 monitor_height: Some(1080),
                 x: 100,
                 y: 50,
+                width: Some(800),
+                height: Some(600),
             }),
         };
         state.save(Some(&path));

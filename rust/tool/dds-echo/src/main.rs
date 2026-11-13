@@ -29,7 +29,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use clap::Parser;
+use slint::winit_030::WinitWindowAccessor;
 use slint::{ComponentHandle as _, ModelRc, Timer, TimerMode, VecModel};
+use window_position::{self, SavedPosition};
 
 use crate::capture::{Capture, CaptureConfig, CaptureQueue, DRAIN_MAX_PER_TICK};
 use crate::model::{
@@ -39,9 +41,7 @@ use crate::send::{schema_for, SendForm, TopicWriter};
 use crate::ui::MainWindow;
 
 use stations_dds::contract::{TopicDef, TopicRegistry};
-use stations_dds::cyclonedds::{
-    BuiltinEndpointSample, DataReader, DdsEntity, DomainParticipant,
-};
+use stations_dds::cyclonedds::{BuiltinEndpointSample, DataReader, DdsEntity, DomainParticipant};
 use stations_dds::dds::Node;
 
 use cyclonedds_rust_sys as cdds;
@@ -52,6 +52,105 @@ const TICK: Duration = Duration::from_millis(100);
 const VIEW_REBUILD_MS: u64 = 250;
 /// Minimum interval between discovery-reader polls.
 const DISCOVERY_POLL_MS: u64 = 500;
+
+struct Placement {
+    saved: Option<SavedPosition>,
+    last_position: Option<(i32, i32)>,
+    last_size: Option<(u32, u32)>,
+    last_save: Instant,
+    dirty: bool,
+    restored: bool,
+}
+
+impl Placement {
+    fn new() -> Self {
+        Self {
+            saved: window_position::load_key("dds-echo", "window"),
+            last_position: None,
+            last_size: None,
+            last_save: Instant::now(),
+            dirty: false,
+            restored: false,
+        }
+    }
+
+    fn restore(&mut self, app: &MainWindow) {
+        if self.restored {
+            return;
+        }
+        let saved = self.saved.clone();
+        let resolved = app.window().with_winit_window(|window| {
+            let resolved = window_position::restore_or_cascade_with(saved.as_ref(), window, 0);
+            if let Some(size) = resolved.size {
+                let _ = window.request_inner_size(size);
+            }
+            window.set_outer_position(resolved.position);
+            resolved
+        });
+        let Some(resolved) = resolved else {
+            return;
+        };
+        self.saved = resolved.saved;
+        self.last_position = Some((resolved.position.x, resolved.position.y));
+        let size = app.window().size();
+        self.last_size = Some((size.width, size.height));
+        self.restored = true;
+        self.dirty = false;
+        self.last_save = Instant::now();
+        self.save();
+    }
+
+    fn track(&mut self, app: &MainWindow) {
+        if !self.restored {
+            self.restore(app);
+            if !self.restored {
+                return;
+            }
+        }
+        let position = app.window().position();
+        let size = app.window().size();
+        let current_position = (position.x, position.y);
+        let current_size = (size.width, size.height);
+        if self.last_position == Some(current_position) && self.last_size == Some(current_size) {
+            return;
+        }
+        self.last_position = Some(current_position);
+        self.last_size = Some(current_size);
+        self.dirty = true;
+        if self.last_save.elapsed() >= window_position::SAVE_INTERVAL {
+            self.flush(app, false);
+        }
+    }
+
+    fn flush(&mut self, app: &MainWindow, force: bool) {
+        if !self.dirty && !force {
+            return;
+        }
+        let position = app.window().position();
+        let saved = app
+            .window()
+            .with_winit_window(|window| {
+                window_position::saved_from_window_at(window, position.x, position.y)
+            })
+            .flatten();
+        let Some(saved) = saved else {
+            return;
+        };
+        self.saved = Some(saved);
+        self.dirty = false;
+        self.last_save = Instant::now();
+        self.save();
+    }
+
+    fn save(&self) {
+        let Some(saved) = &self.saved else {
+            return;
+        };
+        if let Err(error) = window_position::save_key("dds-echo", "window", saved) {
+            eprintln!("dds-echo: placement save failed: {error}");
+        }
+    }
+}
 
 #[derive(Parser, Debug)]
 #[command(name = "dds-echo", about = "DDSI-RTPS multicast/UDP traffic inspector")]
@@ -97,9 +196,7 @@ struct DiscoveryLog {
 
 impl DiscoveryLog {
     fn open(explicit: Option<&Path>) -> Self {
-        let path = explicit
-            .map(Path::to_path_buf)
-            .or_else(default_log_path);
+        let path = explicit.map(Path::to_path_buf).or_else(default_log_path);
         let mut file = None;
         if let Some(path) = path {
             if let Some(parent) = path.parent() {
@@ -690,10 +787,7 @@ fn send_now(app: &MainWindow, state: &Rc<State>, timer: &Weak<Timer>) {
             let mut send = state.send.borrow_mut();
             send.sent += 1;
             send.error = false;
-            send.status = format!(
-                "Sent {} sample(s) to {} subscriber(s)",
-                send.sent, matched
-            );
+            send.status = format!("Sent {} sample(s) to {} subscriber(s)", send.sent, matched);
             update_send_props(app, &send);
         }
         Err(error) => {
@@ -913,10 +1007,7 @@ fn detail_text(r: &model::Record, known: &KnownTopics) -> String {
             r.kind.label()
         }
     ));
-    out.push_str(&format!(
-        "topic: {}\n",
-        r.display_topic().unwrap_or("")
-    ));
+    out.push_str(&format!("topic: {}\n", r.display_topic().unwrap_or("")));
     out.push_str(&format!("submessages: {}\n", r.submessages));
     out.push('\n');
     out.push_str(&format!("frames ({}):\n", r.frames.len()));
@@ -1092,12 +1183,7 @@ fn refresh_topics(
 
 /// Poll the discovery readers and re-attribute retained records when new
 /// endpoints are learned. Returns true when topic counts changed.
-fn poll_discovery(
-    app: &MainWindow,
-    state: &State,
-    topics: &TopicModels,
-    force: bool,
-) -> bool {
+fn poll_discovery(app: &MainWindow, state: &State, topics: &TopicModels, force: bool) -> bool {
     let now_ms = state.start.get().elapsed().as_millis() as u64;
     let learned = {
         let mut source = state.discovery_source.borrow_mut();
@@ -1143,12 +1229,7 @@ fn poll_discovery(
     true
 }
 
-fn tick(
-    app: &MainWindow,
-    state: &State,
-    records: &VecModel<ui::RecordRow>,
-    topics: &TopicModels,
-) {
+fn tick(app: &MainWindow, state: &State, records: &VecModel<ui::RecordRow>, topics: &TopicModels) {
     let now_ms = state.start.get().elapsed().as_millis() as u64;
     let self_prefix = state
         .resources
@@ -1186,7 +1267,9 @@ fn tick(
                 state.counts.borrow_mut().observe(&record);
                 if first_for_topic {
                     if let Some(topic) = &topic {
-                        state.log.log(format!("first record attributed to topic {topic}"));
+                        state
+                            .log
+                            .log(format!("first record attributed to topic {topic}"));
                     }
                 }
                 trimmed += history.push(record).len();
@@ -1253,10 +1336,7 @@ fn load_registry(path: &Path, log: &DiscoveryLog) -> Option<TopicRegistry> {
             Some(registry)
         }
         Err(e) => {
-            log.log(format!(
-                "failed to load registry {}: {e}",
-                path.display()
-            ));
+            log.log(format!("failed to load registry {}: {e}", path.display()));
             eprintln!("dds-echo: failed to load registry {}: {e}", path.display());
             None
         }
@@ -1469,9 +1549,9 @@ fn main() -> Result<(), slint::PlatformError> {
                     refresh_topics(
                         &app,
                         &state
-            .counts
-            .borrow()
-            .rows(&state.known_topics, state.hide_self.get()),
+                            .counts
+                            .borrow()
+                            .rows(&state.known_topics, state.hide_self.get()),
                         &state.selection.borrow(),
                         &topics,
                     );
@@ -1525,9 +1605,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 refresh_topics(
                     &app,
                     &state
-            .counts
-            .borrow()
-            .rows(&state.known_topics, state.hide_self.get()),
+                        .counts
+                        .borrow()
+                        .rows(&state.known_topics, state.hide_self.get()),
                     &state.selection.borrow(),
                     &topics,
                 );
@@ -1571,9 +1651,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 refresh_topics(
                     &app,
                     &state
-            .counts
-            .borrow()
-            .rows(&state.known_topics, state.hide_self.get()),
+                        .counts
+                        .borrow()
+                        .rows(&state.known_topics, state.hide_self.get()),
                     &state.selection.borrow(),
                     &topics,
                 );
@@ -1805,6 +1885,27 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
+    let placement = Rc::new(RefCell::new(Placement::new()));
+    let app_weak = app.as_weak();
+    let close_placement = placement.clone();
+    app.window().on_close_requested(move || {
+        if let Some(app) = app_weak.upgrade() {
+            close_placement.borrow_mut().flush(&app, true);
+        }
+        slint::CloseRequestResponse::HideWindow
+    });
+
+    let placement_timer = Timer::default();
+    let app_weak = app.as_weak();
+    let timer_placement = placement.clone();
+    placement_timer.start(TimerMode::Repeated, Duration::from_millis(250), move || {
+        if let Some(app) = app_weak.upgrade() {
+            timer_placement.borrow_mut().track(&app);
+        }
+    });
+
+    app.show()?;
+    placement.borrow_mut().restore(&app);
     app.run()
 }
 

@@ -36,12 +36,31 @@ pub struct SavedPosition {
     pub monitor_height: Option<u32>,
     pub x: i32,
     pub y: i32,
+    /// The window's inner width, absent in legacy files.
+    #[serde(default)]
+    pub width: Option<u32>,
+    /// The window's inner height, absent in legacy files.
+    #[serde(default)]
+    pub height: Option<u32>,
+}
+
+impl SavedPosition {
+    /// The saved inner size, or `None` when it is absent or invalid.
+    pub fn size(&self) -> Option<PhysicalSize<u32>> {
+        match (self.width, self.height) {
+            (Some(width), Some(height)) if width > 0 && height > 0 => {
+                Some(PhysicalSize::new(width, height))
+            }
+            _ => None,
+        }
+    }
 }
 
 /// The resolved startup position and the state that should be persisted for it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedPosition {
     pub position: PhysicalPosition<i32>,
+    pub size: Option<PhysicalSize<u32>>,
     pub saved: Option<SavedPosition>,
 }
 
@@ -54,23 +73,38 @@ struct MonitorInfo {
 
 /// The state file for an application and display id.
 pub fn state_path(application: &str, display_id: u32) -> Option<PathBuf> {
-    app_state::state_path(application, &display_id.to_string())
+    state_path_key(application, &display_id.to_string())
 }
 
-/// Load the saved position for an application and display id.
+/// The state file for an application and key.
+pub fn state_path_key(application: &str, key: &str) -> Option<PathBuf> {
+    app_state::state_path(application, key)
+}
+
+/// Load the saved placement for an application and display id.
 pub fn load(application: &str, display_id: u32) -> Option<SavedPosition> {
-    let path = state_path(application, display_id)?;
+    load_key(application, &display_id.to_string())
+}
+
+/// Load the saved placement for an application and key.
+pub fn load_key(application: &str, key: &str) -> Option<SavedPosition> {
+    let path = state_path_key(application, key)?;
     app_state::load(&path)
 }
 
-/// Save the position for an application and display id.
+/// Save the placement for an application and display id.
 pub fn save(application: &str, display_id: u32, position: &SavedPosition) -> io::Result<()> {
-    let path = state_path(application, display_id)
+    save_key(application, &display_id.to_string(), position)
+}
+
+/// Save the placement for an application and key.
+pub fn save_key(application: &str, key: &str, position: &SavedPosition) -> io::Result<()> {
+    let path = state_path_key(application, key)
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "LOCALAPPDATA is unavailable"))?;
     app_state::save(&path, position)
 }
 
-/// Build the saved position for the current window and monitor.
+/// Build the saved placement for the current window and monitor.
 pub fn saved_from_window(
     window: &Window,
     position: PhysicalPosition<i32>,
@@ -78,17 +112,32 @@ pub fn saved_from_window(
     saved_from_window_at(window, position.x, position.y)
 }
 
-/// Build the saved position for the current window and monitor from x/y.
+/// Build the saved placement for the current window and monitor from x/y.
 pub fn saved_from_window_at(window: &Window, x: i32, y: i32) -> Option<SavedPosition> {
     let monitor = monitor_info(window.current_monitor()?);
-    Some(saved_from_monitor(&monitor, PhysicalPosition::new(x, y)))
+    Some(saved_from_monitor(
+        &monitor,
+        PhysicalPosition::new(x, y),
+        window_inner_size(window),
+    ))
 }
 
-/// Restore the saved position, fall back to the main monitor, or cascade by
+/// Restore the saved placement, fall back to the main monitor, or cascade by
 /// display id.
 pub fn restore_or_cascade(window: &Window, application: &str, display_id: u32) -> ResolvedPosition {
-    let saved = load(application, display_id);
-    restore_or_cascade_with(saved.as_ref(), window, display_id)
+    restore_or_cascade_key(window, application, &display_id.to_string(), display_id)
+}
+
+/// Restore the saved placement for a key, fall back to the main monitor, or
+/// cascade by `cascade_slot`.
+pub fn restore_or_cascade_key(
+    window: &Window,
+    application: &str,
+    key: &str,
+    cascade_slot: u32,
+) -> ResolvedPosition {
+    let saved = load_key(application, key);
+    restore_or_cascade_with(saved.as_ref(), window, cascade_slot)
 }
 
 /// Restore `saved`, fall back to the main monitor, or cascade by display id.
@@ -102,11 +151,15 @@ pub fn restore_or_cascade_with(
         .primary_monitor()
         .map(monitor_info)
         .or_else(|| monitors.first().cloned());
+    let inner_size = saved
+        .and_then(SavedPosition::size)
+        .unwrap_or_else(|| window_inner_size(window));
     choose_position(
         saved,
         &monitors,
         primary.as_ref(),
         window_size(window),
+        inner_size,
         display_id,
     )
 }
@@ -124,9 +177,13 @@ fn window_size(window: &Window) -> PhysicalSize<u32> {
     if outer.width > 0 && outer.height > 0 {
         outer
     } else {
-        let inner = window.inner_size();
-        PhysicalSize::new(inner.width.max(1), inner.height.max(1))
+        window_inner_size(window)
     }
+}
+
+fn window_inner_size(window: &Window) -> PhysicalSize<u32> {
+    let inner = window.inner_size();
+    PhysicalSize::new(inner.width.max(1), inner.height.max(1))
 }
 
 fn choose_position(
@@ -134,6 +191,7 @@ fn choose_position(
     monitors: &[MonitorInfo],
     primary: Option<&MonitorInfo>,
     window_size: PhysicalSize<u32>,
+    inner_size: PhysicalSize<u32>,
     display_id: u32,
 ) -> ResolvedPosition {
     if let Some(saved) = saved {
@@ -145,7 +203,7 @@ fn choose_position(
                 if resolution_matches(saved, monitor) {
                     let position = offset(monitor, saved.x, saved.y);
                     if visible_enough(monitor, position, window_size) {
-                        return resolved(monitor, position);
+                        return resolved(monitor, position, inner_size);
                     }
                 }
             }
@@ -153,7 +211,7 @@ fn choose_position(
         if let Some(primary) = primary {
             let position = offset(primary, saved.x, saved.y);
             if visible_enough(primary, position, window_size) {
-                return resolved(primary, position);
+                return resolved(primary, position, inner_size);
             }
         }
     }
@@ -173,10 +231,11 @@ fn choose_position(
         if !visible_enough(monitor, position, window_size) {
             position = monitor.position;
         }
-        return resolved(monitor, position);
+        return resolved(monitor, position, inner_size);
     }
     ResolvedPosition {
         position,
+        size: Some(inner_size),
         saved: None,
     }
 }
@@ -189,20 +248,31 @@ fn resolution_matches(saved: &SavedPosition, monitor: &MonitorInfo) -> bool {
     }
 }
 
-fn resolved(monitor: &MonitorInfo, position: PhysicalPosition<i32>) -> ResolvedPosition {
+fn resolved(
+    monitor: &MonitorInfo,
+    position: PhysicalPosition<i32>,
+    inner_size: PhysicalSize<u32>,
+) -> ResolvedPosition {
     ResolvedPosition {
         position,
-        saved: Some(saved_from_monitor(monitor, position)),
+        size: Some(inner_size),
+        saved: Some(saved_from_monitor(monitor, position, inner_size)),
     }
 }
 
-fn saved_from_monitor(monitor: &MonitorInfo, position: PhysicalPosition<i32>) -> SavedPosition {
+fn saved_from_monitor(
+    monitor: &MonitorInfo,
+    position: PhysicalPosition<i32>,
+    inner_size: PhysicalSize<u32>,
+) -> SavedPosition {
     SavedPosition {
         monitor: monitor.name.clone(),
         monitor_width: Some(monitor.size.width),
         monitor_height: Some(monitor.size.height),
         x: position.x - monitor.position.x,
         y: position.y - monitor.position.y,
+        width: Some(inner_size.width.max(1)),
+        height: Some(inner_size.height.max(1)),
     }
 }
 
@@ -293,6 +363,8 @@ mod tests {
             monitor_height: height,
             x,
             y,
+            width: None,
+            height: None,
         }
     }
 
@@ -335,7 +407,15 @@ mod tests {
         ];
         let saved = saved("B", Some(1920), Some(1080), 100, 50);
         assert_eq!(
-            choose_position(Some(&saved), &monitors, Some(&monitors[0]), WINDOW, 0).position,
+            choose_position(
+                Some(&saved),
+                &monitors,
+                Some(&monitors[0]),
+                WINDOW,
+                WINDOW,
+                0
+            )
+            .position,
             PhysicalPosition::new(2020, 50)
         );
     }
@@ -348,7 +428,15 @@ mod tests {
         ];
         let saved = saved("B", Some(2560), Some(1440), -5, 2);
         assert_eq!(
-            choose_position(Some(&saved), &monitors, Some(&monitors[0]), WINDOW, 0).position,
+            choose_position(
+                Some(&saved),
+                &monitors,
+                Some(&monitors[0]),
+                WINDOW,
+                WINDOW,
+                0
+            )
+            .position,
             PhysicalPosition::new(-2565, 2)
         );
     }
@@ -360,11 +448,51 @@ mod tests {
             monitor("B", -2560, 0, 2560, 1440),
         ];
         let saved = saved("B", None, None, -5, 2);
-        let resolved = choose_position(Some(&saved), &monitors, Some(&monitors[0]), WINDOW, 0);
+        let resolved = choose_position(
+            Some(&saved),
+            &monitors,
+            Some(&monitors[0]),
+            WINDOW,
+            WINDOW,
+            0,
+        );
         assert_eq!(resolved.position, PhysicalPosition::new(-2565, 2));
+        assert_eq!(resolved.size, Some(WINDOW));
         let upgraded = resolved.saved.expect("upgraded state");
         assert_eq!(upgraded.monitor_width, Some(2560));
         assert_eq!(upgraded.monitor_height, Some(1440));
+    }
+
+    #[test]
+    fn saved_size_requires_positive_dimensions() {
+        let mut position = saved("A", Some(1920), Some(1080), 0, 0);
+        assert_eq!(position.size(), None);
+
+        position.width = Some(800);
+        position.height = Some(600);
+        assert_eq!(position.size(), Some(PhysicalSize::new(800, 600)));
+
+        position.width = Some(0);
+        assert_eq!(position.size(), None);
+    }
+
+    #[test]
+    fn resolved_returns_the_saved_size() {
+        let monitors = vec![monitor("A", 0, 0, 1920, 1080)];
+        let mut position = saved("A", Some(1920), Some(1080), 100, 50);
+        position.width = Some(800);
+        position.height = Some(600);
+        let size = PhysicalSize::new(800, 600);
+        let resolved = choose_position(
+            Some(&position),
+            &monitors,
+            Some(&monitors[0]),
+            WINDOW,
+            size,
+            0,
+        );
+        assert_eq!(resolved.size, Some(size));
+        assert_eq!(resolved.saved.unwrap().size(), Some(size));
     }
 
     #[test]
@@ -375,7 +503,15 @@ mod tests {
         ];
         let saved = saved("B", Some(1920), Some(1080), 100, 50);
         assert_eq!(
-            choose_position(Some(&saved), &monitors, Some(&monitors[0]), WINDOW, 0).position,
+            choose_position(
+                Some(&saved),
+                &monitors,
+                Some(&monitors[0]),
+                WINDOW,
+                WINDOW,
+                0
+            )
+            .position,
             PhysicalPosition::new(100, 50)
         );
     }
@@ -385,7 +521,15 @@ mod tests {
         let monitors = vec![monitor("A", 0, 0, 1920, 1080)];
         let saved = saved("Z", Some(1920), Some(1080), 100, 50);
         assert_eq!(
-            choose_position(Some(&saved), &monitors, Some(&monitors[0]), WINDOW, 0).position,
+            choose_position(
+                Some(&saved),
+                &monitors,
+                Some(&monitors[0]),
+                WINDOW,
+                WINDOW,
+                0
+            )
+            .position,
             PhysicalPosition::new(100, 50)
         );
     }
@@ -395,7 +539,15 @@ mod tests {
         let monitors = vec![monitor("A", 0, 0, 1920, 1080)];
         let saved = saved("Z", Some(1920), Some(1080), 5000, 50);
         assert_eq!(
-            choose_position(Some(&saved), &monitors, Some(&monitors[0]), WINDOW, 0).position,
+            choose_position(
+                Some(&saved),
+                &monitors,
+                Some(&monitors[0]),
+                WINDOW,
+                WINDOW,
+                0
+            )
+            .position,
             PhysicalPosition::new(0, 0)
         );
     }
@@ -405,7 +557,15 @@ mod tests {
         let monitors = vec![monitor("A", 0, 0, 1920, 1080)];
         let saved = saved("A", Some(1920), Some(1080), 5000, 50);
         assert_eq!(
-            choose_position(Some(&saved), &monitors, Some(&monitors[0]), WINDOW, 0).position,
+            choose_position(
+                Some(&saved),
+                &monitors,
+                Some(&monitors[0]),
+                WINDOW,
+                WINDOW,
+                0
+            )
+            .position,
             PhysicalPosition::new(0, 0)
         );
     }

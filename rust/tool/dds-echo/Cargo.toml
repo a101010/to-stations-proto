@@ -6,12 +6,13 @@ publish = false
 build = "build.rs"
 
 [dependencies]
-slint = "1.18"
+slint = { version = "1.18", features = ["unstable-winit-030"] }
 clap = { workspace = true }
 socket2 = { workspace = true }
 if-addrs = { workspace = true }
 stations-dds = { workspace = true }
 single-instance = { workspace = true }
+window-position = { workspace = true }
 cyclonedds-rust-sys = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]

@@ -76,6 +76,9 @@ impl App {
         };
         let resolved =
             position::restore_or_cascade(gl_window.window(), "lil-d", self.args.display_id);
+        if let Some(size) = resolved.size {
+            let _ = gl_window.window().request_inner_size(size);
+        }
         gl_window.window().set_outer_position(resolved.position);
         self.position = Some(resolved.position);
         if let Some(saved) = &resolved.saved {
@@ -274,6 +277,8 @@ impl ApplicationHandler for App {
                         .unwrap_or(core::num::NonZeroU32::MIN);
                     gl_window.resize(width, height);
                     gl_window.window().request_redraw();
+                    self.position_dirty = true;
+                    self.flush_position(false);
                 }
             }
             WindowEvent::RedrawRequested => self.render(),

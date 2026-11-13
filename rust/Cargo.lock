@@ -1073,6 +1073,7 @@ dependencies = [
  "slint-build",
  "socket2",
  "stations-dds",
+ "window-position",
  "windows-sys 0.59.0",
 ]
 

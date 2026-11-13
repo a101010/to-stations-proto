@@ -46,6 +46,7 @@ struct AppState {
     position: Option<SavedPosition>,
     position_restored: bool,
     last_position: Option<(i32, i32)>,
+    last_size: Option<(u32, u32)>,
     last_position_save: Instant,
     position_dirty: bool,
 }
@@ -86,6 +87,7 @@ impl AppState {
             position: saved.position,
             position_restored: false,
             last_position: None,
+            last_size: None,
             last_position_save: Instant::now(),
             position_dirty: false,
         }
@@ -108,14 +110,19 @@ impl AppState {
         let resolved = ui.window().with_winit_window(|window| {
             let resolved =
                 window_position::restore_or_cascade_with(saved.as_ref(), window, display_id);
+            if let Some(size) = resolved.size {
+                let _ = window.request_inner_size(size);
+            }
             window.set_outer_position(resolved.position);
             resolved
         });
         let Some(resolved) = resolved else {
             return;
         };
+        let size = ui.window().size();
         self.position = resolved.saved;
         self.last_position = Some((resolved.position.x, resolved.position.y));
+        self.last_size = Some((size.width, size.height));
         self.position_restored = true;
         self.position_dirty = false;
         self.last_position_save = Instant::now();
@@ -130,11 +137,14 @@ impl AppState {
             }
         }
         let position = ui.window().position();
-        let current = (position.x, position.y);
-        if self.last_position == Some(current) {
+        let size = ui.window().size();
+        let current_position = (position.x, position.y);
+        let current_size = (size.width, size.height);
+        if self.last_position == Some(current_position) && self.last_size == Some(current_size) {
             return;
         }
-        self.last_position = Some(current);
+        self.last_position = Some(current_position);
+        self.last_size = Some(current_size);
         self.position_dirty = true;
         if self.last_position_save.elapsed() >= window_position::SAVE_INTERVAL {
             self.flush_position(ui, false);
