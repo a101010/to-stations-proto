@@ -256,3 +256,10 @@ Create the game-controller window application (`paws`): a Slint window with an X
 - **Depends on:** none.
 - **Minimal test:** `launch-rust.ps1` brings up the `paws` window showing the virtual controller; sticks move and buttons highlight.
 - **Note:** the manual stick/button and second-instance checks remain for the user.
+
+### xbox-controller
+Connect Xbox-style controllers to `paws`: one window per display id, `Virtual` plus connected Xbox controllers in the dropdown, persisted controller selection per display, virtual/controller mode gating, the XInput backend, startup enumeration retry, and zero-UUID name/id matching. Added per-display paws state and controller tests.
+- **Completed:** 2026-11-13 11:15:47.
+- **Depends on:** none.
+- **Minimal test:** launch one paws per display id; select an Xbox controller for one display and verify it restores on restart only for that display. Select `Virtual` and verify mouse control while controller input is ignored. Reconnect the remembered controller and verify automatic selection, including an all-zero-UUID controller whose name changed between backends.
+- **Note:** controller auto-selection was verified with the real controller using a temporary `LOCALAPPDATA`. Window placement is tracked by the `window-placement` story.

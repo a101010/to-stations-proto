@@ -1,368 +1,197 @@
-# Current story: xbox-controller
+# Current story: window-placement
 
 This file is the detailed, living plan for the one active story. It is rewritten for each story. The backlog in `backlog.md` holds all work and the per-story status.
 
 ## Story
 
-Add Xbox-style controller input to `paws`, one window per display id, with per-display persistence of the last selected controller and automatic reselection when that controller appears. Keep DDS out of scope.
+Persist and restore window position and inner size for `lil-d`, `paws`, and `dds-echo` through the shared `window-position` library.
 
 - **Depends on:** none.
-- **Minimal test:** launch one paws per display id; select an Xbox controller for one display and verify it restores on restart only for that display. Select `Virtual` and verify the mouse works while controller input is ignored. Connect the remembered controller later and verify it is selected automatically.
+- **Minimal test:** move and resize `lil-d`, `paws`, and `dds-echo`; close and relaunch each; verify both size and position restore. Legacy state without size still loads.
 
 ## Context
 
-- `paws` currently has mouse-only controls and a disabled `N/A` controller dropdown.
-- `paws` currently launches once and has no display id.
-- `gilrs` 0.11.2 provides connected-controller enumeration, stable UUIDs, connection and disconnection events, and cached axis/button state.
-- `app-state` provides per-user atomic TOML state files keyed by discriminator.
-- `single-instance` provides per-identity Windows named-mutex guards.
-- `lil-d` already has per-display window-position persistence in `rust/ui/lil-d/src/position.rs`; this story extracts it so `paws` can share the same monitor and fallback rules.
-- The current Xbox controller reports an all-zero UUID. The default gilrs WGI backend does not enumerate it; the XInput backend does.
-- The first-launch regressions were caused by verification deleting the real runtime state, not by the restore or matching code.
-- No joystick IDL, joystick control service, or DDS exists yet.
-- `paws` is per display: each window is tied to one display id and its format-manager controller services later.
+- `window-position` currently stores only position, monitor name, resolution, and relative offset.
+- `lil-d` and `paws` restore and save position; neither saves inner size.
+- `dds-echo` has no placement persistence.
+- `window-position` uses winit types and already supports per-display state.
+- `dds-echo` is a singleton and should use a keyed state file, not a display id.
+- The `AGENTS.md` rule already requires GUI tests to use a temporary `LOCALAPPDATA` and never touch the real runtime state.
+- The controller work is complete and committed; this story only covers placement.
 
 ## Decisions
 
-1. **Use `gilrs` 0.11.2 with the `xinput` backend** for controller enumeration and state. The default WGI backend does not see the current controller.
-2. **One paws per display id.** `paws` takes a required `--display-id <id>`.
-3. **Persist per display id** in `%LOCALAPPDATA%\to-stations\paws\<display_id>.toml`.
-4. **Remembered controller identity** is `(name, UUID, last gilrs id)`. Match by UUID and name, and prefer the saved gilrs id to disambiguate identical devices.
-5. **Startup:** if the remembered controller is connected, select it; otherwise select `Virtual`. Never auto-select a different controller.
-6. **Appearance:** if the remembered controller appears later, select it automatically, even if `Virtual` or another controller is active.
-7. **Explicit `Virtual`:** clears the remembered controller, so it will not auto-reselect.
-8. **Different controller selected:** replaces the remembered controller.
-9. **Disconnect:** if the selected remembered controller disconnects, fall back to `Virtual` but keep it remembered so it auto-reselects when it reconnects.
-10. **Filter:** list only controllers whose name contains `Xbox` or `XInput` (case-insensitive).
-11. **Modes:** `Virtual` uses mouse control; controller mode mirrors the selected device and ignores mouse control.
-12. **Single instance per display:** acquire `paws-display-<id>`; a duplicate for the same display id exits.
-13. **No DDS, station identity, or control service** in this story.
-14. **Launch integration:** `launch-rust.ps1` starts one paws per display id; `cleanup.ps1` already stops all paws.
-15. **Window position persistence (tracked by the separate `window-placement` story):** extract `lil-d`'s position logic into a shared `window-position` library and use it from both apps. `paws` restores and saves its position per display id in the same state file as the controller.
-16. **Enumeration retry:** while a remembered controller exists but is not selected, re-enumerate every 500 ms until it is found or the selection clears.
-17. **Zero-UUID matching:** treat an all-zero saved UUID as unknown. Match by name first, preferring the saved gilrs id. If the name changed, fall back to the saved id, or to the only controller if exactly one exists; reject ambiguous multiple matches.
-18. **Verification isolation:** never delete the real `%LOCALAPPDATA%\to-stations` state; GUI smoke tests use a temporary `LOCALAPPDATA`.
+1. **Store inner size**, not outer size: `width` and `height` are `window.inner_size()`.
+2. Extend `SavedPosition` and `ResolvedPosition`; keep the existing monitor, visibility, primary-monitor, and cascade rules.
+3. **Legacy state without size** keeps the app's default size and upgrades on the next save.
+4. Add key-based state APIs so `dds-echo` uses `dds-echo\window.toml`.
+5. `lil-d` restores size before position and saves after resize.
+6. `paws` restores size, tracks position and size, and saves both in the existing `paws\<display_id>.toml`.
+7. `dds-echo` restores and tracks placement in `dds-echo\window.toml`.
+8. Do not extract a new placement tracker yet; keep app-specific tracking thin.
+9. Verification uses a temporary `LOCALAPPDATA`.
 
 ## Scope
 
 **In scope**
 
-- `--display-id` and one paws window per display id.
-- Per-display state persistence for the remembered controller.
-- `gilrs` controller enumeration, selection, state polling, and Xbox filtering.
-- Virtual mode and controller mode switching.
-- Controller-state mirroring for sticks, face buttons, D-pad, bumpers, and triggers.
-- Mouse-control gating in controller mode.
-- Per-display window-position restore and save, sharing `lil-d`'s monitor and visibility rules.
-- Build/deploy/launch/cleanup integration.
-- Planning, architecture, and version documentation.
+- Position plus inner-size persistence in `window-position`.
+- Keyed state paths for singleton applications.
+- Size restore and save in `lil-d` and `paws`.
+- New placement persistence in `dds-echo`.
+- Legacy-state compatibility and tests.
+- Architecture and planning updates.
 
 **Out of scope**
 
-- DDS, joystick topics, contracts, and the joystick control service.
-- Cursor movement, format-manager commands, and display control.
-- Station identity.
-- C++ mirror.
-- Force feedback.
+- Saving outer-window size or decorations.
+- Restoring maximized, minimized, or fullscreen state.
+- Monitor-layout changes beyond the existing fallback rules.
+- Any DDS, controller, or format changes.
 
-## Display identity and persistence
+## Shared `window-position` changes
 
-`rust/ui/paws/src/state.rs` (new):
+`rust/lib/window-position/src/lib.rs`:
 
 ```rust
-#[derive(Serialize, Deserialize, Default)]
-pub(crate) struct SavedState {
+pub struct SavedPosition {
+    pub monitor: Option<String>,
+    pub monitor_width: Option<u32>,
+    pub monitor_height: Option<u32>,
+    pub x: i32,
+    pub y: i32,
     #[serde(default)]
-    pub(crate) controller: Option<SavedController>,
+    pub width: Option<u32>,
     #[serde(default)]
-    pub(crate) position: Option<window_position::SavedPosition>,
+    pub height: Option<u32>,
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
-pub(crate) struct SavedController {
-    pub(crate) name: String,
-    pub(crate) uuid: [u8; 16],
-    pub(crate) id: usize,
+pub struct ResolvedPosition {
+    pub position: PhysicalPosition<i32>,
+    pub size: Option<PhysicalSize<u32>>,
+    pub saved: Option<SavedPosition>,
 }
 ```
 
-- Load via `app_state::state_path("paws", &display_id.to_string())`.
-- Save after a user selection:
-  - controller selected: save its identity;
-  - `Virtual` selected: save `controller: None`.
-- Missing, unreadable, or malformed state falls back to `Virtual`.
-- Save failures are logged and do not block the UI.
-- The display id is shown in the window header, for example `paws #0`.
-
-## Window position persistence
-
-**Ownership:** the detailed placement plan below belongs to the separate `window-placement` story. It is kept here because the working tree already contains the first part of that story; `window-placement` also adds inner-size persistence and `dds-echo`.
-
-Extract `rust/ui/lil-d/src/position.rs` into a new shared `rust/lib/window-position` crate:
-
-- `SAVE_INTERVAL` (250 ms).
-- `SavedPosition` and `ResolvedPosition`.
-- `should_save`.
-- `load(application, display_id)` and `save(application, display_id, position)`.
-- `restore_or_cascade(window, application, display_id)`.
-- `restore_or_cascade_with(saved, window, display_id)`.
-- `saved_from_window` and `saved_from_window_at`.
-
-Update `lil-d` to use `window-position` with application name `"lil-d"` and remove its local `position.rs`.
-
-Paws:
-
-- Enable Slint's `unstable-winit-030` feature.
-- Load `SavedState.position` at startup.
-- After `ui.show()`, attempt:
-  - `ui.window().with_winit_window(...)`;
-  - `window_position::restore_or_cascade_with(saved, winit_window, display_id)`;
-  - `winit_window.set_outer_position(resolved.position)`;
-  - store and save the resolved position.
-- If the winit window is not ready, retry from the 16 ms timer.
-- Track `ui.window().position()` in the same timer and save at most every `SAVE_INTERVAL`.
-- Flush the position on `on_close_requested` with `force = true`.
-- Always write `SavedState { controller, position }` so controller and position do not clobber each other.
-
-## Controller selection semantics
-
-`rust/ui/paws/src/gamepad.rs` (new):
+- Add `SavedPosition::size() -> Option<PhysicalSize<u32>>`; reject zero dimensions.
+- `saved_from_window_at` captures `window.inner_size()`.
+- `choose_position` uses the saved size when present, otherwise the current inner size.
+- `ResolvedPosition.size` returns the size to apply.
+- Add keyed state functions:
 
 ```rust
-pub(crate) struct Choice {
-    pub(crate) id: gilrs::GamepadId,
-    pub(crate) name: String,
-    pub(crate) uuid: [u8; 16],
-}
-
-pub(crate) enum Selection {
-    Virtual,
-    Gamepad(gilrs::GamepadId),
-}
-
-pub(crate) fn xbox_choices(gilrs: &gilrs::Gilrs) -> Vec<Choice>;
-pub(crate) fn selection_for_index(index: i32, choices: &[Choice]) -> Selection;
-pub(crate) fn find_remembered(
-    choices: &[Choice],
-    saved: &SavedController,
-) -> Option<gilrs::GamepadId>;
+pub fn load_key(application: &str, key: &str) -> Option<SavedPosition>;
+pub fn save_key(application: &str, key: &str, position: &SavedPosition) -> io::Result<()>;
+pub fn restore_or_cascade_key(
+    window: &winit::window::Window,
+    application: &str,
+    key: &str,
+    cascade_slot: u32,
+) -> ResolvedPosition;
 ```
 
-Rules:
+- Keep the display-id wrappers for `lil-d` and `paws`.
+- Update the position tests for the new fields and add:
+  - size round trip;
+  - legacy state with no size;
+  - restored size and position survive save/load.
 
-- Dropdown index 0 is `Virtual`; index N is `choices[N - 1]`.
-- On `Connected`, refresh the list. If the remembered controller is now available, select it. Otherwise leave the current selection alone.
-- On `Disconnected`, refresh the list. If the selected controller disappeared, select `Virtual` and keep the remembered identity.
-- Auto-reselection must never choose a controller that does not match the remembered identity.
-- A user-selected controller changes the remembered identity and is saved.
-- A user-selected `Virtual` clears and saves the empty identity.
-- Controller labels include the controller name and id, for example `Xbox Wireless Controller (0)`.
+## `lil-d`
 
-### Controller detection hardening
+`rust/ui/lil-d/src/app.rs`:
 
-- `remembered_index` treats an all-zero saved UUID as unknown.
-- Matching order:
-  1. exact name + UUID + preferred gilrs id;
-  2. exact name + UUID;
-  3. zero UUID: name match, preferring the saved id;
-  4. zero UUID with a changed name: saved id, or the only controller if exactly one exists;
-  5. non-zero UUID with a changed name: unique UUID match;
-  6. otherwise no match.
-- If multiple controllers remain ambiguous, do not auto-select.
-- While a remembered controller exists but is not selected, re-enumerate about every 500 ms and retry matching.
-- Only refresh the dropdown model when the controller list actually changes.
-- Stop retrying once the remembered controller is selected or the remembered identity is cleared.
-- When a match is found under a changed backend name, update the remembered identity and save it on startup so the state self-heals.
-- Keep the existing `Connected`/`Disconnected` refresh behavior.
+- After `restore_or_cascade`:
+  - if `resolved.size` is present, call `window.request_inner_size(size)`;
+  - then `set_outer_position(resolved.position)`.
+- On `WindowEvent::Resized`:
+  - update the GL surface as today;
+  - mark the position dirty;
+  - flush with the normal throttle.
+- `flush_position` continues to call `saved_from_window`, which now includes size.
+- On focus loss and close, force-save as today.
 
-### Verification isolation
-
-- Add an `AGENTS.md` rule: never delete or overwrite the real `%LOCALAPPDATA%\to-stations` state.
-- GUI smoke tests launch processes with a temporary `LOCALAPPDATA` and remove only that directory.
-- The first-launch `lil-d` monitor change and the `paws` `Virtual` fallback were caused by deleting the real state directories during verification.
-
-## Input mapping
-
-`rust/ui/paws/src/controls.rs` (new):
-
-```rust
-#[derive(Clone, Copy, Default, PartialEq)]
-pub(crate) struct Controls {
-    pub(crate) left: (f32, f32),
-    pub(crate) right: (f32, f32),
-    pub(crate) a: bool,
-    pub(crate) b: bool,
-    pub(crate) x: bool,
-    pub(crate) y: bool,
-    pub(crate) lb: bool,
-    pub(crate) rb: bool,
-    pub(crate) lt: bool,
-    pub(crate) rt: bool,
-    pub(crate) up: bool,
-    pub(crate) down: bool,
-    pub(crate) left_dpad: bool,
-    pub(crate) right_dpad: bool,
-    pub(crate) back: bool,
-    pub(crate) start: bool,
-}
-
-pub(crate) trait PadState {
-    fn axis(&self, axis: gilrs::Axis) -> f32;
-    fn pressed(&self, button: gilrs::Button) -> bool;
-}
-
-impl PadState for gilrs::ev::state::GamepadState { ... }
-
-impl Controls {
-    pub(crate) fn read(pad: &impl PadState) -> Self;
-    pub(crate) fn neutral() -> Self;
-    pub(crate) fn apply(&self, ui: &MainWindow);
-}
-```
-
-Mappings:
-
-| Controller | UI |
-|---|---|
-| `Axis::LeftStickX/Y` | left stick, with Y inverted |
-| `Axis::RightStickX/Y` | right stick, with Y inverted |
-| `Button::South/East/West/North` | A/B/X/Y |
-| `Button::LeftTrigger/RightTrigger` | LB/RB |
-| `Axis::LeftZ/RightZ` above threshold | LT/RT |
-| `Button::DPadUp/Down/Left/Right` | D-pad |
-| `Button::Select` | Back |
-| `Button::Start` | Start |
-
-Use an 0.08 stick deadzone and clamp to `[-1, 1]`.
-
-## UI changes
-
-`rust/ui/paws/ui/paws.slint`:
-
-- Header shows `paws #<display-id>`.
-- Replace the disabled `N/A` ComboBox:
-  - `in-out property <[string]> controllers: ["Virtual"];`
-  - `in-out property <int> controller-index: 0;`
-  - enabled always;
-  - `selected(index) => { root.controller-selected(index); }`.
-- Add `in-out property <bool> virtual-mode: true;`.
-- Add button properties: `a-down`, `b-down`, `x-down`, `y-down`, `lb-down`, `rb-down`, `lt-down`, `rt-down`, `up-down`, `down-down`, `left-down`, `right-down`, `back-down`, `start-down`.
-- Refactor `ControllerButton`:
-  - `down` is supplied by the parent;
-  - `TouchArea` emits `pressed-changed(bool)`;
-  - each instance forwards to `control-pressed("<name>", value)`.
-- Add `in property <bool> interactive` to `Stick`, bound to `root.virtual-mode`.
-- Add callbacks:
-  - `controller-selected(int)`
-  - `control-pressed(string, bool)`.
-- Footer reflects mode:
-  - Virtual: `Virtual mode: use the mouse or select a connected controller.`
-  - Controller: `Controller mode: the window mirrors the selected controller.`
-
-## Rust wiring
+## `paws`
 
 `rust/ui/paws/src/main.rs`:
 
-- Parse `--display-id` with `clap`.
-- Acquire the `paws-display-<id>` guard before loading state or creating the UI.
-- Initialize `Gilrs` best-effort; if it fails, run with only `Virtual`.
-- Load `SavedState` for the display id.
-- Create the UI, populate the controller model, and restore the remembered controller if present.
-- Wire `controller-selected`, `control-pressed`, `stick-drag`, and `stick-release`.
-  - Stick and button callbacks update the UI only in `Virtual` mode.
-- Add a 16 ms `slint::Timer` that:
-  - drains gilrs events;
-  - refreshes the controller list on connect/disconnect;
-  - auto-selects the remembered controller when it appears;
-  - falls back to `Virtual` on disconnect;
-  - applies the selected controller state to the UI;
-  - leaves controls untouched in `Virtual` mode.
-- Keep the timer alive until `ui.run()` returns.
+- `SavedState.position` already stores `window_position::SavedPosition`; the size fields are automatic.
+- In `restore_position`:
+  - apply `resolved.size` via `winit_window.request_inner_size(size)`;
+  - then `set_outer_position(resolved.position)`.
+- Add `last_size: Option<(u32, u32)>`.
+- In `track_position`:
+  - compare both `ui.window().position()` and `ui.window().size()`;
+  - mark dirty on either change;
+  - save at most every 250 ms.
+- `flush_position` continues to use `saved_from_window_at`, which captures the actual inner size.
+- The resolved state is saved on startup, so legacy files gain width/height.
 
-## Launch integration
+## `dds-echo`
 
-`scripts/launch-rust.ps1`:
+`rust/tool/dds-echo/`:
 
-- After raising the display windows, start one paws per display id:
-  - `paws.exe --display-id <id>`.
-- Raise each paws window.
-- Update the launch message.
-- `scripts/cleanup.ps1` already stops all paws processes; no change.
-- `scripts/build.ps1` already scans and deploys paws; no change.
+- Add `window-position` and Slint's `unstable-winit-030` feature.
+- Use `window_position::load_key("dds-echo", "window")` and `save_key`.
+- After the existing setup and before `run()`:
+  - call `app.show()?`;
+  - restore through `app.window().with_winit_window(...)`;
+  - apply `resolved.size`, then `resolved.position`;
+  - retry from the placement timer if the winit window is not ready.
+- Add a placement timer (about 250 ms) that tracks `app.window().position()` and `app.window().size()`.
+- Save at most every 250 ms while changed.
+- Register `app.window().on_close_requested(...)` to force-save and return `HideWindow`.
+- Duplicate launches still activate the existing window and create no new state.
+- State path: `%LOCALAPPDATA%\to-stations\dds-echo\window.toml`.
 
-## Documentation updates
+## Verification isolation
 
-- `docs/versions.md`: record `gilrs` 0.11.2.
+- Use a temporary `LOCALAPPDATA` for every GUI smoke test.
+- Remove only the temporary directory.
+- Never delete or overwrite the real `%LOCALAPPDATA%\to-stations` state.
+- The `AGENTS.md` rule is already in place.
+
+## Documentation
+
 - `planning/architecture.md`:
-  - Paws section: one window per display id, persisted controller selection, window position, auto-reselection rules, no DDS.
-  - Service and display instances: add `paws-display-<id>`.
-  - Runtime state examples: add `paws\<display_id>.toml` with controller and position.
-  - Shared Rust libraries: add `window-position`, used by `lil-d` and `paws`.
-- `planning/backlog.md`, `planning/completed_stories.md`, and `planning/current_story.md`: keep the story state current.
+  - `window-position` stores position and inner size.
+  - `lil-d\<display_id>.toml` and `paws\<display_id>.toml` include size.
+  - Add `dds-echo\window.toml`.
+  - Mention all three apps use the shared placement library.
+  - Paws section: remembers position and size.
+- `docs/versions.md`: no new external component.
+- `planning/backlog.md` and `planning/current_story.md`: keep the story state current.
 
 ## Tests
 
 Automated:
 
-- `Controls::neutral` is all zero and false.
-- Axis clamp, Y inversion, and deadzone behavior.
-- Face buttons, bumpers, triggers, D-pad, back, and start map correctly.
-- `selection_for_index`: 0 -> `Virtual`, 1 -> first controller, out-of-range -> `Virtual`.
-- `find_remembered`:
-  - exact UUID and name match;
-  - saved id preferred when names and UUIDs collide;
-  - zero UUID matches by name and prefers the saved id;
-  - zero UUID with a changed name matches the saved id;
-  - zero UUID with a changed name and one controller matches it;
-  - zero UUID with multiple ambiguous matches -> none;
-  - non-zero UUID with a changed name and a unique UUID -> match;
-  - no match -> none;
-  - different controller -> none.
-- Startup retry re-enumerates every 500 ms while the remembered controller is pending.
-- The XInput backend enumerates the current controller; the WGI backend does not.
-- Selection-state rules:
-  - user selects a controller -> remembered and saved;
-  - user selects `Virtual` -> remembered cleared and saved;
-  - disconnect -> `Virtual` but remembered kept;
-  - remembered appears -> selected;
-  - other controller appears -> not selected.
-- Window-position tests move to `window-position` and cover monitor-relative round trip, preferred-monitor restore, resolution mismatch, off-screen fallback, and cascade.
-- `SavedState` round trip includes both controller and position.
-- Existing `stick::clamp_stick` tests still pass.
+- `SavedPosition` size round trip.
+- Legacy state without size.
+- Restored size and position persistence.
+- Existing monitor/cascade tests.
+- `paws` `SavedState` controller + position + size round trip.
+- `cargo test --manifest-path rust/Cargo.toml`.
+- `cargo clippy` for changed crates.
+- `.\scripts\build.ps1 -Test`.
+- `.\scripts\build.ps1`.
 
-Manual (use a temporary `LOCALAPPDATA`; never delete the real state):
+Manual, using a temporary `LOCALAPPDATA`:
 
-1. Launch the fleet with two display ids; verify two paws windows, each labelled with its id.
-2. Select an Xbox controller for display 0; verify only that window mirrors it.
-3. Restart; verify display 0 restores that controller and display 1 stays `Virtual`.
-4. Select `Virtual` for display 0; restart; verify it stays `Virtual`.
-5. Disconnect the selected controller; verify fallback to `Virtual`.
-6. Reconnect it; verify automatic reselection.
-7. Connect a different Xbox controller; verify it is listed but not auto-selected.
-8. Verify the dropdown contains only Xbox/XInput controllers.
-9. With an all-zero-UUID controller, verify startup auto-selection still works.
-10. Move each paws window to a different position, close it, and relaunch; verify each restores its own position.
-11. Move a paws window to another monitor, close, and relaunch; verify it returns there when that monitor is present.
-12. Remove or change the saved monitor/resolution; verify fallback to the main monitor or cascade instead of off-screen.
-13. Verify controller selection is still restored after position saves.
-14. Run `cleanup.ps1`; verify all paws windows stop.
+1. Move and resize `lil-d`; close/relaunch; verify both restore.
+2. Move and resize `paws`; close/relaunch; verify both restore and controller selection remains.
+3. Move and resize `dds-echo`; close/relaunch; verify both restore.
+4. Verify legacy state files without `width`/`height` load and upgrade.
+5. Verify the real `%LOCALAPPDATA%\to-stations` state is untouched.
 
 ## Acceptance
 
-- `paws` accepts required `--display-id`, and one window launches per display id.
-- The dropdown lists `Virtual` plus connected Xbox-style controllers with ids.
-- The remembered controller restores per display id; no other controller auto-selects.
-- A remembered controller appearing later is auto-selected.
-- Explicit `Virtual` clears the remembered controller.
-- Controller mode mirrors the controller and ignores mouse input.
-- `Virtual` mode uses mouse input and ignores controller input.
-- State persists in `paws\<display_id>.toml`.
-- Each paws window restores its own window position per display id.
-- Controller selection and window position coexist in the same state file.
-- Startup retries controller enumeration and zero-UUID controllers match by name/id.
-- Verification uses a temporary `LOCALAPPDATA`; real runtime state is never deleted.
-- No DDS, IDL, contracts, or control-service changes.
-- `gilrs` 0.11.2 is recorded in `docs/versions.md`.
+- `lil-d`, `paws`, and `dds-echo` restore both position and inner size.
+- Legacy state remains compatible.
+- `paws` keeps controller and placement state in one file.
+- `dds-echo` uses `dds-echo\window.toml`.
+- `window-position` exposes keyed state for singleton apps.
+- No new external dependencies or version changes.
+- Verification does not touch real runtime state.
 
 ## Verification
 
@@ -370,60 +199,37 @@ Manual (use a temporary `LOCALAPPDATA`; never delete the real state):
 cargo test --manifest-path rust/Cargo.toml
 .\scripts\build.ps1 -Test
 .\scripts\build.ps1
-.\scripts\launch-rust.ps1
-.\scripts\cleanup.ps1
 ```
 
-One manual two-display controller run, including restart and reconnect checks; no screenshots and no repeated UI runs.
+One manual move/resize/restart pass for all three apps using a temporary `LOCALAPPDATA`; no screenshots and no repeated UI runs.
 
 ## Risks
 
-- **Persistence identity:** UUID may be shared by identical controllers; use the saved gilrs id as a tiebreaker.
-- **Stable ids:** gilrs ids are session-scoped, so UUID and name are the primary key.
-- **Auto-reselection:** only the remembered controller may reselect; guard against choosing a different device.
-- **Explicit Virtual:** clear the remembered controller or it reselects immediately.
-- **Per-display state:** two paws instances must never share a display id; use the guard.
-- **Launch order:** raise each paws window after its display; multiple windows may overlap.
-- **Button refactor:** moving state from component-local to MainWindow properties touches every control.
-- **Mouse gating:** sticks and buttons must not visually react to mouse in controller mode.
-- **Gilrs backend:** the Windows default WGI backend does not enumerate the current controller; use the XInput backend.
-- **Slint winit accessor:** requires the `unstable-winit-030` feature and a matching winit 0.30 version.
-- **Restore timing:** the winit window may not exist immediately after `show()`; retry from the timer if needed.
-- **Shared-file writes:** position and controller saves must always write the full `SavedState`.
-- **Existing state compatibility:** files without `[position]` must still load.
-- **lil-d refactor:** moving `position.rs` must preserve lil-d's monitor and fallback behavior.
-- **Zero-UUID ambiguity:** multiple same-name controllers with no matching saved id must not be guessed.
-- **Retry loop:** only the remembered controller may be selected during the retry; stop when it is selected or the remembered identity is cleared.
-- **Test isolation:** deleting real runtime state caused the false first-launch regressions; never repeat that.
-- **No automated UI test:** manual position and controller checks remain necessary.
+- **Asynchronous resize:** `request_inner_size` may apply after the position; verify no visible jump.
+- **Slint size clamping:** minimum/preferred sizes may clamp restored sizes; the next save records the actual size.
+- **Outer vs inner size:** mixing them would make restored sizes drift; consistently use inner size.
+- **Legacy state:** missing size fields must not fail deserialization.
+- **Resize saves:** `lil-d` must mark dirty on `Resized`, not only `Moved`.
+- **Timer lifetime:** keep the `dds-echo` placement timer alive for the whole run.
+- **Test isolation:** never delete the real state directory.
 
 ## Files touched
 
-- `AGENTS.md`
-- `docs/versions.md`
 - `planning/architecture.md`
 - `planning/backlog.md`
 - `planning/completed_stories.md`
 - `planning/current_story.md`
-- `rust/Cargo.lock`
-- `rust/Cargo.toml`
-- `rust/lib/window-position/Cargo.toml` (new)
-- `rust/lib/window-position/src/lib.rs` (new)
-- `rust/ui/lil-d/Cargo.toml`
+- `rust/lib/window-position/src/lib.rs`
 - `rust/ui/lil-d/src/app.rs`
-- `rust/ui/lil-d/src/main.rs`
-- `rust/ui/lil-d/src/position.rs` (deleted, moved into `window-position`)
-- `rust/ui/paws/Cargo.toml`
 - `rust/ui/paws/src/main.rs`
-- `rust/ui/paws/src/gamepad.rs` (new)
-- `rust/ui/paws/src/controls.rs` (new)
-- `rust/ui/paws/src/state.rs` (new)
-- `rust/ui/paws/ui/paws.slint`
-- `scripts/launch-rust.ps1`
+- `rust/ui/paws/src/state.rs` (only if the round-trip test changes)
+- `rust/tool/dds-echo/Cargo.toml`
+- `rust/tool/dds-echo/src/main.rs`
+- `rust/Cargo.lock` (only if dependencies change)
+- `docs/versions.md` (only if needed; no expected change)
 
 ## Bookkeeping
 
-- `paws` was completed at `2026-11-12 15:33:37` and moved to `completed_stories.md` under "Later increments".
-- `xbox-controller` is `in progress` in `backlog.md`.
-- `window-placement` was added to `backlog.md` as `todo`, depending on `xbox-controller`; it covers position and inner-size persistence for `lil-d`, `paws`, and `dds-echo`.
-- Do not move `xbox-controller` to `completed_stories.md` until the user asks to plan the next story.
+- `xbox-controller` was completed at `2026-11-13 11:15:47` and moved to `completed_stories.md` under "Later increments".
+- `window-placement` is `in progress` in `backlog.md`.
+- Do not move `window-placement` to `completed_stories.md` until the user asks to plan the next story.

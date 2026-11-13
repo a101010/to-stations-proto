@@ -11,21 +11,15 @@ Conventions:
 
 ## Stories
 
-### xbox-controller
-Connect Xbox-style controllers to each paws window. Add a required `--display-id`, launch one paws per display id, and persist the selected controller and window position per display id. The dropdown lists `Virtual` plus every connected Xbox-style controller with its controller id. On startup, restore the remembered controller for that display if it is present; otherwise use `Virtual`. A remembered controller that appears later is selected automatically; no other controller is auto-selected. Use the gilrs XInput backend on Windows, retry controller enumeration while the remembered controller is pending, and treat an all-zero UUID as unknown so a driver-reported zero UUID can still match by name or saved id. In `Virtual` mode the mouse controls the window; in controller mode the window mirrors the selected controller and ignores mouse control. DDS remains out of scope.
-- **Depends on:** none.
-- **Minimal test:** launch one paws per display id; select an Xbox controller for one display and verify it restores on restart only for that display. Select `Virtual` and verify the mouse works while controller input is ignored. Connect the remembered controller later and verify it is selected automatically. Move each window, restart, and verify each restores its own position. With an all-zero-UUID controller whose name changed between backends, verify startup auto-selection still works.
-- **Status:** in progress.
-
 ### window-placement
-Persist and restore window position and inner size for `lil-d`, `paws`, and `dds-echo` through the shared `window-position` library. The uncommitted `window-position` extraction and `paws` position restore are the first part of this story; extend them with size and `dds-echo`.
-- **Depends on:** xbox-controller
+Persist and restore window position and inner size for `lil-d`, `paws`, and `dds-echo` through the shared `window-position` library. The existing `window-position` extraction and `paws` position restore are the first part of this story; extend them with size and `dds-echo`.
+- **Depends on:** none.
 - **Minimal test:** move and resize `lil-d`, `paws`, and `dds-echo`; close and relaunch each; verify both size and position restore. Legacy state without size still loads.
-- **Status:** todo.
+- **Status:** in progress.
 
 ### paws-format-ctl
 DDS connectivity for the paws app. Show a virtual cursor controlled by the right joystick. An `A` button press acts the same as a mouse right-click. D-pad moves the current icon selection in the format-chooser format. The first format is selected by default. paws sends high-level format-independent commands to the format manager controller service. The paws app uses the display id already supplied for controller persistence to map it to the appropriate controller services.
-- **Depends on:** xbox-controller
+- **Depends on:** none
 - **Minimal test:** launch paws with a display id; the right stick moves the virtual cursor, `A` acts as a right-click, the D-pad moves the format-chooser selection with the first format selected by default, and the format controller receives the commands.
 - **Status:** todo.
 
@@ -37,7 +31,7 @@ Create the hello_world control service (`hello-ctl-service`): consume input even
 
 ### paws-two
 Create a game-controller window application (`paws-two`): a Slint window with a Saitek X-52 virtual controller. DDS and real-controller connectivity are out of scope.
-- **Depends on:** xbox-controller
+- **Depends on:** none
 - **Minimal test:** launch paws-two; the window shows a Saitek X-52 virtual controller and its controls work in `Virtual` mode.
 - **Status:** todo.
 
