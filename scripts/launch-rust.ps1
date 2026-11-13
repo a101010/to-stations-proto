@@ -5,12 +5,13 @@ Launches the Rust configuration.
 .DESCRIPTION
 Starts the applications of the Rust configuration from build/deploy: the
 hello_world model service, the view service, one format-manager service pair per
-display, the small displays (lil-d), and the paws virtual-controller window.
+display, the small displays (lil-d), and one paws virtual-controller window per
+display id.
 
 Every display has a unique numeric display id. The same id is given to its
 format controller, format view service, and lil-d. After everything starts, the
-lil-d windows are raised above the service console windows, then paws is opened
-on top.
+lil-d windows are raised above the service console windows, then the paws
+windows are opened on top.
 
 All participants read the shared DDS configuration; this script sets
 CYCLONEDDS_URI before starting them.
@@ -107,8 +108,13 @@ foreach ($process in $displayProcesses) {
     Show-DisplayWindow $process
 }
 
-$pawsProcess = Start-Process -FilePath $paws -PassThru
-Start-Sleep -Milliseconds 300
-Show-DisplayWindow $pawsProcess
+$pawsProcesses = @()
+foreach ($id in $DisplayId) {
+    $pawsProcesses += Start-Process -FilePath $paws -ArgumentList '--display-id', $id -PassThru
+    Start-Sleep -Milliseconds 300
+}
+foreach ($process in $pawsProcesses) {
+    Show-DisplayWindow $process
+}
 
-Write-Host "Started hello-service, hello-view-service, lil-d for display ids: $($DisplayId -join ', '), and paws"
+Write-Host "Started hello-service, hello-view-service, lil-d and paws for display ids: $($DisplayId -join ', ')"

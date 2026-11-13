@@ -3,6 +3,7 @@ import { ComboBox } from "std-widgets.slint";
 component Stick inherits Rectangle {
     in-out property <float> value-x: 0;
     in-out property <float> value-y: 0;
+    in property <bool> interactive: true;
     callback drag(length, length, length);
     callback released();
     property <bool> dragging: false;
@@ -29,6 +30,9 @@ component Stick inherits Rectangle {
         width: parent.width;
         height: parent.height;
         pointer-event(event) => {
+            if (!root.interactive) {
+                return EventResult.reject;
+            }
             if (event.kind == PointerEventKind.down) {
                 root.dragging = true;
                 root.drag(
@@ -58,7 +62,8 @@ component Stick inherits Rectangle {
 
 component ControllerButton inherits Rectangle {
     in property <string> label;
-    property <bool> down: false;
+    in property <bool> down;
+    callback pressed-changed(bool);
 
     width: 44px;
     height: 44px;
@@ -81,11 +86,11 @@ component ControllerButton inherits Rectangle {
         height: parent.height;
         pointer-event(event) => {
             if (event.kind == PointerEventKind.down) {
-                root.down = true;
+                root.pressed-changed(true);
                 return EventResult.accept;
             }
             if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
-                root.down = false;
+                root.pressed-changed(false);
                 return EventResult.accept;
             }
             return EventResult.reject;
@@ -101,13 +106,33 @@ export component MainWindow inherits Window {
     min-height: 480px;
     background: #121417;
 
+    in-out property <int> display-id: 0;
+    in-out property <[string]> controllers: ["Virtual"];
+    in-out property <int> controller-index: 0;
+    in-out property <bool> virtual-mode: true;
     in-out property <float> left-x: 0;
     in-out property <float> left-y: 0;
     in-out property <float> right-x: 0;
     in-out property <float> right-y: 0;
+    in-out property <bool> a-down: false;
+    in-out property <bool> b-down: false;
+    in-out property <bool> x-down: false;
+    in-out property <bool> y-down: false;
+    in-out property <bool> lb-down: false;
+    in-out property <bool> rb-down: false;
+    in-out property <bool> lt-down: false;
+    in-out property <bool> rt-down: false;
+    in-out property <bool> up-down: false;
+    in-out property <bool> down-down: false;
+    in-out property <bool> left-down: false;
+    in-out property <bool> right-down: false;
+    in-out property <bool> back-down: false;
+    in-out property <bool> start-down: false;
 
     callback stick-drag(int, length, length, length);
     callback stick-release(int);
+    callback control-pressed(string, bool);
+    callback controller-selected(int);
 
     VerticalLayout {
         padding: 16px;
@@ -118,7 +143,7 @@ export component MainWindow inherits Window {
             height: 44px;
 
             Text {
-                text: "paws";
+                text: "paws #" + root.display-id;
                 color: #f2f5f8;
                 font-size: 26px;
                 font-weight: 700;
@@ -134,10 +159,11 @@ export component MainWindow inherits Window {
             }
 
             ComboBox {
-                model: ["N/A"];
-                current-index: 0;
-                enabled: false;
-                width: 220px;
+                model: root.controllers;
+                current-index: root.controller-index;
+                selected(value) => { root.controller-selected(self.current-index); }
+                enabled: true;
+                width: 280px;
                 height: 34px;
             }
         }
@@ -159,6 +185,8 @@ export component MainWindow inherits Window {
 
                 ControllerButton {
                     label: "LT";
+                    down: root.lt-down;
+                    pressed-changed(value) => { root.control-pressed("LT", value); }
                     x: body.width * 0.08;
                     y: body.height * 0.04;
                     width: body.width * 0.16;
@@ -166,6 +194,8 @@ export component MainWindow inherits Window {
                 }
                 ControllerButton {
                     label: "RT";
+                    down: root.rt-down;
+                    pressed-changed(value) => { root.control-pressed("RT", value); }
                     x: body.width * 0.76;
                     y: body.height * 0.04;
                     width: body.width * 0.16;
@@ -173,6 +203,8 @@ export component MainWindow inherits Window {
                 }
                 ControllerButton {
                     label: "LB";
+                    down: root.lb-down;
+                    pressed-changed(value) => { root.control-pressed("LB", value); }
                     x: body.width * 0.16;
                     y: body.height * 0.16;
                     width: body.width * 0.14;
@@ -180,6 +212,8 @@ export component MainWindow inherits Window {
                 }
                 ControllerButton {
                     label: "RB";
+                    down: root.rb-down;
+                    pressed-changed(value) => { root.control-pressed("RB", value); }
                     x: body.width * 0.70;
                     y: body.height * 0.16;
                     width: body.width * 0.14;
@@ -193,6 +227,7 @@ export component MainWindow inherits Window {
                     y: body.height * 0.36;
                     value-x: root.left-x;
                     value-y: root.left-y;
+                    interactive: root.virtual-mode;
                     drag(dx, dy, radius) => { root.stick-drag(0, dx, dy, radius); }
                     released => { root.stick-release(0); }
                 }
@@ -204,6 +239,7 @@ export component MainWindow inherits Window {
                     y: body.height * 0.56;
                     value-x: root.right-x;
                     value-y: root.right-y;
+                    interactive: root.virtual-mode;
                     drag(dx, dy, radius) => { root.stick-drag(1, dx, dy, radius); }
                     released => { root.stick-release(1); }
                 }
@@ -211,6 +247,8 @@ export component MainWindow inherits Window {
                 // D-pad: up, down, left, right around a center point.
                 ControllerButton {
                     label: "U";
+                    down: root.up-down;
+                    pressed-changed(value) => { root.control-pressed("Up", value); }
                     width: body.width * 0.072;
                     height: self.width;
                     x: body.width * 0.22 - self.width / 2;
@@ -218,6 +256,8 @@ export component MainWindow inherits Window {
                 }
                 ControllerButton {
                     label: "D";
+                    down: root.down-down;
+                    pressed-changed(value) => { root.control-pressed("Down", value); }
                     width: body.width * 0.072;
                     height: self.width;
                     x: body.width * 0.22 - self.width / 2;
@@ -225,6 +265,8 @@ export component MainWindow inherits Window {
                 }
                 ControllerButton {
                     label: "L";
+                    down: root.left-down;
+                    pressed-changed(value) => { root.control-pressed("Left", value); }
                     width: body.width * 0.072;
                     height: self.width;
                     x: body.width * 0.22 - self.width * 1.5;
@@ -232,6 +274,8 @@ export component MainWindow inherits Window {
                 }
                 ControllerButton {
                     label: "R";
+                    down: root.right-down;
+                    pressed-changed(value) => { root.control-pressed("Right", value); }
                     width: body.width * 0.072;
                     height: self.width;
                     x: body.width * 0.22 + self.width * 0.5;
@@ -241,6 +285,8 @@ export component MainWindow inherits Window {
                 // Face buttons in a diamond.
                 ControllerButton {
                     label: "Y";
+                    down: root.y-down;
+                    pressed-changed(value) => { root.control-pressed("Y", value); }
                     width: body.width * 0.075;
                     height: self.width;
                     x: body.width * 0.79 - self.width / 2;
@@ -248,6 +294,8 @@ export component MainWindow inherits Window {
                 }
                 ControllerButton {
                     label: "A";
+                    down: root.a-down;
+                    pressed-changed(value) => { root.control-pressed("A", value); }
                     width: body.width * 0.075;
                     height: self.width;
                     x: body.width * 0.79 - self.width / 2;
@@ -255,6 +303,8 @@ export component MainWindow inherits Window {
                 }
                 ControllerButton {
                     label: "X";
+                    down: root.x-down;
+                    pressed-changed(value) => { root.control-pressed("X", value); }
                     width: body.width * 0.075;
                     height: self.width;
                     x: body.width * 0.79 - self.width * 1.2;
@@ -262,6 +312,8 @@ export component MainWindow inherits Window {
                 }
                 ControllerButton {
                     label: "B";
+                    down: root.b-down;
+                    pressed-changed(value) => { root.control-pressed("B", value); }
                     width: body.width * 0.075;
                     height: self.width;
                     x: body.width * 0.79 + self.width * 0.2;
@@ -270,6 +322,8 @@ export component MainWindow inherits Window {
 
                 ControllerButton {
                     label: "Back";
+                    down: root.back-down;
+                    pressed-changed(value) => { root.control-pressed("Back", value); }
                     width: body.width * 0.085;
                     height: body.height * 0.045;
                     x: body.width * 0.45 - self.width / 2;
@@ -277,6 +331,8 @@ export component MainWindow inherits Window {
                 }
                 ControllerButton {
                     label: "Start";
+                    down: root.start-down;
+                    pressed-changed(value) => { root.control-pressed("Start", value); }
                     width: body.width * 0.085;
                     height: body.height * 0.045;
                     x: body.width * 0.55 - self.width / 2;
@@ -286,7 +342,9 @@ export component MainWindow inherits Window {
         }
 
         Text {
-            text: "Local virtual controller. Game-controller binding and DDS are not connected yet.";
+            text: root.virtual-mode
+                ? "Virtual mode: use the mouse or select a connected controller."
+                : "Controller mode: the window mirrors the selected controller.";
             color: #858e98;
             font-size: 13px;
             horizontal-alignment: center;
