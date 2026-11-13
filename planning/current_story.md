@@ -1,149 +1,285 @@
-# Current story: paws
+# Current story: xbox-controller
 
 This file is the detailed, living plan for the one active story. It is rewritten for each story. The backlog in `backlog.md` holds all work and the per-story status.
 
 ## Story
 
-Create the game-controller window application (`paws`): a Slint window with an Xbox-style virtual controller, local stick and button interaction, and a controller-selection dropdown that shows `N/A` until binding exists. Add it to the Rust build/deploy and launch/cleanup scripts.
+Add Xbox-style controller input to `paws`, one window per display id, with per-display persistence of the last selected controller and automatic reselection when that controller appears. Keep DDS out of scope.
 
 - **Depends on:** none.
-- **Minimal test:** `launch-rust.ps1` brings up the `paws` window showing the virtual controller; sticks move and buttons highlight.
+- **Minimal test:** launch one paws per display id; select an Xbox controller for one display and verify it restores on restart only for that display. Select `Virtual` and verify the mouse works while controller input is ignored. Connect the remembered controller later and verify it is selected automatically.
 
 ## Context
 
-- `paws` is the controller GUI named in `architecture.md` and lives at `rust/ui/paws`.
-- `dds-echo` already proves the Slint 1.18 toolchain, build script, and Windows windowing backend.
-- No joystick IDL, joystick control service, station identity, or game-controller binding exists yet.
-- Real game-controller binding and the joystick control service are explicitly later, not-yet-broken-out work.
-- `paws` is a per-station application, so multiple instances are legitimate; do not use the `single-instance` guard.
-- The Rust launch script now starts one `paws` window as part of the configuration.
-- `paws` needs no DDS participant, contracts, IDL, or assets for this story.
+- `paws` currently has mouse-only controls and a disabled `N/A` controller dropdown.
+- `paws` currently launches once and has no display id.
+- `gilrs` 0.11.2 provides connected-controller enumeration, stable UUIDs, connection and disconnection events, and cached axis/button state.
+- `app-state` provides per-user atomic TOML state files keyed by discriminator.
+- `single-instance` provides per-identity Windows named-mutex guards.
+- No joystick IDL, joystick control service, or DDS exists yet.
+- `paws` is per display: each window is tied to one display id and its format-manager controller services later.
 
 ## Decisions
 
-1. **Slint window, no DDS.** `paws` is a standalone Slint UI with local state only.
-2. **Xbox-style virtual controller drawn with Slint primitives.** Rectangles, rounded rectangles, and circles; no image assets.
-3. **Local interactivity.** Sticks drag and return to center; buttons, bumpers, and triggers highlight while pressed.
-4. **Controller selection is a dropdown, not a bind button.** Reserve header space for a controller `ComboBox` whose only entry is `N/A`; it is disabled until binding exists.
-5. **Binding is deferred.** No gamepad detection, no real binding, no station identity, and no DDS in this story.
-6. **No single-instance guard.** Multiple `paws` windows are allowed.
-7. **Launch integration is in scope.** One `paws.exe` is started by `launch-rust.ps1` after the display windows are raised, and `cleanup.ps1` stops it.
-8. **Release is a GUI application.** Keep the `windows_subsystem` attribute so the release build has no console window.
-9. **No shared Slint component extraction yet.** The controller layout stays inside `paws.slint` until a second consumer appears.
+1. **Use `gilrs` 0.11.2** for controller enumeration and state.
+2. **One paws per display id.** `paws` takes a required `--display-id <id>`.
+3. **Persist per display id** in `%LOCALAPPDATA%\to-stations\paws\<display_id>.toml`.
+4. **Remembered controller identity** is `(name, UUID, last gilrs id)`. Match by UUID and name, and prefer the saved gilrs id to disambiguate identical devices.
+5. **Startup:** if the remembered controller is connected, select it; otherwise select `Virtual`. Never auto-select a different controller.
+6. **Appearance:** if the remembered controller appears later, select it automatically, even if `Virtual` or another controller is active.
+7. **Explicit `Virtual`:** clears the remembered controller, so it will not auto-reselect.
+8. **Different controller selected:** replaces the remembered controller.
+9. **Disconnect:** if the selected remembered controller disconnects, fall back to `Virtual` but keep it remembered so it auto-reselects when it reconnects.
+10. **Filter:** list only controllers whose name contains `Xbox` or `XInput` (case-insensitive).
+11. **Modes:** `Virtual` uses mouse control; controller mode mirrors the selected device and ignores mouse control.
+12. **Single instance per display:** acquire `paws-display-<id>`; a duplicate for the same display id exits.
+13. **No DDS, station identity, or control service** in this story.
+14. **Launch integration:** `launch-rust.ps1` starts one paws per display id; `cleanup.ps1` already stops all paws.
 
 ## Scope
 
 **In scope**
 
-- New `rust/ui/paws` crate and `paws.slint`.
-- Window layout and virtual-controller visuals.
-- Local stick drag and button press states.
-- Rust stick-normalization helper with unit tests.
-- Build, deploy, launch, and cleanup integration.
-- Planning and architecture updates.
+- `--display-id` and one paws window per display id.
+- Per-display state persistence for the remembered controller.
+- `gilrs` controller enumeration, selection, state polling, and Xbox filtering.
+- Virtual mode and controller mode switching.
+- Controller-state mirroring for sticks, face buttons, D-pad, bumpers, and triggers.
+- Mouse-control gating in controller mode.
+- Build/deploy/launch/cleanup integration.
+- Planning, architecture, and version documentation.
 
 **Out of scope**
 
-- Real game-controller detection or binding.
-- Joystick IDL, topics, contracts, DDS, or the joystick control service.
-- Persisting controller state.
-- Station identity or per-station routing.
+- DDS, joystick topics, contracts, and the joystick control service.
+- Cursor movement, format-manager commands, and display control.
+- Station identity.
 - C++ mirror.
+- Force feedback.
 
-## UI design
+## Display identity and persistence
 
-Window:
+`rust/ui/paws/src/state.rs` (new):
 
-- Title `paws`.
-- Preferred size about 960x640; minimum about 720x480.
-- Dark background with a header, a large centered controller body, and a footer.
+```rust
+#[derive(Serialize, Deserialize, Default)]
+pub(crate) struct SavedState {
+    pub(crate) controller: Option<SavedController>,
+}
 
-Header:
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub(crate) struct SavedController {
+    pub(crate) name: String,
+    pub(crate) uuid: [u8; 16],
+    pub(crate) id: usize,
+}
+```
 
-- `paws` title.
-- A `Controller` label and a disabled `ComboBox` with the single entry `N/A`.
-- No bind button.
+- Load via `app_state::state_path("paws", &display_id.to_string())`.
+- Save after a user selection:
+  - controller selected: save its identity;
+  - `Virtual` selected: save `controller: None`.
+- Missing, unreadable, or malformed state falls back to `Virtual`.
+- Save failures are logged and do not block the UI.
+- The display id is shown in the window header, for example `paws #0`.
 
-Controller body:
+## Controller selection semantics
 
-- Rounded central body with two grips.
-- Left and right analog sticks, each an outer ring plus a movable inner knob.
-- D-pad on the left and four face buttons on the right.
-- LB/RB bumpers and LT/RT triggers at the top.
-- Start/back in the center.
-- Labels: `A`, `B`, `X`, `Y`, `LB`, `RB`, `LT`, `RT`, `Back`, `Start`.
+`rust/ui/paws/src/gamepad.rs` (new):
 
-Interaction:
+```rust
+pub(crate) struct Choice {
+    pub(crate) id: gilrs::GamepadId,
+    pub(crate) name: String,
+    pub(crate) uuid: [u8; 16],
+}
 
-- Each stick's `TouchArea` reports the pointer position relative to the stick center.
-- Rust clamps the vector to the stick radius and normalizes each axis to `[-1, 1]`.
-- The knob position is derived from the normalized values.
-- Releasing a stick resets it to zero.
-- `TouchArea.pressed` drives the visual highlight for buttons, bumpers, and triggers.
+pub(crate) enum Selection {
+    Virtual,
+    Gamepad(gilrs::GamepadId),
+}
 
-Footer:
+pub(crate) fn xbox_choices(gilrs: &gilrs::Gilrs) -> Vec<Choice>;
+pub(crate) fn selection_for_index(index: i32, choices: &[Choice]) -> Selection;
+pub(crate) fn find_remembered(
+    choices: &[Choice],
+    saved: &SavedController,
+) -> Option<gilrs::GamepadId>;
+```
 
-- `Local virtual controller. Game-controller binding and DDS are not connected yet.`
+Rules:
 
-## Crate and code
+- Dropdown index 0 is `Virtual`; index N is `choices[N - 1]`.
+- On `Connected`, refresh the list. If the remembered controller is now available, select it. Otherwise leave the current selection alone.
+- On `Disconnected`, refresh the list. If the selected controller disappeared, select `Virtual` and keep the remembered identity.
+- Auto-reselection must never choose a controller that does not match the remembered identity.
+- A user-selected controller changes the remembered identity and is saved.
+- A user-selected `Virtual` clears and saves the empty identity.
+- Controller labels include the controller name and id, for example `Xbox Wireless Controller (0)`.
 
-`rust/ui/paws/`:
+## Input mapping
 
-- `Cargo.toml` with the `paws` binary, `slint = "1.18"`, and `build-dependencies: slint-build = "1.18"`.
-- `build.rs` compiles `ui/paws.slint`.
-- `src/main.rs`:
-  - `#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]`.
-  - `slint::include_modules!()`.
-  - Create `MainWindow`, wire stick callbacks, run.
-- `src/stick.rs`:
-  - Pure `clamp_stick(dx: f32, dy: f32, radius: f32) -> (f32, f32)`.
-  - Clamp the vector length to the radius, normalize to `[-1, 1]`, and preserve direction.
-  - Unit tests for center, edge, outside, and diagonal input.
-- `ui/paws.slint`:
-  - Properties for both stick values, button/trigger pressed states, and the controller selection model.
-  - Reusable `Stick` and `ControllerButton` components inside the file.
-  - No external assets.
+`rust/ui/paws/src/controls.rs` (new):
 
-## Build and launch integration
+```rust
+#[derive(Clone, Copy, Default, PartialEq)]
+pub(crate) struct Controls {
+    pub(crate) left: (f32, f32),
+    pub(crate) right: (f32, f32),
+    pub(crate) a: bool,
+    pub(crate) b: bool,
+    pub(crate) x: bool,
+    pub(crate) y: bool,
+    pub(crate) lb: bool,
+    pub(crate) rb: bool,
+    pub(crate) lt: bool,
+    pub(crate) rt: bool,
+    pub(crate) up: bool,
+    pub(crate) down: bool,
+    pub(crate) left_dpad: bool,
+    pub(crate) right_dpad: bool,
+    pub(crate) back: bool,
+    pub(crate) start: bool,
+}
 
-- Add `ui/paws` to the `rust/Cargo.toml` workspace members.
-- Add `rust\ui\paws\src` to the scan list in `scripts/build.ps1`.
-- Copy `build\rust\release\paws.exe` to `build\deploy\bin` and update the deployed-apps message.
-- In `scripts/launch-rust.ps1`, start one `paws.exe` from `build\deploy\bin` after the display windows are raised, so the controller window opens on top.
-- In `scripts/cleanup.ps1`, add `paws` to the stopped image-name list.
-- No changes to `docs/versions.md`: Slint is already recorded.
+pub(crate) trait PadState {
+    fn axis(&self, axis: gilrs::Axis) -> f32;
+    fn pressed(&self, button: gilrs::Button) -> bool;
+}
+
+impl PadState for gilrs::ev::state::GamepadState { ... }
+
+impl Controls {
+    pub(crate) fn read(pad: &impl PadState) -> Self;
+    pub(crate) fn neutral() -> Self;
+    pub(crate) fn apply(&self, ui: &MainWindow);
+}
+```
+
+Mappings:
+
+| Controller | UI |
+|---|---|
+| `Axis::LeftStickX/Y` | left stick, with Y inverted |
+| `Axis::RightStickX/Y` | right stick, with Y inverted |
+| `Button::South/East/West/North` | A/B/X/Y |
+| `Button::LeftTrigger/RightTrigger` | LB/RB |
+| `Axis::LeftZ/RightZ` above threshold | LT/RT |
+| `Button::DPadUp/Down/Left/Right` | D-pad |
+| `Button::Select` | Back |
+| `Button::Start` | Start |
+
+Use an 0.08 stick deadzone and clamp to `[-1, 1]`.
+
+## UI changes
+
+`rust/ui/paws/ui/paws.slint`:
+
+- Header shows `paws #<display-id>`.
+- Replace the disabled `N/A` ComboBox:
+  - `in-out property <[string]> controllers: ["Virtual"];`
+  - `in-out property <int> controller-index: 0;`
+  - enabled always;
+  - `selected(index) => { root.controller-selected(index); }`.
+- Add `in-out property <bool> virtual-mode: true;`.
+- Add button properties: `a-down`, `b-down`, `x-down`, `y-down`, `lb-down`, `rb-down`, `lt-down`, `rt-down`, `up-down`, `down-down`, `left-down`, `right-down`, `back-down`, `start-down`.
+- Refactor `ControllerButton`:
+  - `down` is supplied by the parent;
+  - `TouchArea` emits `pressed-changed(bool)`;
+  - each instance forwards to `control-pressed("<name>", value)`.
+- Add `in property <bool> interactive` to `Stick`, bound to `root.virtual-mode`.
+- Add callbacks:
+  - `controller-selected(int)`
+  - `control-pressed(string, bool)`.
+- Footer reflects mode:
+  - Virtual: `Virtual mode: use the mouse or select a connected controller.`
+  - Controller: `Controller mode: the window mirrors the selected controller.`
+
+## Rust wiring
+
+`rust/ui/paws/src/main.rs`:
+
+- Parse `--display-id` with `clap`.
+- Acquire the `paws-display-<id>` guard before loading state or creating the UI.
+- Initialize `Gilrs` best-effort; if it fails, run with only `Virtual`.
+- Load `SavedState` for the display id.
+- Create the UI, populate the controller model, and restore the remembered controller if present.
+- Wire `controller-selected`, `control-pressed`, `stick-drag`, and `stick-release`.
+  - Stick and button callbacks update the UI only in `Virtual` mode.
+- Add a 16 ms `slint::Timer` that:
+  - drains gilrs events;
+  - refreshes the controller list on connect/disconnect;
+  - auto-selects the remembered controller when it appears;
+  - falls back to `Virtual` on disconnect;
+  - applies the selected controller state to the UI;
+  - leaves controls untouched in `Virtual` mode.
+- Keep the timer alive until `ui.run()` returns.
+
+## Launch integration
+
+`scripts/launch-rust.ps1`:
+
+- After raising the display windows, start one paws per display id:
+  - `paws.exe --display-id <id>`.
+- Raise each paws window.
+- Update the launch message.
+- `scripts/cleanup.ps1` already stops all paws processes; no change.
+- `scripts/build.ps1` already scans and deploys paws; no change.
+
+## Documentation updates
+
+- `docs/versions.md`: record `gilrs` 0.11.2.
+- `planning/architecture.md`:
+  - Paws section: one window per display id, persisted controller selection, auto-reselection rules, no DDS.
+  - Service and display instances: add `paws-display-<id>`.
+  - Runtime state examples: add `paws\<display_id>.toml`.
+- `planning/backlog.md`, `planning/completed_stories.md`, and `planning/current_story.md`: keep the story state current.
 
 ## Tests
 
 Automated:
 
-- `stick::clamp_stick` unit tests.
-- `cargo test --manifest-path rust/Cargo.toml`.
-- `.\scripts\build.ps1 -Test`.
-- `.\scripts\build.ps1`.
+- `Controls::neutral` is all zero and false.
+- Axis clamp, Y inversion, and deadzone behavior.
+- Face buttons, bumpers, triggers, D-pad, back, and start map correctly.
+- `selection_for_index`: 0 -> `Virtual`, 1 -> first controller, out-of-range -> `Virtual`.
+- `find_remembered`:
+  - exact UUID and name match;
+  - saved id preferred when names and UUIDs collide;
+  - no match -> none;
+  - different controller -> none.
+- Selection-state rules:
+  - user selects a controller -> remembered and saved;
+  - user selects `Virtual` -> remembered cleared and saved;
+  - disconnect -> `Virtual` but remembered kept;
+  - remembered appears -> selected;
+  - other controller appears -> not selected.
+- Existing `stick::clamp_stick` tests still pass.
 
 Manual:
 
-1. Run `.\scripts\launch-rust.ps1`; verify the `paws` window opens with the virtual controller.
-2. Verify the controller dropdown shows `N/A` and is reserved in the header.
-3. Drag both sticks; verify the knobs move and return to center.
-4. Press the face buttons, D-pad, bumpers, and triggers; verify the highlights.
-5. Verify no console window appears for the release build.
-6. Launch a second `paws.exe` manually; verify a second window opens.
-7. Run `.\scripts\cleanup.ps1`; verify `paws` stops.
-8. Launch `build\deploy\bin\paws.exe` from an unrelated working directory; verify it still runs.
+1. Launch the fleet with two display ids; verify two paws windows, each labelled with its id.
+2. Select an Xbox controller for display 0; verify only that window mirrors it.
+3. Restart; verify display 0 restores that controller and display 1 stays `Virtual`.
+4. Select `Virtual` for display 0; restart; verify it stays `Virtual`.
+5. Disconnect the selected controller; verify fallback to `Virtual`.
+6. Reconnect it; verify automatic reselection.
+7. Connect a different Xbox controller; verify it is listed but not auto-selected.
+8. Verify the dropdown contains only Xbox/XInput controllers.
+9. Run `cleanup.ps1`; verify all paws windows stop.
 
 ## Acceptance
 
-- `paws.exe` builds and deploys to `build/deploy/bin`.
-- `launch-rust.ps1` starts one `paws` window and raises it after the displays.
-- `cleanup.ps1` stops `paws`.
-- The window shows a recognizable Xbox-style virtual controller.
-- Sticks and buttons respond locally.
-- The header reserves a controller dropdown showing `N/A`.
-- No DDS participant, topics, contracts, station identity, or gamepad binding are added.
-- Multiple instances are allowed.
-- The release build has no console window.
+- `paws` accepts required `--display-id`, and one window launches per display id.
+- The dropdown lists `Virtual` plus connected Xbox-style controllers with ids.
+- The remembered controller restores per display id; no other controller auto-selects.
+- A remembered controller appearing later is auto-selected.
+- Explicit `Virtual` clears the remembered controller.
+- Controller mode mirrors the controller and ignores mouse input.
+- `Virtual` mode uses mouse input and ignores controller input.
+- State persists in `paws\<display_id>.toml`.
+- No DDS, IDL, contracts, or control-service changes.
+- `gilrs` 0.11.2 is recorded in `docs/versions.md`.
 
 ## Verification
 
@@ -155,36 +291,39 @@ cargo test --manifest-path rust/Cargo.toml
 .\scripts\cleanup.ps1
 ```
 
-One manual launch of the fleet plus one manual second-instance check; no screenshots and no repeated UI runs.
+One manual two-display controller run, including restart and reconnect checks; no screenshots and no repeated UI runs.
 
 ## Risks
 
-- **Slint layout:** percentage positioning and aspect preservation need care; test at minimum and preferred sizes.
-- **Binding loops:** keep knob geometry derived from normalized values without circular bindings.
-- **Launch ordering:** start `paws` after the display windows are raised so the controller is visible.
-- **Cleanup:** add `paws` to the image-name stop list or a stale window survives a cleanup.
-- **Disabled dropdown:** the reserved `N/A` selector must read as intentionally unavailable, not as a broken control.
-- **Scope creep:** gamepad binding, DDS, station ids, and per-station routing are explicitly deferred.
-- **No automated UI test:** the visual/interaction check remains manual, consistent with the story’s minimal test.
+- **Persistence identity:** UUID may be shared by identical controllers; use the saved gilrs id as a tiebreaker.
+- **Stable ids:** gilrs ids are session-scoped, so UUID and name are the primary key.
+- **Auto-reselection:** only the remembered controller may reselect; guard against choosing a different device.
+- **Explicit Virtual:** clear the remembered controller or it reselects immediately.
+- **Per-display state:** two paws instances must never share a display id; use the guard.
+- **Launch order:** raise each paws window after its display; multiple windows may overlap.
+- **Button refactor:** moving state from component-local to MainWindow properties touches every control.
+- **Mouse gating:** sticks and buttons must not visually react to mouse in controller mode.
+- **Gilrs backend:** verify enumeration and state updates on Windows.
+- **No automated UI test:** manual checks remain necessary.
 
 ## Files touched
 
-- `rust/Cargo.toml`
-- `rust/ui/paws/Cargo.toml` (new)
-- `rust/ui/paws/build.rs` (new)
-- `rust/ui/paws/src/main.rs` (new)
-- `rust/ui/paws/src/stick.rs` (new)
-- `rust/ui/paws/ui/paws.slint` (new)
-- `scripts/build.ps1`
-- `scripts/launch-rust.ps1`
-- `scripts/cleanup.ps1`
+- `docs/versions.md`
 - `planning/architecture.md`
 - `planning/backlog.md`
 - `planning/completed_stories.md`
 - `planning/current_story.md`
+- `rust/Cargo.lock`
+- `rust/ui/paws/Cargo.toml`
+- `rust/ui/paws/src/main.rs`
+- `rust/ui/paws/src/gamepad.rs` (new)
+- `rust/ui/paws/src/controls.rs` (new)
+- `rust/ui/paws/src/state.rs` (new)
+- `rust/ui/paws/ui/paws.slint`
+- `scripts/launch-rust.ps1`
 
 ## Bookkeeping
 
-- `format-chooser-format` was completed at `2026-11-12 10:46:13` and moved to `completed_stories.md` under "Later increments".
-- `paws` is `in progress` in `backlog.md`.
-- Do not move `paws` to `completed_stories.md` until the user asks to plan the next story.
+- `paws` was completed at `2026-11-12 15:33:37` and moved to `completed_stories.md` under "Later increments".
+- `xbox-controller` is `in progress` in `backlog.md`.
+- Do not move `xbox-controller` to `completed_stories.md` until the user asks to plan the next story.

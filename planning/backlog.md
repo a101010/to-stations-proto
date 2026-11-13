@@ -11,34 +11,41 @@ Conventions:
 
 ## Stories
 
-### paws
-Create the game-controller window application (`paws`): a Slint window with an Xbox-style virtual controller, local stick and button interaction, and a reserved controller-selection dropdown that shows `N/A` until binding exists. Add it to the Rust build/deploy and launch/cleanup scripts. Game-controller binding, station identity, and DDS remain later work.
+### xbox-controller
+Connect Xbox-style controllers to each paws window. Add a required `--display-id`, launch one paws per display id, and persist the selected controller per display id. The dropdown lists `Virtual` plus every connected Xbox-style controller with its controller id. On startup, restore the remembered controller for that display if it is present; otherwise use `Virtual`. A remembered controller that appears later is selected automatically; no other controller is auto-selected. In `Virtual` mode the mouse controls the window; in controller mode the window mirrors the selected controller and ignores mouse control. DDS remains out of scope.
 - **Depends on:** none.
-- **Minimal test:** `launch-rust.ps1` brings up the `paws` window showing the virtual controller; sticks move and buttons highlight.
+- **Minimal test:** launch one paws per display id; select an Xbox controller for one display and verify it restores on restart only for that display. Select `Virtual` and verify the mouse works while controller input is ignored. Connect the remembered controller later and verify it is selected automatically.
 - **Status:** in progress.
 
-### xbox-controller
-Connect an xbox-controller to the paws app. Allow a 'virtual' mode (replacing N/A in the dropdown) and a controller id for any connected xbox-style controller. The paws window controls reflect the connected controller, or can be controlled by mouse if in virtual mode. DDS connectivity remains out of scope.
-
 ### paws-format-ctl
-DDS connectivity for the paws app. Show a virtual cursor controlled by the right joystick. An 'A' button press acts the same as a mouse right-click. D-pad moves the current icon selection in the format-chooser-format. The first format is selected by default. paws sends high-level format independent commands to the format manager controller service. The paws app is started with a display id to map it to the appropriate controller services.
+DDS connectivity for the paws app. Show a virtual cursor controlled by the right joystick. An `A` button press acts the same as a mouse right-click. D-pad moves the current icon selection in the format-chooser format. The first format is selected by default. paws sends high-level format-independent commands to the format manager controller service. The paws app uses the display id already supplied for controller persistence to map it to the appropriate controller services.
+- **Depends on:** xbox-controller
+- **Minimal test:** launch paws with a display id; the right stick moves the virtual cursor, `A` acts as a right-click, the D-pad moves the format-chooser selection with the first format selected by default, and the format controller receives the commands.
+- **Status:** todo.
 
 ### hello-ctl-service
 Create the hello_world control service (`hello-ctl-service`): consume input events from the display libraries; user rotations and changes of the light vector and color, specific controls to be refined later. Also allow control via paws.
 - **Depends on:** paws-format-ctl
-- **Minimal test:** input events change the displayed world.
+- **Minimal test:** input events change the displayed world, including inputs sent from paws.
 - **Status:** todo.
 
 ### paws-two
-Create a game controller window application (`paws-two`): a Slint windows with a saitek-x-52 virtual controller. DDS and real controller connectivity are out of scope.
+Create a game-controller window application (`paws-two`): a Slint window with a Saitek X-52 virtual controller. DDS and real-controller connectivity are out of scope.
+- **Depends on:** xbox-controller
+- **Minimal test:** launch paws-two; the window shows a Saitek X-52 virtual controller and its controls work in `Virtual` mode.
+- **Status:** todo.
 
 ### saitek-x-52
-Connect a saitek x-52 to the paws-two app. Allow a 'virtual' mode (replacing N/A in the dropdown) and a controller id for any connected saitek x-52 controller. DDS connectivity remains out of scope.
+Connect a Saitek X-52 to the paws-two app. Allow a `Virtual` mode and a controller id for any connected Saitek X-52. The paws-two window reflects the connected controller, or can be controlled by mouse in `Virtual` mode. DDS connectivity remains out of scope.
 - **Depends on:** paws-two
+- **Minimal test:** with an X-52 connected, select it and verify the paws-two controls mirror it; select `Virtual` and verify mouse control; disconnect and verify fallback to `Virtual`.
+- **Status:** todo.
 
 ### paws-two-ctrl
-Determine control bindings to the format-chooser and hello-world formats for paws-two. After this story, any change that affects controller behavior should determine a common abstract command and a binding to that command for both paws and paws2.
-- **Depends on:** paws-two
+Determine control bindings to the format-chooser and hello-world formats for paws-two. After this story, any change that affects controller behavior should determine a common abstract command and a binding to that command for both paws and paws-two.
+- **Depends on:** paws-two; saitek-x-52; paws-format-ctl
+- **Minimal test:** with paws-two bound to an X-52, its controls drive the format chooser and hello-world through the shared abstract commands; the same commands work from paws.
+- **Status:** todo.
 
 ### random-greeting
 Change `hello-service` to choose greetings randomly from its Latin-script list instead of advancing through a fixed sequence; avoid repeating the same greeting twice in a row where practical.
@@ -100,6 +107,6 @@ Here are some backlog items not yet broken into stories.
   * Alpha-numeric entry format overlay (for waypoint mgr and text message format and anything else that needs it)
   * A text message format
   * Turret targeting view?
-* A vehicle platform concept (multi-turrent tank-like? helecopter? ship? space ship?)
+* A vehicle platform concept (multi-turret tank-like? helicopter? ship? spaceship?)
 * An 'out-the-window' view for big-d, and maybe even lil-d
 

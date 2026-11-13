@@ -249,3 +249,10 @@ Create the format-chooser format: a normal format that presents the other format
 - **Depends on:** none.
 - **Minimal test:** open the three-dot menu, choose `Formats`, choose a format tile, and verify the display switches to it.
 - **Note:** the manual two-display, chooser/menu, and saved-format restore checks remain for the user.
+
+### paws
+Create the game-controller window application (`paws`): a Slint window with an Xbox-style virtual controller, local stick and button interaction, and a reserved controller-selection dropdown. Added the crate, virtual controller UI, stick helper and tests, and build/deploy/launch/cleanup integration.
+- **Completed:** 2026-11-12 15:33:37.
+- **Depends on:** none.
+- **Minimal test:** `launch-rust.ps1` brings up the `paws` window showing the virtual controller; sticks move and buttons highlight.
+- **Note:** the manual stick/button and second-instance checks remain for the user.
