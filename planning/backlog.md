@@ -11,23 +11,20 @@ Conventions:
 
 ## Stories
 
-### window-placement
-Persist and restore window position and inner size for `lil-d`, `paws`, and `dds-echo` through the shared `window-position` library. The existing `window-position` extraction and `paws` position restore are the first part of this story; extend them with size and `dds-echo`.
-- **Depends on:** none.
-- **Minimal test:** move and resize `lil-d`, `paws`, and `dds-echo`; close and relaunch each; verify both size and position restore. Legacy state without size still loads.
-- **Status:** in progress.
-
 ### paws-format-ctl
-DDS connectivity for the paws app. Show a virtual cursor controlled by the right joystick. An `A` button press acts the same as a mouse right-click. D-pad moves the current icon selection in the format-chooser format. The first format is selected by default. paws sends high-level format-independent commands to the format manager controller service. The paws app uses the display id already supplied for controller persistence to map it to the appropriate controller services.
+DDS connectivity for the paws app. Add high-level cursor, navigation, and pointer commands to `FormatManagerInputTopic`; `format-ctl-service` relays them on `FormatManagerCommandCtlTopic` to the display library. The right stick moves a virtual cursor; A/right-click aimed at the three-dot button opens the menu; D-pad selects the `Formats` row and A opens the chooser. In the chooser, the first format is selected by default, D-pad wraps spatially, and A activates the highlighted tile. Add a paws service contract and `dds-echo` support for the command topic.
 - **Depends on:** none
-- **Minimal test:** launch paws with a display id; the right stick moves the virtual cursor, `A` acts as a right-click, the D-pad moves the format-chooser selection with the first format selected by default, and the format controller receives the commands.
-- **Status:** todo.
+- **Minimal test:** launch paws with a display id; move the virtual cursor to the three-dot button, open the menu with A, open `Formats`, verify D-pad wraps the chooser selection with the first format selected by default, A selects the highlighted format, and `dds-echo` shows the input/command-control samples.
+- **Status:** in progress.
 
 ### hello-ctl-service
 Create the hello_world control service (`hello-ctl-service`): consume input events from the display libraries; user rotations and changes of the light vector and color, specific controls to be refined later. Also allow control via paws.
 - **Depends on:** paws-format-ctl
 - **Minimal test:** input events change the displayed world, including inputs sent from paws.
 - **Status:** todo.
+
+### TODO
+Need to shift to C++ here. Bring it up to date with hello-ctl-service. Replace this with C++ stories to do so.
 
 ### paws-two
 Create a game-controller window application (`paws-two`): a Slint window with a Saitek X-52 virtual controller. DDS and real-controller connectivity are out of scope.

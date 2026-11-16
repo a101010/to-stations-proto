@@ -262,4 +262,11 @@ Connect Xbox-style controllers to `paws`: one window per display id, `Virtual` p
 - **Completed:** 2026-11-13 11:15:47.
 - **Depends on:** none.
 - **Minimal test:** launch one paws per display id; select an Xbox controller for one display and verify it restores on restart only for that display. Select `Virtual` and verify mouse control while controller input is ignored. Reconnect the remembered controller and verify automatic selection, including an all-zero-UUID controller whose name changed between backends.
-- **Note:** controller auto-selection was verified with the real controller using a temporary `LOCALAPPDATA`. Window placement is tracked by the `window-placement` story.
+- **Note:** controller auto-selection was verified with the real controller using a temporary `LOCALAPPDATA`. Window placement was completed in the `window-placement` story.
+
+### window-placement
+Persist window position and inner size for `lil-d`, `paws`, and `dds-echo` through the shared `window-position` library. Added keyed placement state, size fields, legacy-state upgrade, resize tracking, and `dds-echo\window.toml`.
+- **Completed:** 2026-11-13 16:10:13.
+- **Depends on:** none.
+- **Minimal test:** move and resize `lil-d`, `paws`, and `dds-echo`; close and relaunch each; verify both size and position restore. Legacy state without size still loads.
+- **Note:** verified with a temporary `LOCALAPPDATA`; the real runtime state was untouched.
