@@ -4,5 +4,8 @@ name = "format-ctl-service"
 [[publish]]
 topic = "FormatManagerCtlTopic"
 
+[[publish]]
+topic = "FormatManagerCommandCtlTopic"
+
 [[subscribe]]
 topic = "FormatManagerInputTopic"

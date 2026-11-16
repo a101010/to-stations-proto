@@ -13,7 +13,8 @@ use format_list::FormatList;
 use stations_dds::format_manager::FormatWindowAssignment;
 
 use crate::format_menu::{FormatMenu, MenuAction};
-use crate::formats::{self, Format, FormatInput, FORMAT_CHOOSER};
+use crate::formats::{self, Format, FormatCommand, FormatInput, FORMAT_CHOOSER};
+use crate::ui::{self, Rect};
 use crate::DisplayError;
 
 /// The active formats by format-window id.
@@ -24,7 +25,18 @@ pub(crate) struct FormatManager {
     /// The last region `render` was given, as `(x, y, width, height)` in
     /// physical pixels with a top-left origin.
     region: (i32, i32, i32, i32),
+    /// The virtual cursor position, if it has been moved at least once.
+    cursor: Option<(i32, i32)>,
 }
+
+/// Cursor bar color.
+const CURSOR_COLOR: [f32; 4] = [0.90, 1.0, 0.92, 1.0];
+/// Cursor shadow color.
+const CURSOR_SHADOW: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
+/// Distance the cursor center stays from the region edge.
+const CURSOR_MARGIN: i32 = 8;
+/// Half-length of a cursor bar.
+const CURSOR_HALF: i32 = 7;
 
 /// A logical format-manager event produced by local input.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -46,6 +58,7 @@ impl FormatManager {
             menu: Some(menu),
             assignments: BTreeMap::new(),
             region: (0, 0, 0, 0),
+            cursor: None,
         })
     }
 
@@ -78,6 +91,74 @@ impl FormatManager {
                 menu.render(gl, framebuffer_height, self.region, 0);
             }
         }
+        self.render_cursor(gl, framebuffer_height);
+    }
+
+    /// Handle a high-level controller command for `window`.
+    pub(crate) fn command(&mut self, window: i32, command: FormatCommand) -> Option<FormatAction> {
+        if window != 0 {
+            return None;
+        }
+        if let FormatCommand::CursorMove { dx, dy } = command {
+            self.move_cursor(dx, dy);
+        }
+
+        let active = self.active_format_name(0);
+        if active.as_deref() != Some(FORMAT_CHOOSER) {
+            if let Some(menu) = &mut self.menu {
+                let cursor = self.cursor.unwrap_or((
+                    self.region.0 + self.region.2 / 2,
+                    self.region.1 + self.region.3 / 2,
+                ));
+                match menu.command(0, self.region, cursor, command) {
+                    MenuAction::Consumed => return None,
+                    MenuAction::Select(format) => {
+                        return Some(FormatAction::Select { window: 0, format })
+                    }
+                    MenuAction::Ignored => {}
+                }
+            }
+        }
+
+        let name = active?;
+        let format = self
+            .formats
+            .iter_mut()
+            .find(|format| format.name() == name.as_str())?;
+        match format.command(command) {
+            FormatInput::Select(format) => Some(FormatAction::Select { window: 0, format }),
+            FormatInput::Ignored | FormatInput::Consumed => None,
+        }
+    }
+
+    fn move_cursor(&mut self, dx: i32, dy: i32) {
+        let (x, y, width, height) = self.region;
+        if width <= 0 || height <= 0 {
+            return;
+        }
+        let (current_x, current_y) = self.cursor.unwrap_or((x + width / 2, y + height / 2));
+        let left = x + CURSOR_MARGIN.min(width / 2);
+        let right = x + width - CURSOR_MARGIN.min(width / 2);
+        let top = y + CURSOR_MARGIN.min(height / 2);
+        let bottom = y + height - CURSOR_MARGIN.min(height / 2);
+        self.cursor = Some((
+            (current_x + dx).clamp(left, right.max(left)),
+            (current_y + dy).clamp(top, bottom.max(top)),
+        ));
+    }
+
+    fn render_cursor(&self, gl: &glow::Context, framebuffer_height: i32) {
+        let Some((x, y)) = self.cursor else {
+            return;
+        };
+        let shadow_horizontal = Rect::new(x - CURSOR_HALF - 1, y - 2, CURSOR_HALF * 2 + 3, 4);
+        let shadow_vertical = Rect::new(x - 2, y - CURSOR_HALF - 1, 4, CURSOR_HALF * 2 + 3);
+        ui::clear_rect(gl, framebuffer_height, shadow_horizontal, CURSOR_SHADOW);
+        ui::clear_rect(gl, framebuffer_height, shadow_vertical, CURSOR_SHADOW);
+        let horizontal = Rect::new(x - CURSOR_HALF, y - 1, CURSOR_HALF * 2 + 1, 2);
+        let vertical = Rect::new(x - 1, y - CURSOR_HALF, 2, CURSOR_HALF * 2 + 1);
+        ui::clear_rect(gl, framebuffer_height, horizontal, CURSOR_COLOR);
+        ui::clear_rect(gl, framebuffer_height, vertical, CURSOR_COLOR);
     }
 
     /// Handle a left-button press in window coordinates.
@@ -142,6 +223,7 @@ impl FormatManager {
             menu: None,
             assignments: BTreeMap::new(),
             region,
+            cursor: None,
         }
     }
 
@@ -192,6 +274,10 @@ mod tests {
         }
 
         fn mouse_button(&mut self, _region: (i32, i32, i32, i32), _x: i32, _y: i32) -> FormatInput {
+            self.input.clone()
+        }
+
+        fn command(&mut self, _command: FormatCommand) -> FormatInput {
             self.input.clone()
         }
     }
@@ -274,5 +360,39 @@ mod tests {
         m.set_assignments(&[assignment(0, "default"), assignment(1, "hello-world")]);
         assert_eq!(m.assigned(0), Some("default"));
         assert_eq!(m.assigned(1), Some("hello-world"));
+    }
+    #[test]
+    fn commands_route_to_the_active_format() {
+        let mut m = manager(FormatInput::Select("default".to_string()));
+        assert_eq!(
+            m.command(0, FormatCommand::Navigate { dx: 1, dy: 0 }),
+            Some(FormatAction::Select {
+                window: 0,
+                format: "default".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn commands_for_other_windows_are_ignored() {
+        let mut m = manager(FormatInput::Select("default".to_string()));
+        assert_eq!(m.command(1, FormatCommand::Navigate { dx: 1, dy: 0 }), None);
+    }
+
+    #[test]
+    fn cursor_starts_at_center_and_clamps() {
+        let mut m = manager(FormatInput::Ignored);
+        m.command(0, FormatCommand::CursorMove { dx: 0, dy: 0 });
+        assert_eq!(m.cursor, Some((50, 50)));
+        m.command(0, FormatCommand::CursorMove { dx: 1000, dy: 1000 });
+        assert_eq!(m.cursor, Some((92, 92)));
+        m.command(
+            0,
+            FormatCommand::CursorMove {
+                dx: -1000,
+                dy: -1000,
+            },
+        );
+        assert_eq!(m.cursor, Some((8, 8)));
     }
 }

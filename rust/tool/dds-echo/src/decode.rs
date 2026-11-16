@@ -9,7 +9,8 @@
 
 use stations_dds::cyclonedds::{CdrDeserializer, CdrEncoding, DdsType};
 use stations_dds::format_manager::{
-    FormatManagerCtlTopic, FormatManagerInputTopic, FormatManagerViewTopic,
+    FormatManagerCommandCtlTopic, FormatManagerCtlTopic, FormatManagerInputTopic,
+    FormatManagerViewTopic,
 };
 use stations_dds::hello_world::{HelloWorldTopic, HelloWorldViewTopic};
 
@@ -36,6 +37,10 @@ pub fn decode(idl_type: &str, payload: &[u8]) -> Option<String> {
         }
         "format_manager::FormatManagerViewTopic" => {
             let sample = deserialize::<FormatManagerViewTopic>(payload)?;
+            Some(format!("{sample:#?}"))
+        }
+        "format_manager::FormatManagerCommandCtlTopic" => {
+            let sample = deserialize::<FormatManagerCommandCtlTopic>(payload)?;
             Some(format!("{sample:#?}"))
         }
         _ => None,
@@ -146,6 +151,10 @@ mod tests {
             window: 0,
             command: 1,
             format: "default".to_string(),
+            x: 0,
+            y: 0,
+            button: 0,
+            pressed: false,
         };
         let dump =
             decode("format_manager::FormatManagerInputTopic", &framed(&sample)).expect("decoded");
@@ -196,6 +205,30 @@ mod tests {
     }
 
     #[test]
+    fn decodes_format_manager_command_control() {
+        use format_manager::FormatManagerCommandCtlTopic;
+
+        let sample = FormatManagerCommandCtlTopic {
+            display_id: 2,
+            window: 0,
+            command: 10,
+            x: 20,
+            y: -15,
+            button: 0,
+            pressed: false,
+        };
+        let dump = decode(
+            "format_manager::FormatManagerCommandCtlTopic",
+            &framed(&sample),
+        )
+        .expect("decoded command");
+        assert!(dump.contains("display_id: 2"));
+        assert!(dump.contains("command: 10"));
+        assert!(dump.contains("x: 20"));
+        assert!(dump.contains("y: -15"));
+    }
+
+    #[test]
     fn every_registered_topic_has_a_decoder() {
         use stations_dds::contract::TopicRegistry;
         use std::path::PathBuf;
@@ -212,6 +245,9 @@ mod tests {
                 }
                 "format_manager::FormatManagerViewTopic" => {
                     Some(framed(&FormatManagerViewTopic::default()))
+                }
+                "format_manager::FormatManagerCommandCtlTopic" => {
+                    Some(framed(&FormatManagerCommandCtlTopic::default()))
                 }
                 _ => None,
             }

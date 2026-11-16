@@ -12,10 +12,12 @@ path = "src/main.rs"
 [dependencies]
 app-state = { workspace = true }
 clap = { workspace = true }
+format-list = { workspace = true }
 gilrs = { version = "0.11", default-features = false, features = ["xinput"] }
 serde = { workspace = true }
 single-instance = { workspace = true }
 slint = { version = "1.18", features = ["unstable-winit-030"] }
+stations-dds = { workspace = true }
 window-position = { workspace = true }
 
 [build-dependencies]

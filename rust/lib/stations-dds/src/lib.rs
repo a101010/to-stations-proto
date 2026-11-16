@@ -25,7 +25,10 @@ mod tests {
 
     #[test]
     fn type_names_match_scopes() {
-        assert_eq!(<math::Quaternion as DdsType>::type_name(), "math::Quaternion");
+        assert_eq!(
+            <math::Quaternion as DdsType>::type_name(),
+            "math::Quaternion"
+        );
         assert_eq!(
             <hello_world::HelloWorldTopic as DdsType>::type_name(),
             "hello_world::HelloWorldTopic"
@@ -33,6 +36,10 @@ mod tests {
         assert_eq!(
             <format_manager::FormatManagerInputTopic as DdsType>::type_name(),
             "format_manager::FormatManagerInputTopic"
+        );
+        assert_eq!(
+            <format_manager::FormatManagerCommandCtlTopic as DdsType>::type_name(),
+            "format_manager::FormatManagerCommandCtlTopic"
         );
     }
 }

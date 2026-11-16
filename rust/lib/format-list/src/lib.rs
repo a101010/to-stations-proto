@@ -12,6 +12,22 @@ use serde::{Deserialize, Serialize};
 pub const FORMAT_COMMAND_NEXT: i32 = 0;
 /// `FormatManagerInputTopic.command`: select the named format.
 pub const FORMAT_COMMAND_SELECT: i32 = 1;
+/// `FormatManagerInputTopic.command`: move the virtual cursor.
+pub const FORMAT_COMMAND_CURSOR_MOVE: i32 = 10;
+/// `FormatManagerInputTopic.command`: move the active selection.
+pub const FORMAT_COMMAND_NAVIGATE: i32 = 11;
+/// `FormatManagerInputTopic.command`: pointer button event.
+pub const FORMAT_COMMAND_POINTER: i32 = 12;
+/// `FormatManagerInputTopic.button`: right mouse button.
+pub const FORMAT_POINTER_RIGHT: i32 = 1;
+
+/// Whether `command` is a high-level control command relayed by the controller.
+pub fn is_control_command(command: i32) -> bool {
+    matches!(
+        command,
+        FORMAT_COMMAND_CURSOR_MOVE | FORMAT_COMMAND_NAVIGATE | FORMAT_COMMAND_POINTER
+    )
+}
 
 /// One saved format-window assignment.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -237,5 +253,14 @@ name = "a"
                 ],
             }
         );
+    }
+    #[test]
+    fn control_commands_are_classified() {
+        assert!(!is_control_command(FORMAT_COMMAND_NEXT));
+        assert!(!is_control_command(FORMAT_COMMAND_SELECT));
+        assert!(is_control_command(FORMAT_COMMAND_CURSOR_MOVE));
+        assert!(is_control_command(FORMAT_COMMAND_NAVIGATE));
+        assert!(is_control_command(FORMAT_COMMAND_POINTER));
+        assert!(!is_control_command(99));
     }
 }

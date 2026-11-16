@@ -11,14 +11,15 @@ use std::time::Duration;
 
 use clap::Parser;
 use format_list::{
-    FormatList, SavedAssignments, FORMAT_COMMAND_NEXT, FORMAT_COMMAND_SELECT,
+    is_control_command, FormatList, SavedAssignments, FORMAT_COMMAND_NEXT, FORMAT_COMMAND_SELECT,
 };
 use single_instance::Acquire;
 use stations_dds::contract::{ServiceContract, TopicRegistry};
 use stations_dds::cyclonedds::DdsSequence;
 use stations_dds::dds::Node;
 use stations_dds::format_manager::{
-    FormatManagerCtlTopic, FormatManagerInputTopic, FormatWindowAssignment,
+    FormatManagerCommandCtlTopic, FormatManagerCtlTopic, FormatManagerInputTopic,
+    FormatWindowAssignment,
 };
 
 const POLL: Duration = Duration::from_millis(10);
@@ -75,9 +76,8 @@ fn run(args: &Args) -> Result<(), String> {
         .display_id
         .ok_or_else(|| "--display-id is required".to_string())?;
 
-    let _guard = match single_instance::acquire(&format!(
-        "format-ctl-service-display-{display_id}"
-    )) {
+    let _guard = match single_instance::acquire(&format!("format-ctl-service-display-{display_id}"))
+    {
         Acquire::Primary(guard) => guard,
         Acquire::Duplicate => return Err("an instance is already running".to_string()),
     };
@@ -95,9 +95,16 @@ fn run(args: &Args) -> Result<(), String> {
     let writer = node
         .writer::<FormatManagerCtlTopic>("FormatManagerCtlTopic")
         .map_err(|e| e.to_string())?;
+    let command_writer = node
+        .writer::<FormatManagerCommandCtlTopic>("FormatManagerCommandCtlTopic")
+        .map_err(|e| e.to_string())?;
     loop {
         let samples = reader.take().map_err(|e| e.to_string())?;
         for sample in samples {
+            if let Some(command) = command_for(&sample, display_id) {
+                command_writer.write(&command).map_err(|e| e.to_string())?;
+                continue;
+            }
             let changed = apply_for(display_id, &formats, &mut assignments, sample);
             if changed {
                 let control = control_topic(display_id, &assignments)?;
@@ -106,6 +113,25 @@ fn run(args: &Args) -> Result<(), String> {
         }
         std::thread::sleep(POLL);
     }
+}
+
+/// Relay a control command addressed to `display_id`.
+fn command_for(
+    sample: &FormatManagerInputTopic,
+    display_id: u32,
+) -> Option<FormatManagerCommandCtlTopic> {
+    if sample.display_id != display_id || !is_control_command(sample.command) {
+        return None;
+    }
+    Some(FormatManagerCommandCtlTopic {
+        display_id,
+        window: sample.window,
+        command: sample.command,
+        x: sample.x,
+        y: sample.y,
+        button: sample.button,
+        pressed: sample.pressed,
+    })
 }
 
 fn assignments_from_saved(saved: &SavedAssignments) -> BTreeMap<i32, String> {
@@ -221,6 +247,31 @@ name = "default"
             window,
             command,
             format: format.to_string(),
+            x: 0,
+            y: 0,
+            button: 0,
+            pressed: false,
+        }
+    }
+
+    fn command(
+        display_id: u32,
+        window: i32,
+        command: i32,
+        x: i32,
+        y: i32,
+        button: i32,
+        pressed: bool,
+    ) -> FormatManagerInputTopic {
+        FormatManagerInputTopic {
+            display_id,
+            window,
+            command,
+            format: String::new(),
+            x,
+            y,
+            button,
+            pressed,
         }
     }
 
@@ -322,6 +373,43 @@ name = "default"
         let control = control_topic(0, &assignments).unwrap();
         assert_eq!(control.display_id, 0);
         assert_eq!(control.windows.as_slice()[0].format, "default");
+    }
+
+    #[test]
+    fn control_commands_are_relayed_unchanged() {
+        let sample = command(
+            0,
+            0,
+            format_list::FORMAT_COMMAND_CURSOR_MOVE,
+            12,
+            -7,
+            0,
+            false,
+        );
+        let relayed = command_for(&sample, 0).expect("relayed");
+        assert_eq!(relayed.display_id, 0);
+        assert_eq!(relayed.window, 0);
+        assert_eq!(relayed.command, format_list::FORMAT_COMMAND_CURSOR_MOVE);
+        assert_eq!(relayed.x, 12);
+        assert_eq!(relayed.y, -7);
+    }
+
+    #[test]
+    fn control_commands_for_other_displays_are_ignored() {
+        let sample = command(1, 0, format_list::FORMAT_COMMAND_NAVIGATE, 1, 0, 0, false);
+        assert!(command_for(&sample, 0).is_none());
+    }
+
+    #[test]
+    fn assignment_commands_are_not_relayed() {
+        let sample = input(0, 0, FORMAT_COMMAND_SELECT, "default");
+        assert!(command_for(&sample, 0).is_none());
+    }
+
+    #[test]
+    fn unknown_commands_are_not_relayed() {
+        let sample = command(0, 0, 99, 0, 0, 0, false);
+        assert!(command_for(&sample, 0).is_none());
     }
 
     #[test]

@@ -12,7 +12,8 @@ use stations_dds::cyclonedds::{
 };
 use stations_dds::dds::Node;
 use stations_dds::format_manager::{
-    FormatManagerCtlTopic, FormatManagerInputTopic, FormatManagerViewTopic,
+    FormatManagerCommandCtlTopic, FormatManagerCtlTopic, FormatManagerInputTopic,
+    FormatManagerViewTopic,
 };
 use stations_dds::hello_world::{HelloWorldTopic, HelloWorldViewTopic};
 
@@ -194,6 +195,9 @@ pub fn schema_for(idl_type: &str) -> Option<&'static DynamicTypeSchema> {
         "format_manager::FormatManagerViewTopic" => {
             Some(<FormatManagerViewTopic as DdsFieldMetadata>::field_schema())
         }
+        "format_manager::FormatManagerCommandCtlTopic" => {
+            Some(<FormatManagerCommandCtlTopic as DdsFieldMetadata>::field_schema())
+        }
         _ => None,
     }
 }
@@ -205,6 +209,7 @@ pub enum TopicWriter {
     FormatManagerInput(DataWriter<FormatManagerInputTopic>),
     FormatManagerCtl(DataWriter<FormatManagerCtlTopic>),
     FormatManagerView(DataWriter<FormatManagerViewTopic>),
+    FormatManagerCommandCtl(DataWriter<FormatManagerCommandCtlTopic>),
 }
 
 impl TopicWriter {
@@ -230,6 +235,10 @@ impl TopicWriter {
                 .writer::<FormatManagerViewTopic>(topic)
                 .map(TopicWriter::FormatManagerView)
                 .map_err(|e| e.to_string()),
+            "format_manager::FormatManagerCommandCtlTopic" => node
+                .writer::<FormatManagerCommandCtlTopic>(topic)
+                .map(TopicWriter::FormatManagerCommandCtl)
+                .map_err(|e| e.to_string()),
             other => Err(format!("unsupported topic type `{other}`")),
         }
     }
@@ -254,6 +263,10 @@ impl TopicWriter {
                 .map(|handles| handles.len())
                 .map_err(|e| e.to_string()),
             TopicWriter::FormatManagerView(writer) => writer
+                .matched_subscriptions()
+                .map(|handles| handles.len())
+                .map_err(|e| e.to_string()),
+            TopicWriter::FormatManagerCommandCtl(writer) => writer
                 .matched_subscriptions()
                 .map(|handles| handles.len())
                 .map_err(|e| e.to_string()),
@@ -285,6 +298,11 @@ impl TopicWriter {
             TopicWriter::FormatManagerView(writer) => {
                 let sample = FormatManagerViewTopic::from_dynamic_value(value)
                     .map_err(|e| format!("FormatManagerViewTopic: {e}"))?;
+                writer.write(&sample).map_err(|e| e.to_string())
+            }
+            TopicWriter::FormatManagerCommandCtl(writer) => {
+                let sample = FormatManagerCommandCtlTopic::from_dynamic_value(value)
+                    .map_err(|e| format!("FormatManagerCommandCtlTopic: {e}"))?;
                 writer.write(&sample).map_err(|e| e.to_string())
             }
         }

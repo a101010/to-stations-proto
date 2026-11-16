@@ -34,6 +34,14 @@ pub(crate) enum FormatInput {
     Select(String),
 }
 
+/// A high-level command from the controller.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FormatCommand {
+    CursorMove { dx: i32, dy: i32 },
+    Navigate { dx: i32, dy: i32 },
+    Pointer { button: i32, pressed: bool },
+}
+
 /// A displayable format.
 pub(crate) trait Format {
     /// The format's registry name.
@@ -60,6 +68,12 @@ pub(crate) trait Format {
     /// Handle a left-button press inside the format region.
     fn mouse_button(&mut self, region: (i32, i32, i32, i32), x: i32, y: i32) -> FormatInput {
         let _ = (region, x, y);
+        FormatInput::Ignored
+    }
+
+    /// Handle a high-level controller command.
+    fn command(&mut self, command: FormatCommand) -> FormatInput {
+        let _ = command;
         FormatInput::Ignored
     }
 }

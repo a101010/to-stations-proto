@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod commands;
 mod controls;
 mod gamepad;
 mod state;
@@ -31,6 +32,14 @@ struct Args {
     /// Display id this controller window belongs to.
     #[arg(long)]
     display_id: u32,
+
+    /// DDS domain id.
+    #[arg(long, default_value_t = 0)]
+    domain: u32,
+
+    /// Contracts directory (default: `<exe_dir>/../config`, else `./contracts`).
+    #[arg(long)]
+    config: Option<PathBuf>,
 }
 
 struct AppState {
@@ -321,6 +330,11 @@ fn main() -> Result<(), slint::PlatformError> {
         st.apply_selection(&ui);
     }
     state.borrow_mut().apply_current_controls(&ui);
+    let command_sender = Rc::new(RefCell::new(commands::CommandSender::new(
+        args.display_id,
+        args.domain,
+        args.config.as_deref(),
+    )));
 
     let weak = ui.as_weak();
     let cb_state = state.clone();
@@ -396,11 +410,14 @@ fn main() -> Result<(), slint::PlatformError> {
     let timer = Timer::default();
     let weak = ui.as_weak();
     let timer_state = state.clone();
+    let timer_commands = command_sender.clone();
     timer.start(TimerMode::Repeated, Duration::from_millis(16), move || {
         if let Some(ui) = weak.upgrade() {
             let mut state = timer_state.borrow_mut();
             state.poll(&ui);
             state.track_position(&ui);
+            drop(state);
+            timer_commands.borrow_mut().tick(&ui);
         }
     });
 

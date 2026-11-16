@@ -9,18 +9,21 @@ use std::path::Path;
 
 use glow::HasContext as _;
 
-use crate::formats::FORMAT_CHOOSER;
+use format_list::FORMAT_POINTER_RIGHT;
+
+use crate::formats::{FormatCommand, FORMAT_CHOOSER};
 use crate::text::{TextRenderer, FONT_FILE};
 use crate::ui::{self, Rect};
 use crate::DisplayError;
 
 const BUTTON_BG: [f32; 4] = [0.08, 0.08, 0.10, 1.0];
 const PANEL_BG: [f32; 4] = [0.10, 0.10, 0.13, 1.0];
+const SELECTED_ROW_BG: [f32; 4] = [0.20, 0.32, 0.24, 1.0];
 const TEXT_COLOR: [f32; 4] = [0.95, 0.95, 0.95, 1.0];
 const DOTS: &str = "...";
 const LABEL: &str = "Formats";
 
-/// What a left-button click did in menu terms.
+/// What menu input did.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum MenuAction {
     Ignored,
@@ -98,12 +101,14 @@ impl MenuLayout {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct MenuState {
     open: bool,
+    selected_row: usize,
 }
 
 impl MenuState {
     fn click(&mut self, layout: &MenuLayout, x: i32, y: i32) -> MenuAction {
         if layout.button.contains(x, y) {
             self.open = !self.open;
+            self.selected_row = 0;
             return MenuAction::Consumed;
         }
 
@@ -116,6 +121,38 @@ impl MenuState {
         }
 
         MenuAction::Ignored
+    }
+
+    fn command(
+        &mut self,
+        layout: &MenuLayout,
+        cursor: (i32, i32),
+        command: FormatCommand,
+    ) -> MenuAction {
+        match command {
+            FormatCommand::Pointer {
+                button,
+                pressed: true,
+            } if button == FORMAT_POINTER_RIGHT => {
+                if self.open {
+                    self.open = false;
+                    self.selected_row = 0;
+                    return MenuAction::Select(FORMAT_CHOOSER.to_string());
+                }
+                if layout.button.contains(cursor.0, cursor.1) {
+                    self.open = true;
+                    self.selected_row = 0;
+                    return MenuAction::Consumed;
+                }
+                MenuAction::Ignored
+            }
+            FormatCommand::Navigate { .. } if self.open => {
+                // One row for now; keep it selected.
+                self.selected_row = 0;
+                MenuAction::Consumed
+            }
+            _ => MenuAction::Ignored,
+        }
     }
 }
 
@@ -146,9 +183,26 @@ impl FormatMenu {
         self.states.entry(window).or_default().click(&layout, x, y)
     }
 
+    /// Handle a high-level controller command aimed at the menu.
+    pub(crate) fn command(
+        &mut self,
+        window: i32,
+        region: (i32, i32, i32, i32),
+        cursor: (i32, i32),
+        command: FormatCommand,
+    ) -> MenuAction {
+        let layout = MenuLayout::new(region);
+        self.states
+            .entry(window)
+            .or_default()
+            .command(&layout, cursor, command)
+    }
+
     /// Close the menu, for example when the chooser becomes active.
     pub(crate) fn close(&mut self, window: i32) {
-        self.states.entry(window).or_default().open = false;
+        let state = self.states.entry(window).or_default();
+        state.open = false;
+        state.selected_row = 0;
     }
 
     /// Draw the button, and the open panel, over the active format.
@@ -173,6 +227,14 @@ impl FormatMenu {
             .unwrap_or(false);
         if open {
             ui::clear_rect(gl, framebuffer_height, layout.panel, PANEL_BG);
+            let selected = self
+                .states
+                .get(&window)
+                .map(|state| state.selected_row)
+                .unwrap_or(0);
+            if selected == 0 && layout.row.h > 0 {
+                ui::clear_rect(gl, framebuffer_height, layout.row, SELECTED_ROW_BG);
+            }
         }
 
         let y_gl = framebuffer_height - region.1 - region.3;
@@ -290,5 +352,98 @@ mod tests {
     fn closed_menu_outside_click_is_ignored() {
         let mut state = MenuState::default();
         assert_eq!(state.click(&layout(), 700, 700), MenuAction::Ignored);
+    }
+    #[test]
+    fn controller_right_click_over_button_opens_menu() {
+        let mut state = MenuState::default();
+        let layout = layout();
+        let cursor = center(layout.button);
+        assert_eq!(
+            state.command(
+                &layout,
+                cursor,
+                FormatCommand::Pointer {
+                    button: FORMAT_POINTER_RIGHT,
+                    pressed: true,
+                },
+            ),
+            MenuAction::Consumed
+        );
+        assert!(state.open);
+        assert_eq!(state.selected_row, 0);
+    }
+
+    #[test]
+    fn controller_right_click_activates_open_menu() {
+        let mut state = MenuState::default();
+        let layout = layout();
+        state.command(
+            &layout,
+            center(layout.button),
+            FormatCommand::Pointer {
+                button: FORMAT_POINTER_RIGHT,
+                pressed: true,
+            },
+        );
+        assert_eq!(
+            state.command(
+                &layout,
+                (700, 700),
+                FormatCommand::Pointer {
+                    button: FORMAT_POINTER_RIGHT,
+                    pressed: true,
+                },
+            ),
+            MenuAction::Select(FORMAT_CHOOSER.to_string())
+        );
+        assert!(!state.open);
+    }
+
+    #[test]
+    fn controller_outside_button_is_ignored_when_closed() {
+        let mut state = MenuState::default();
+        assert_eq!(
+            state.command(
+                &layout(),
+                (700, 700),
+                FormatCommand::Pointer {
+                    button: FORMAT_POINTER_RIGHT,
+                    pressed: true,
+                },
+            ),
+            MenuAction::Ignored
+        );
+    }
+
+    #[test]
+    fn controller_navigation_is_consumed_while_open() {
+        let mut state = MenuState {
+            open: true,
+            selected_row: 0,
+        };
+        assert_eq!(
+            state.command(&layout(), (0, 0), FormatCommand::Navigate { dx: 0, dy: 1 },),
+            MenuAction::Consumed
+        );
+        assert_eq!(
+            MenuState::default().command(
+                &layout(),
+                (0, 0),
+                FormatCommand::Navigate { dx: 0, dy: 1 },
+            ),
+            MenuAction::Ignored
+        );
+    }
+
+    #[test]
+    fn controller_cursor_move_is_ignored_by_menu() {
+        assert_eq!(
+            MenuState::default().command(
+                &layout(),
+                (0, 0),
+                FormatCommand::CursorMove { dx: 1, dy: 1 },
+            ),
+            MenuAction::Ignored
+        );
     }
 }

@@ -86,7 +86,10 @@ impl std::fmt::Display for ContractError {
             ContractError::UnknownType(t) => write!(f, "unknown IDL type: {t}"),
             ContractError::UnknownQos(q) => write!(f, "unknown QoS: {q}"),
             ContractError::NameMismatch { expected, found } => {
-                write!(f, "service name `{found}` does not match file stem `{expected}`")
+                write!(
+                    f,
+                    "service name `{found}` does not match file stem `{expected}`"
+                )
             }
             ContractError::Duplicate(t) => write!(f, "duplicate topic: {t}"),
         }
@@ -103,6 +106,7 @@ pub fn known_types() -> &'static [&'static str] {
         "format_manager::FormatManagerInputTopic",
         "format_manager::FormatManagerCtlTopic",
         "format_manager::FormatManagerViewTopic",
+        "format_manager::FormatManagerCommandCtlTopic",
     ]
 }
 
@@ -154,7 +158,10 @@ impl ServiceContract {
         let text = std::fs::read_to_string(path)
             .map_err(|e| ContractError::Io(format!("read {}: {e}", path.display())))?;
         let contract = Self::from_toml(&text)?;
-        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default();
         contract.check_name(stem)?;
         Ok(contract)
     }
@@ -288,7 +295,10 @@ topic = "HelloWorldTopic"
         let r = registry();
         assert_eq!(r.topics.len(), 1);
         assert!(r.validate().is_ok());
-        assert_eq!(r.get("HelloWorldTopic").unwrap().idl_type, "hello_world::HelloWorldTopic");
+        assert_eq!(
+            r.get("HelloWorldTopic").unwrap().idl_type,
+            "hello_world::HelloWorldTopic"
+        );
         assert!(r.get("Nope").is_none());
     }
 

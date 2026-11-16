@@ -3749,11 +3749,13 @@ version = "0.0.0"
 dependencies = [
  "app-state",
  "clap",
+ "format-list",
  "gilrs",
  "serde",
  "single-instance",
  "slint",
  "slint-build",
+ "stations-dds",
  "window-position",
 ]
 

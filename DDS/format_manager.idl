@@ -7,8 +7,22 @@ module format_manager {
   struct FormatManagerInputTopic {
     unsigned long display_id;
     long window;
-    long command;   // 0 = Next, 1 = Select
+    long command;   // 0 = Next, 1 = Select, 10 = CursorMove, 11 = Navigate, 12 = Pointer
     string format;
+    long x;
+    long y;
+    long button;
+    boolean pressed;
+  };
+
+  struct FormatManagerCommandCtlTopic {
+    unsigned long display_id;
+    long window;
+    long command;
+    long x;
+    long y;
+    long button;
+    boolean pressed;
   };
 
   struct FormatManagerCtlTopic {

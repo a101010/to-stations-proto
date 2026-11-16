@@ -8,7 +8,7 @@ use std::path::Path;
 
 use glow::HasContext as _;
 
-use crate::formats::{Format, FormatInput, FormatMeta, FORMAT_CHOOSER};
+use crate::formats::{Format, FormatCommand, FormatInput, FormatMeta, FORMAT_CHOOSER};
 use crate::icon::{Icon, IconRenderer, ICON_SIZE};
 use crate::text::{TextRenderer, FONT_FILE};
 use crate::ui::{self, Rect};
@@ -25,6 +25,8 @@ pub(crate) const PAGE_CAPACITY: usize = GRID_COLUMNS * GRID_ROWS;
 const BACKGROUND: [f32; 4] = [0.02, 0.03, 0.02, 1.0];
 /// Tile background.
 const TILE_BG: [f32; 4] = [0.06, 0.10, 0.07, 1.0];
+/// Selected tile background.
+const TILE_SELECTED_BG: [f32; 4] = [0.12, 0.26, 0.16, 1.0];
 /// Tile title color.
 const TITLE_COLOR: [f32; 4] = [0.80, 1.0, 0.85, 1.0];
 
@@ -146,8 +148,45 @@ fn selectable(catalog: &[FormatMeta]) -> Vec<&FormatMeta> {
 /// The format chooser.
 pub(crate) struct FormatChooser {
     entries: Vec<Entry>,
+    selected: usize,
     icons: IconRenderer,
     text: TextRenderer,
+}
+
+/// The next selected index for a spatial D-pad move.
+///
+/// Horizontal moves cycle through occupied tiles in the current row and
+/// vertical moves cycle through occupied tiles in the current column. A row or
+/// column with no other occupied tile is a no-op.
+pub(crate) fn wrap_index(selected: usize, count: usize, dx: i32, dy: i32) -> usize {
+    if count == 0 || selected >= count {
+        return selected;
+    }
+    let row = selected / GRID_COLUMNS;
+    let column = selected % GRID_COLUMNS;
+
+    if dx != 0 {
+        let direction = dx.signum();
+        for step in 1..=GRID_COLUMNS {
+            let next_column =
+                (column as i32 + direction * step as i32).rem_euclid(GRID_COLUMNS as i32) as usize;
+            let next = row * GRID_COLUMNS + next_column;
+            if next < count {
+                return next;
+            }
+        }
+    } else if dy != 0 {
+        let direction = dy.signum();
+        for step in 1..=GRID_ROWS {
+            let next_row =
+                (row as i32 + direction * step as i32).rem_euclid(GRID_ROWS as i32) as usize;
+            let next = next_row * GRID_COLUMNS + column;
+            if next < count {
+                return next;
+            }
+        }
+    }
+    selected
 }
 
 impl FormatChooser {
@@ -169,6 +208,7 @@ impl FormatChooser {
         let text = TextRenderer::new(gl, &assets_root.join(FONT_FILE))?;
         Ok(Self {
             entries,
+            selected: 0,
             icons,
             text,
         })
@@ -212,7 +252,12 @@ impl Format for FormatChooser {
         let scale = ui::scale_for_height(height);
         let layout = ChooserLayout::new(region, self.entries.len());
         for tile in &layout.tiles {
-            ui::clear_rect(gl, framebuffer_height, tile.rect, TILE_BG);
+            let color = if tile.index == self.selected {
+                TILE_SELECTED_BG
+            } else {
+                TILE_BG
+            };
+            ui::clear_rect(gl, framebuffer_height, tile.rect, color);
         }
         for tile in &layout.tiles {
             let entry = &self.entries[tile.index];
@@ -246,8 +291,29 @@ impl Format for FormatChooser {
         }
         let layout = ChooserLayout::new(region, self.entries.len());
         match layout.tile_at(x, y) {
-            Some(index) => FormatInput::Select(self.entries[index].name.clone()),
+            Some(index) => {
+                self.selected = index;
+                FormatInput::Select(self.entries[index].name.clone())
+            }
             None => FormatInput::Consumed,
+        }
+    }
+
+    fn command(&mut self, command: FormatCommand) -> FormatInput {
+        match command {
+            FormatCommand::Navigate { dx, dy } => {
+                self.selected = wrap_index(self.selected, self.entries.len(), dx, dy);
+                FormatInput::Consumed
+            }
+            FormatCommand::Pointer {
+                button: 1,
+                pressed: true,
+            } if !self.entries.is_empty() => {
+                FormatInput::Select(self.entries[self.selected].name.clone())
+            }
+            FormatCommand::Pointer { .. } | FormatCommand::CursorMove { .. } => {
+                FormatInput::Consumed
+            }
         }
     }
 }
@@ -335,5 +401,36 @@ mod tests {
     fn invalid_region_has_no_tiles() {
         let layout = ChooserLayout::new(Rect::new(0, 0, 0, 720), 2);
         assert!(layout.tiles.is_empty());
+    }
+    #[test]
+    fn two_tiles_wrap_horizontally_and_ignore_vertical() {
+        assert_eq!(wrap_index(0, 2, 1, 0), 1);
+        assert_eq!(wrap_index(1, 2, 1, 0), 0);
+        assert_eq!(wrap_index(0, 2, -1, 0), 1);
+        assert_eq!(wrap_index(1, 2, -1, 0), 0);
+        assert_eq!(wrap_index(0, 2, 0, 1), 0);
+        assert_eq!(wrap_index(1, 2, 0, -1), 1);
+    }
+
+    #[test]
+    fn full_grid_wraps_at_edges() {
+        assert_eq!(wrap_index(3, 16, 1, 0), 0);
+        assert_eq!(wrap_index(0, 16, -1, 0), 3);
+        assert_eq!(wrap_index(12, 16, 0, 1), 0);
+        assert_eq!(wrap_index(0, 16, 0, -1), 12);
+    }
+
+    #[test]
+    fn sparse_grid_skips_empty_cells() {
+        // Five entries: row 0 is full and row 1 has only column 0.
+        assert_eq!(wrap_index(0, 5, 0, 1), 4);
+        assert_eq!(wrap_index(4, 5, 0, -1), 0);
+        assert_eq!(wrap_index(1, 5, 0, 1), 1);
+    }
+
+    #[test]
+    fn empty_selection_is_unchanged() {
+        assert_eq!(wrap_index(0, 0, 1, 0), 0);
+        assert_eq!(wrap_index(5, 2, 1, 0), 5);
     }
 }

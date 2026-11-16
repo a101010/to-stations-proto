@@ -1,0 +1,5 @@
+[service]
+name = "paws"
+
+[[publish]]
+topic = "FormatManagerInputTopic"
