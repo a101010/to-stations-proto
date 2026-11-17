@@ -173,7 +173,7 @@ impl crate::formats::Format for HelloWorld {
             let Some(point) = normalized(region, x, y) else {
                 return FormatInput::Ignored;
             };
-            if point.0 * point.0 + point.1 * point.1 > 1.0 {
+            if !on_globe(point) {
                 return FormatInput::Ignored;
             }
             self.dragging = true;
@@ -202,7 +202,15 @@ impl crate::formats::Format for HelloWorld {
             return FormatInput::Ignored;
         };
         self.last_pointer = point;
+
+        // Leaving the globe releases the drag immediately, even if the button
+        // is still held. The final drag at the rim gives the view service a
+        // velocity to carry into inertia.
         self.send(HELLO_ACTION_DRAG, point.0, point.1, true);
+        if !on_globe(point) {
+            self.send(HELLO_ACTION_RELEASE, point.0, point.1, false);
+            self.dragging = false;
+        }
         FormatInput::Consumed
     }
 
@@ -280,6 +288,11 @@ fn hello_menu_items(mode: i32, overlay: i32) -> Vec<MenuItem> {
     ]
 }
 
+/// Whether a normalized point is inside the globe's drag area.
+fn on_globe(point: (f64, f64)) -> bool {
+    point.0 * point.0 + point.1 * point.1 <= 1.0
+}
+
 /// Map a region point to normalized arcball coordinates, `y` up.
 fn normalized(region: (i32, i32, i32, i32), x: i32, y: i32) -> Option<(f64, f64)> {
     let (rx, ry, width, height) = region;
@@ -325,6 +338,15 @@ mod tests {
         let advance =
             |text: &str| -> f32 { font.shape(text).iter().map(|glyph| glyph.x_advance).sum() };
         assert!(advance(MAX_TEXT) >= advance("NoConn 00:00:00"));
+    }
+
+    #[test]
+    fn globe_hit_area_is_the_unit_circle() {
+        assert!(on_globe((0.0, 0.0)));
+        assert!(on_globe((0.5, -0.5)));
+        assert!(on_globe((1.0, 0.0)));
+        assert!(!on_globe((0.8, 0.8)));
+        assert!(!on_globe((1.1, 0.0)));
     }
 
     #[test]

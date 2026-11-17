@@ -39,7 +39,7 @@ The color-picker and light-position overlays are the next two stories (`hello-lu
 13. **`Inspect`/`Auto` shows the next mode**, not the current mode.
 14. **The Lux menu items are selectable placeholders in Story A.** Selecting one cycles its label as if its overlay were open (`Lux Color` to `World`, and back), and opens no overlay.
 15. **Auto** uses the model attitude and shows the greeting. **Inspect** uses the local attitude and hides the greeting.
-16. **Arcball:** left-drag on the globe enters Inspect and rotates with trackball mapping; release velocity produces inertia damped by friction.
+16. **Arcball:** left-drag on the globe enters Inspect and rotates with trackball mapping; release velocity produces inertia damped by friction. Leaving the globe releases the drag and starts the spin even if the button is still held.
 17. **Paws right-stick press toggles arcball**; while arcball is active, right-stick movement rotates the globe.
 18. **Paws gets a local, clearly visible `R3` toggle near the right stick.** It defaults unchecked, shows `Off`/`On`, toggles on physical right-thumb press or click, and sends the same toggle command. It does not subscribe to view state or know about formats.
 19. **The Xbox Start button toggles the three-dot menu, and B cancels it.** Start opens or closes the menu; B closes it if open. Both are high-level control commands relayed through the format-manager path.
@@ -204,6 +204,7 @@ void display_lib_mouse_wheel(display_lib* d, int delta);
   - publishes `HelloWorldInputTopic` through a format-specific input handle stamped with the display id;
   - maps:
     - left-drag -> enter Inspect and rotate,
+    - leave the globe -> release and start inertia, even with the button still held,
     - release with velocity -> inertia,
     - right-thumb toggle -> arcball toggle,
     - right-stick movement while arcball -> rotate,
@@ -248,6 +249,7 @@ Replace the vertical menu layout with a horizontal top-band item bar:
 - Trackball/arcball mapping from pointer position to sphere point.
 - Rotation between consecutive points is applied to the local attitude.
 - Left-drag enters Inspect.
+- Leaving the globe ends the drag and starts inertia, even if the left button remains held.
 - Release velocity becomes angular velocity.
 - A friction constant damps the rotation over time.
 - Auto mode ignores local attitude and uses the model attitude.
@@ -292,7 +294,7 @@ Manual, using a temporary `LOCALAPPDATA`:
 1. Launch the fleet with two display ids.
 2. Left-drag the globe on display 0; verify it enters Inspect and rotates.
 3. Right-click the globe and menu button; verify nothing happens.
-4. Release quickly; verify inertia and damping.
+4. Drag off the globe without releasing the left button; verify the globe starts spinning. Release quickly; verify inertia and damping.
 5. Open the menu with left-click; verify four items, left alignment, tight equal spacing, and that the three-dot button is hidden.
 6. Toggle `Inspect`/`Auto` from the menu.
 7. Select `Lux Color`; reopen the menu and verify it reads `World`. Repeat for `Lux Pos`, and verify only one placeholder overlay is active.
@@ -312,7 +314,7 @@ Touch input is out of scope for this increment; the menu keeps its touch-friendl
 - Local mouse input reaches the display library through ABI v4 and then the per-display controller.
 - Paws right-thumb/R3 toggle input reaches the same path.
 - Start toggles the menu and B cancels it.
-- Auto/Inspect mode, local arcball, inertia, and light/color work per display.
+- Auto/Inspect mode, local arcball, inertia, leaving the globe to spin, and light/color work per display.
 - The menu is horizontal, touch-friendly, left-aligned in the top band, has four items, and hides the three-dot button while open.
 - Lux Color/World and Lux Pos/World cycle as selectable placeholders without rendering overlays.
 - No hello-view state is persisted.
@@ -339,7 +341,7 @@ One manual two-display run; no screenshots and no repeated UI runs.
 - **Menu hit-testing:** when open, the former three-dot area is the first item, not a close toggle.
 - **Placeholder overlays:** Lux labels cycle, but no overlay is rendered; this must not be mistaken for a finished overlay.
 - **Input ownership:** the display library must publish input with the correct display id.
-- **Arcball math:** trackball mapping, inertia, and friction decay need focused tests.
+- **Arcball math:** trackball mapping, inertia, friction decay, and leaving the globe need focused tests.
 - **Touch:** touch input is deferred until hardware is available; the menu keeps its touch-friendly layout.
 - **Cursor hiding:** native cursor visibility is region-based; console controls must keep the native arrow.
 - **Local buttons:** only the left button acts locally; controller A/right-click is intentionally separate.

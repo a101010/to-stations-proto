@@ -14,7 +14,7 @@ Conventions:
 ### hello-ctl-service
 Create the per-display hello_world controller and view foundation: a per-display `hello-ctl-service`, a per-display `hello-view-service`, ABI v4 mouse motion/wheel input with pointer tracking, a top-band horizontal format menu with four fixed slots (`Formats`, `Inspect`/`Auto`, `Lux Color`/`World`, `Lux Pos`/`World`), Auto/Inspect mode with arcball rotation and inertia, per-display light color and position, Lux placeholder label cycling, a visible paws right-stick `R3` toggle, and Start/B menu toggle/cancel commands. The Lux items are selectable but open no overlays yet. Hello-view state is not persisted.
 - **Depends on:** none.
-- **Minimal test:** open the menu and verify four left-aligned, equally spaced items with centered labels; cycle the Lux labels; use Start to toggle the menu and B to cancel it; left-drag the globe to enter Inspect and rotate it; right-click does nothing; release quickly to impart inertia; toggle Auto/Inspect from the menu and from the paws `R3` toggle; verify one crosshair follows the mouse, the native arrow is hidden over the format, and a second display is unaffected.
+- **Minimal test:** open the menu and verify four left-aligned, equally spaced items with centered labels; cycle the Lux labels; use Start to toggle the menu and B to cancel it; left-drag the globe to enter Inspect and rotate it; drag off the globe without releasing and verify it starts spinning; right-click does nothing; release quickly to impart inertia; toggle Auto/Inspect from the menu and from the paws `R3` toggle; verify one crosshair follows the mouse, the native arrow is hidden over the format, and a second display is unaffected.
 - **Status:** in progress.
 
 ### hello-lux-color
