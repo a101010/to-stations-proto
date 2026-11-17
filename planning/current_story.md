@@ -1,349 +1,283 @@
-# Current story: paws-format-ctl
+# Current story: hello-ctl-service
 
 This file is the detailed, living plan for the one active story. It is rewritten for each story. The backlog in `backlog.md` holds all work and the per-story status.
 
 ## Story
 
-Add DDS connectivity from `paws` to the per-display format manager: high-level cursor, navigation, and pointer commands go from `paws` to `format-ctl-service`, then to the display library. The right stick moves a virtual cursor, A/right-click opens the three-dot menu, D-pad selects the `Formats` row and wraps the chooser selection, and A activates the highlighted format.
+Create the per-display hello_world controller and view foundation: per-display `hello-ctl-service` and `hello-view-service`, ABI v4 local input, a horizontal touch-friendly format menu, Auto/Inspect arcball with inertia, per-display light color and position, and paws right-stick toggle input.
+
+The color-picker and light-position overlays are the next two stories (`hello-lux-color` and `hello-lux-pos`).
 
 - **Depends on:** none.
-- **Minimal test:** launch paws with a display id; move the cursor to the three-dot button, open the menu and `Formats` with A, verify D-pad wraps the chooser selection with the first format selected by default, A selects the highlighted format, and `dds-echo` shows the input and command-control samples.
+- **Minimal test:** right-drag the globe to enter Inspect and rotate it; release quickly to impart inertia; toggle Auto/Inspect from the horizontal menu and from the paws right-stick toggle; verify a second display is unaffected.
 
 ## Context
 
-- `FormatManagerInputTopic` is the controller's input topic. The display library publishes `Select`; external publishers can send `Next`/`Select`.
-- `FormatManagerCtlTopic` carries persisted format assignments to the view service.
-- The display library has no high-level command path and no virtual cursor.
-- The format chooser has no selected tile or highlight; it only responds to left clicks.
-- `paws` has no DDS connectivity yet.
-- `format-ctl-service` currently consumes only `Next`/`Select`.
-- `paws` already has the display id and both virtual and real controller controls.
+- `hello-service` is the global model and stays unchanged.
+- `hello-view-service` is currently a singleton and publishes a global view.
+- The display library subscribes to the global view without filtering by display id.
+- The display ABI is v3 and carries only mouse-button input; it has no motion or wheel events.
+- The format menu is currently a vertical single-row `Formats` menu.
+- The format-manager command path from paws to the display library already exists.
+- `paws` has a display id, right-stick cursor input, D-pad, and A/right-click, but no right-thumb toggle.
+- Hello-view-specific state must not be persisted.
 
 ## Decisions
 
-1. **Reuse `FormatManagerInputTopic`** for paws commands and add one output topic, `FormatManagerCommandCtlTopic`, from the controller to the display library.
-2. **A/right-click activates the current target.** It activates the selected menu row when the menu is open, and the highlighted chooser tile when the chooser is active.
-3. **Controller access to the chooser is through the three-dot menu.** Move the virtual cursor to the three-dot button and press A/right-click to open the menu; the `Formats` row is selected; press A again to open the chooser.
-4. **The cursor is shown over the active format** after the first right-stick movement and is used to aim at the three-dot button. It is independent of the chooser tile highlight.
-5. **D-pad navigation wraps spatially** within occupied tiles of the current row or column. It does not clamp.
-6. **Cursor moves are pixel deltas** sent at about 30 Hz; D-pad and A are edge-triggered.
-7. **All command transport is DDS.** No display-library ABI change.
-8. **The view service is unchanged.** Commands are transient and are not persisted.
-9. **`dds-echo` decodes and can send the new command-control topic.**
-10. **Paws DDS setup is best-effort**: a missing participant, registry, or contract leaves local paws behavior working.
+1. **`hello-view-service` and `hello-ctl-service` are per display.** Both take `--display-id` and control only that display.
+2. **`hello-service` remains global** and unchanged.
+3. **The view service owns** Auto/Inspect mode, local attitude, arcball velocity, light color, light position, and overlay state.
+4. **No hello-view persistence.** Mode, local attitude, inertia, light color/position, and overlay state reset on restart.
+5. **ABI v4 adds mouse motion and wheel**, and the display application forwards all mouse buttons.
+6. **Local input path:** display app → ABI v4 → display library → `HelloWorldInputTopic` → per-display `hello-ctl-service` → `HelloWorldCtlTopic` → per-display `hello-view-service` → `HelloWorldViewTopic` → display library filtered by display id.
+7. **Paws commands are translated by the display library**, not by paws. Paws does not know formats.
+8. **The format menu is a horizontal, touch-friendly item bar**, not vertical rows.
+9. **`Formats` is always the first menu item.** Format-specific items follow it.
+10. **Story A menu items are `Formats` and `Inspect`/`Auto`.**
+11. **`Inspect`/`Auto` shows the next mode**, not the current mode.
+12. **Auto** uses the model attitude and shows the greeting. **Inspect** uses the local attitude and hides the greeting.
+13. **Arcball:** right-drag on the globe enters Inspect and rotates with trackball mapping; release velocity produces inertia damped by friction.
+14. **Paws right-stick press toggles arcball**; while arcball is active, right-stick movement rotates the globe.
+15. **Paws gets a local `R3` checkbox.** It defaults unchecked, toggles on physical right-thumb press or click, and sends the same toggle command. It does not subscribe to view state or know about formats.
+16. **No format-manager behavior changes** beyond accepting the new right-thumb control command.
+17. **`dds-echo` decodes and can send the new hello-world topics.**
+18. **The C++ mirror must implement ABI v4** after the Rust increment.
 
 ## Scope
 
 **In scope**
 
-- Extended format-manager input payload and new command-control topic.
-- `paws` DDS writer, service contract, domain/config options, and command generation.
-- Controller relay with display filtering and command validation.
-- Display-library command reader, menu routing, and active-format command routing.
-- Virtual cursor rendering and clamping.
-- Controller-operated three-dot menu with a transient selected row.
-- Format chooser selection highlight and spatial D-pad wrapping.
-- A/right-click activation of the selected menu row or chooser tile.
-- `dds-echo` decode and send support.
-- Contracts, IDL, registry, and architecture updates.
+- Per-display hello view and control services.
+- New hello-world input/control topics and extended view topic.
+- ABI v4 mouse motion/wheel and all-button forwarding.
+- Per-display view filtering.
+- Auto/Inspect mode, local attitude, arcball and inertia.
+- Per-display light/color state with defaults.
+- Horizontal touch-friendly menu with `Formats` first and `Inspect`/`Auto` second.
+- Paws `R3` checkbox and right-thumb command.
+- Launch/cleanup and contract updates.
+- Tests and documentation.
 
 **Out of scope**
 
-- Opening the format chooser from the controller.
-- Controller operation of the three-dot menu.
-- Per-window cursors for `big-d`.
-- Pages beyond the chooser's first 16 formats.
-- A joystick control service between paws and the format controller.
-- Any display-library ABI change.
+- Color-picker overlay (`hello-lux-color`).
+- Light-position overlay (`hello-lux-pos`).
+- Persistence of view state.
+- Changes to the global hello model.
+- C++ implementation.
 
-## Wire protocol
+## Services
 
-Extend `DDS/format_manager.idl`:
+### `hello-service`
+
+Unchanged global model.
+
+### `hello-view-service`
+
+- Required `--display-id`.
+- Guard `hello-view-service-display-<id>`.
+- Subscribes to global `HelloWorldTopic`.
+- Subscribes to `HelloWorldCtlTopic` and filters by display id.
+- Maintains per-display state:
+  - mode: Auto or Inspect,
+  - local attitude quaternion,
+  - angular velocity for inertia,
+  - light vector,
+  - light color,
+  - pre-overlay state reserved for the next stories.
+- Merges model data and local state, then publishes `HelloWorldViewTopic` with the display id.
+- No persistence.
+
+### `hello-ctl-service`
+
+- Required `--display-id`.
+- Guard `hello-ctl-service-display-<id>`.
+- Subscribes to `HelloWorldInputTopic`, filters by display id.
+- Publishes `HelloWorldCtlTopic` for its display.
+- Owns no long-term view state.
+- Adds the service contract, build/deploy entry, launch entry, and cleanup coverage.
+
+## IDL, topics, and contracts
+
+Add to `DDS/math.idl`:
 
 ```idl
-struct FormatManagerInputTopic {
+struct Vector3 {
+  double x;
+  double y;
+  double z;
+};
+
+struct Color {
+  double r;
+  double g;
+  double b;
+};
+```
+
+Add to `DDS/hello_world.idl`:
+
+```idl
+struct HelloWorldInputTopic {
   unsigned long display_id;
-  long window;
-  long command;   // 0 Next, 1 Select, 10 CursorMove, 11 Navigate, 12 Pointer
-  string format;
-  long x;
-  long y;
-  long button;
+  long action;
+  double x;
+  double y;
+  double z;
   boolean pressed;
 };
 
-struct FormatManagerCommandCtlTopic {
+struct HelloWorldCtlTopic {
   unsigned long display_id;
-  long window;
-  long command;
-  long x;
-  long y;
-  long button;
+  long action;
+  double x;
+  double y;
+  double z;
   boolean pressed;
 };
 ```
 
-Add constants and command classification to `rust/lib/format-list/src/lib.rs`:
+Extend `HelloWorldViewTopic` with:
 
-```rust
-pub const FORMAT_COMMAND_CURSOR_MOVE: i32 = 10;
-pub const FORMAT_COMMAND_NAVIGATE: i32 = 11;
-pub const FORMAT_COMMAND_POINTER: i32 = 12;
-pub const FORMAT_POINTER_RIGHT: i32 = 1;
+- `display_id`
+- `mode`
+- `light` (`math::Vector3`)
+- `color` (`math::Color`)
+- overlay/menu state reserved for the next stories
 
-pub fn is_control_command(command: i32) -> bool;
-```
+`HelloWorldTopic` stays unchanged.
 
-Semantics:
+Add shared action/mode constants, either in a small `hello-control` library or a dedicated module in `format-list`:
 
-- `CursorMove`: `x`/`y` are physical-pixel deltas.
-- `Navigate`: `x`/`y` are each `-1`, `0`, or `1`; one axis is nonzero.
-- `Pointer`: `button` is the mouse-button number (`1` = right) and `pressed` is the state.
-- `Next`/`Select` keep their existing meaning; new fields are zero/empty for them.
-
-QoS:
-
-- `FormatManagerInputTopic`: reliable (unchanged).
-- `FormatManagerCommandCtlTopic`: reliable, volatile.
-
-## Controller service
-
-`rust/service/format-ctl-service/src/main.rs`:
-
-- Keep the input reader.
-- Add a writer for `FormatManagerCommandCtlTopic`.
-- In the poll loop, for each input sample addressed to this display id:
-  - `Next`/`Select`: apply assignments as today.
-  - `CursorMove`/`Navigate`/`Pointer`: forward the command on `FormatManagerCommandCtlTopic`.
-  - Unknown commands: ignore.
-- Commands for other displays are ignored.
-- Commands do not affect assignments or persistence.
-- Add tests for forwarding, display filtering, unknown commands, and independence from `Next`/`Select`.
+- input actions: grab, drag, release, toggle arcball, menu mode toggle, and future overlay actions;
+- modes: Auto, Inspect;
+- menu item IDs for `Formats`, `Inspect/Auto`, and future format-specific items.
 
 Contracts:
 
-- `contracts/services/format-ctl-service.toml` adds `[[publish]] topic = "FormatManagerCommandCtlTopic"`.
-- The input subscription is unchanged.
+- `contracts/services/hello-ctl-service.toml`: subscribe `HelloWorldInputTopic`, publish `HelloWorldCtlTopic`.
+- `contracts/services/hello-view-service.toml`: subscribe `HelloWorldCtlTopic`.
+- Register the new topics in `contracts/topics.toml` with reliable QoS.
+- Update `stations-dds::contract::known_types()`.
+- Regenerate `build/topics.md`.
+
+## Display library ABI v4
+
+Update `include/display_lib.h`:
+
+```c
+#define DISPLAY_LIB_ABI_VERSION 4u
+
+void display_lib_mouse_motion(display_lib* d, int x, int y);
+void display_lib_mouse_wheel(display_lib* d, int delta);
+```
+
+- `lil-d` loads and calls the new functions.
+- `lil-d` forwards `CursorMoved` and `MouseWheel`.
+- `lil-d` forwards all mouse buttons, not just left.
+- The display library tracks the pointer position and pressed buttons.
+- Motion and wheel are routed to the active format through the format manager.
+- Existing ABI v3 behavior remains otherwise unchanged.
+
+## Display library input and rendering
+
+- Extend `Format` with mouse-motion and mouse-wheel handlers, defaulting to ignored.
+- Extend `FormatCommand` with a right-thumb toggle command.
+- The hello-world format:
+  - receives local mouse motion/wheel and format commands;
+  - publishes `HelloWorldInputTopic` through a format-specific input handle stamped with the display id;
+  - maps:
+    - right-drag → enter Inspect and rotate,
+    - release with velocity → inertia,
+    - right-thumb toggle → arcball toggle,
+    - right-stick movement while arcball → rotate,
+    - menu `Inspect/Auto` → mode toggle,
+    - `Formats` → existing format chooser selection.
+- `ViewSource` filters `HelloWorldViewTopic` by display id.
+- Extend the view state with mode, light, and color.
+- Earth rendering applies the light vector and light color.
+- Hide the greeting in Inspect mode.
+
+## Horizontal touch menu
+
+Replace the vertical menu layout with a horizontal item bar:
+
+- Opens from the three-dot button.
+- Large touch targets; no hover dependency.
+- Anchored at the button and extending right, or spanning the top of the format window if space is tight.
+- Items are laid out left to right.
+- `Formats` is always first.
+- Story A items:
+  1. `Formats`
+  2. `Inspect` / `Auto`
+- Story B adds `Lux Color` / `World`.
+- Story C adds `Lux Pos` / `World`.
+- Labels come from the per-display view state.
+- D-pad left/right selects items.
+- A/right-click, touch, or the virtual cursor activates the selected item.
+- The menu is hidden while the chooser is active.
+- Selecting another item while an overlay is open will cancel the current overlay first (used by Stories B/C).
+
+## Arcball and inertia
+
+- Trackball/arcball mapping from pointer position to sphere point.
+- Rotation between consecutive points is applied to the local attitude.
+- Right-drag enters Inspect.
+- Release velocity becomes angular velocity.
+- A friction constant damps the rotation over time.
+- Auto mode ignores local attitude and uses the model attitude.
+- Inspect mode uses local attitude and hides the greeting.
+- The view service integrates inertia at its relay rate.
+- Tests cover mapping, composition, damping, and mode transitions.
 
 ## Paws
 
-`rust/ui/paws`:
-
-- Add dependencies `stations-dds` and `format-list`.
-- Add `--domain` and `--config` options, matching the services. Defaults preserve current launch behavior.
-- Resolve contracts through `<exe_dir>/../config`, else `./contracts`.
-- Load and validate the topic registry and `contracts/services/paws.toml`.
-- Create a `FormatManagerInputTopic` writer. Best-effort: log failures and continue with local-only controls.
-- Add `contracts/services/paws.toml`:
-
-```toml
-[service]
-name = "paws"
-
-[[publish]]
-topic = "FormatManagerInputTopic"
-```
-
-Command generation (`rust/ui/paws/src/commands.rs`, new):
-
-- Read the current UI controls so Virtual and controller modes behave the same.
-- `CommandState` keeps:
-  - last cursor send time;
-  - previous D-pad pressed states;
-  - previous A state.
-- Each ~33 ms, if the right stick magnitude is above zero:
-  - send `CursorMove` with `dx/dy = round(right * 20)` pixels;
-  - skip if both deltas round to zero.
-- D-pad:
-  - send `Navigate` on each false-to-true edge;
-  - `Up/Down/Left/Right` map to `(0,-1)`, `(0,1)`, `(-1,0)`, `(1,0)`.
-- A:
-  - send a right-button press on the false-to-true edge;
-  - send a right-button release on the true-to-false edge.
-- All commands carry the paws display id and window 0.
-- Unit-test the throttle and edge detection without Slint.
-
-## Display library
-
-### Command API
-
-`rust/lib/display-lib/src/formats.rs`:
-
-```rust
-pub(crate) enum FormatCommand {
-    CursorMove { dx: i32, dy: i32 },
-    Navigate { dx: i32, dy: i32 },
-    Pointer { button: i32, pressed: bool },
-}
-
-pub(crate) trait Format {
-    // existing methods...
-
-    fn command(&mut self, command: FormatCommand) -> FormatInput {
-        let _ = command;
-        FormatInput::Ignored
-    }
-}
-```
-
-### Format menu
-
-`rust/lib/display-lib/src/format_menu.rs`:
-
-- Add `selected_row: usize` to `MenuState`; reset to `0` when the menu opens.
-- Add a `command(...)` method accepting the cursor position and a high-level command.
-- Pointer right press:
-  - menu closed and cursor over the three-dot button: open the menu, select row 0, consume;
-  - menu open: activate the selected row (`Formats`) and close;
-  - otherwise: ignored so the active format can handle it.
-- Navigate while open: move `selected_row` among rows and consume. With one row this stays on row 0 but is ready for future rows.
-- Keep local left-click behavior: the button toggles the menu, a row selects it, and an outside click closes it.
-- Render a distinct background for the selected row while open. This is a transient controller selection, not a current-format indicator.
-- Add tests for controller open, row activation, navigation, outside fallback, and local click behavior.
-
-### Format manager
-
-`rust/lib/display-lib/src/format_manager.rs`:
-
-- Add per-window cursor state, or a single window-0 cursor for the first increment.
-- `command(window, command) -> Option<FormatAction>`:
-  - `CursorMove`: initialize at region center on the first command, add the delta, clamp to the region, make the cursor visible;
-  - if the active format is not the chooser, route menu commands first:
-    - `Pointer` right press opens the menu when the cursor is over the button, or activates the selected row when open;
-    - `Navigate` moves the menu selection when open;
-    - consumed menu commands do not reach the active format;
-  - when the menu is closed, `Navigate` and other pointer commands go to the active format;
-  - when the chooser is active, bypass the menu entirely;
-  - map `FormatInput::Select` to `FormatAction::Select`.
-- Render the cursor after the format and menu:
-  - a crosshair made from two `ui::clear_rect` bars;
-  - contrasting color;
-  - hidden until the first cursor move.
-- Add tests for cursor initialization, clamping, menu-first routing, active-format command routing, and Select propagation.
-
-### Format source
-
-`rust/lib/display-lib/src/format_source.rs`:
-
-- Add an optional reader for `FormatManagerCommandCtlTopic`.
-- On each command matching this display id:
-  - convert it to `FormatCommand`;
-  - call `FormatManager::command`;
-  - publish any resulting `Select` through the existing input writer.
-- A missing command topic must not break assignment handling.
-- Add tests for display-id filtering and Select publication.
-
-### Format chooser
-
-`rust/lib/display-lib/src/formats/format_chooser.rs`:
-
-- Add `selected: usize`, default `0`.
-- Render a distinct background/border for the selected tile.
-- `command`:
-  - `Navigate` moves the selection with spatial wrap:
-    - left/right cycle through occupied tiles in the current row;
-    - up/down cycle through occupied tiles in the current column;
-    - a row or column with one occupied tile is a no-op for that axis;
-  - right-button press returns `Select(entries[selected].name.clone())`;
-  - releases and other buttons are consumed without selection.
-- Mouse left-click updates `selected` and selects as today.
-- With the current two formats, left/right alternate between the two tiles and up/down are no-ops.
-- Add tests for default selection, horizontal/vertical wrap, sparse grids, full-grid edge wrap, activation, and empty catalogs.
-
-## `dds-echo`
-
-`rust/tool/dds-echo`:
-
-- Decode `FormatManagerCommandCtlTopic`.
-- Update `FormatManagerInputTopic` tests and field metadata for the new fields.
-- Add a `TopicWriter` variant and field-schema arm for the command-control topic.
-- Add decode and send tests.
-
-## Contracts, IDL, and build
-
-- `DDS/format_manager.idl`: extend the input struct and add the command-control topic.
-- `contracts/topics.toml`: add `FormatManagerCommandCtlTopic` with reliable QoS.
-- `contracts/services/format-ctl-service.toml`: publish the command-control topic.
-- `contracts/services/paws.toml`: new, publish the input topic.
-- `rust/lib/stations-dds/src/contract.rs`: add the new type to `known_types()`.
-- `rust/lib/stations-dds/src/lib.rs`: add a type-name assertion.
-- `rust/lib/stations-dds/tests/registry.rs`: completeness passes with the new IDL/registry.
-- `build/topics.md`: regenerated by `build.ps1`.
-
-## Architecture updates
-
-`planning/architecture.md`:
-
-- Paws now publishes high-level commands on `FormatManagerInputTopic` using its display id.
-- `format-ctl-service` relays control commands on `FormatManagerCommandCtlTopic`.
-- The display library routes commands to the active format and draws the virtual cursor.
-- The chooser highlights a selected tile; D-pad navigates and A/right-click activates.
-- `paws` is a control source in the format-manager MVC.
-- No ABI changes; commands are DDS-only.
+- Add a local `R3` checkbox to the paws UI.
+- Default unchecked.
+- Clicking the checkbox toggles it.
+- Physical right-stick press toggles it.
+- Every toggle sends the same right-thumb command.
+- Paws does not subscribe to hello-world view state and does not know about formats.
+- The checkbox may not reflect menu/mouse mode changes; that is accepted.
+- Add right-thumb press detection to the gamepad `Controls`.
+- Keep the existing right-stick cursor commands; the display library interprets them as arcball rotation when hello-world is in arcball mode.
 
 ## Tests
 
 Automated:
 
-- `format-list` command classification.
-- `FormatChooser`:
-  - default selection;
-  - horizontal and vertical spatial wrap;
-  - sparse-grid no-ops and full-grid edge wrap;
-  - right-click activation;
-  - mouse selection.
-- `FormatMenu`:
-  - controller open when the cursor is over the button;
-  - selected-row activation selects `format-chooser`;
-  - menu navigation with one and multiple rows;
-  - outside commands fall through;
-  - local click behavior is unchanged.
-- `FormatManager`:
-  - cursor initialization and clamping;
-  - menu-first command routing when not in the chooser;
-  - chooser bypasses the menu;
-  - active-format command routing;
-  - Select propagation.
-- `FormatSource`:
-  - display-id filtering;
-  - command reader optional;
-  - Select publication.
-- `format-ctl-service`:
-  - command forwarding;
-  - display filtering;
-  - unknown commands ignored;
-  - Next/Select independence.
-- `paws` command generation:
-  - cursor throttle;
-  - D-pad press edges;
-  - A press/release edges.
-- `dds-echo` decode/send.
-- `cargo test`, clippy, `build.ps1 -Test`, `build.ps1`.
+- Per-display input/control/view filtering.
+- Auto/Inspect merge and greeting visibility.
+- Arcball mapping, inertia, and friction.
+- Horizontal menu layout, labels, and activation.
+- ABI v4 loading and event routing.
+- Right-thumb toggle from paws and the checkbox.
+- Contract, registry, and known-type completeness.
+- `dds-echo` decode/send for new topics.
 
 Manual, using a temporary `LOCALAPPDATA`:
 
-1. Launch the fleet and paws for display 0.
-2. Select the format chooser locally.
-3. Move the right stick; verify the virtual cursor moves and stays inside the format window.
-4. Press D-pad right; verify the highlight moves from `Hello World` to `Default`.
-5. Press A; verify the display switches to `Default`.
-6. Verify `dds-echo` shows the input and command-control samples.
-7. Verify the second display is unaffected.
-8. Repeat from Virtual mode with mouse-driven sticks/buttons.
-9. Verify no real `%LOCALAPPDATA%\to-stations` state is touched.
+1. Launch the fleet with two display ids.
+2. Right-drag the globe on display 0; verify it enters Inspect and rotates.
+3. Release quickly; verify inertia and damping.
+4. Toggle `Inspect`/`Auto` from the horizontal menu.
+5. Toggle the paws `R3` checkbox and the physical right-stick press; verify the same arcball state on display 0.
+6. Verify display 1 is unaffected.
+7. Confirm the greeting is hidden in Inspect and restored in Auto.
+8. Verify light color/position defaults are visible per display.
+9. Verify no hello-view state file is written.
+10. Verify `cleanup.ps1` stops both per-display services.
 
 ## Acceptance
 
-- `paws` publishes high-level commands to `format-ctl-service`.
-- The controller relays them on `FormatManagerCommandCtlTopic`.
-- The display library draws a virtual cursor and routes commands to the active format.
-- The chooser highlights the first format by default and moves the selection with D-pad.
-- A/right-click opens the menu when aimed at the three-dot button, activates the selected menu row, and selects the highlighted chooser tile.
-- D-pad navigation wraps spatially within rows and columns.
-- `Next`/`Select` and format persistence remain intact.
-- `dds-echo` decodes and can send the new command-control topic.
-- Contracts, registry, and `build/topics.md` stay consistent.
-- No display-library ABI change.
+- Per-display `hello-view-service` and `hello-ctl-service` start and filter correctly.
+- Local input reaches the display library through ABI v4 and then the per-display controller.
+- Paws right-thumb/checkbox input reaches the same path.
+- Auto/Inspect mode, local arcball, inertia, and light/color work per display.
+- The menu is horizontal, touch-friendly, and has `Formats` first.
+- No hello-view state is persisted.
+- The global model remains unchanged.
+- Contracts, registry, `dds-echo`, and `build/topics.md` stay consistent.
 
 ## Verification
 
@@ -355,47 +289,52 @@ cargo test --manifest-path rust/Cargo.toml
 .\scripts\cleanup.ps1
 ```
 
-One manual controller pass including opening the menu and chooser from paws; no screenshots and no repeated UI runs.
+One manual two-display run; no screenshots and no repeated UI runs.
 
 ## Risks
 
-- **Command latency:** the controller relay adds a hop; keep messages small and reliable.
-- **Cursor rate:** throttle cursor sends to about 30 Hz to avoid flooding DDS.
-- **Window scope:** only window 0 is supported; commands for other windows are ignored.
-- **Menu aiming:** opening the menu requires pointing the cursor at the small three-dot button.
-- **Menu activation:** A/right-click on an open menu activates the selected row regardless of cursor position.
-- **Spatial wrap:** partially filled rows/columns must skip empty cells and no-op when only one occupied tile exists.
-- **Cursor semantics:** the cursor is independent of the chooser highlight.
-- **Selection persistence:** the chooser keeps its selected tile while it exists.
-- **Best-effort paws DDS:** missing contracts or a missing participant must leave local controls working.
-- **Input compatibility:** all input-topic publishers must fill the new fields; `Select` sends zeros.
-- **Contract changes:** all apps must be rebuilt together because the input topic payload changed.
+- **Per-display refactor:** view-service filtering and launch/cleanup changes affect every display.
+- **ABI v4:** header, Rust library, `lil-d`, and the future C++ mirror must change together.
+- **Menu rewrite:** horizontal touch layout and dynamic labels touch existing menu tests.
+- **Input ownership:** the display library must publish input with the correct display id.
+- **Arcball math:** trackball mapping and inertia need focused tests.
+- **Paws checkbox:** it is intentionally local-only and may not mirror menu/mouse mode changes.
+- **No persistence:** restart resets mode, attitude, light, and color by design.
 - **Test isolation:** use a temporary `LOCALAPPDATA`.
 
 ## Files touched
 
-- `DDS/format_manager.idl`
+- `DDS/math.idl`
+- `DDS/hello_world.idl`
 - `contracts/topics.toml`
-- `contracts/services/format-ctl-service.toml`
-- `contracts/services/paws.toml` (new)
-- `build/topics.md` (generated)
-- `rust/lib/format-list/src/lib.rs`
+- `contracts/services/hello-ctl-service.toml` (new)
+- `contracts/services/hello-view-service.toml`
+- `include/display_lib.h`
+- `rust/lib/format-list/src/lib.rs` (or new control constants module)
 - `rust/lib/stations-dds/src/contract.rs`
 - `rust/lib/stations-dds/src/lib.rs`
 - `rust/lib/stations-dds/tests/registry.rs`
+- `rust/service/hello-ctl-service/` (new)
+- `rust/service/hello-view-service/src/main.rs`
+- `rust/service/hello-view-service/src/relay.rs`
+- `rust/lib/display-lib/src/lib.rs`
+- `rust/lib/display-lib/src/view.rs`
+- `rust/lib/display-lib/src/earth.rs`
 - `rust/lib/display-lib/src/formats.rs`
-- `rust/lib/display-lib/src/formats/format_chooser.rs`
 - `rust/lib/display-lib/src/format_manager.rs`
-- `rust/lib/display-lib/src/format_menu.rs`
 - `rust/lib/display-lib/src/format_source.rs`
-- `rust/service/format-ctl-service/src/main.rs`
-- `rust/service/format-ctl-service/Cargo.toml` (only if needed)
-- `rust/ui/paws/Cargo.toml`
-- `rust/ui/paws/src/main.rs`
-- `rust/ui/paws/src/commands.rs` (new)
+- `rust/lib/display-lib/src/format_menu.rs`
+- `rust/lib/display-lib/src/formats/hello_world.rs`
+- `rust/ui/lil-d/src/app.rs`
+- `rust/ui/lil-d/src/display.rs`
+- `rust/ui/paws/src/commands.rs`
+- `rust/ui/paws/src/controls.rs`
+- `rust/ui/paws/ui/paws.slint`
 - `rust/tool/dds-echo/src/decode.rs`
 - `rust/tool/dds-echo/src/send.rs`
-- `rust/Cargo.lock`
+- `scripts/build.ps1`
+- `scripts/launch-rust.ps1`
+- `scripts/cleanup.ps1`
 - `planning/architecture.md`
 - `planning/backlog.md`
 - `planning/completed_stories.md`
@@ -403,6 +342,8 @@ One manual controller pass including opening the menu and chooser from paws; no 
 
 ## Bookkeeping
 
-- `window-placement` was completed at `2026-11-13 16:10:13` and moved to `completed_stories.md` under "Later increments".
-- `paws-format-ctl` is `in progress` in `backlog.md`.
-- Do not move `paws-format-ctl` to `completed_stories.md` until the user asks to plan the next story.
+- `paws-format-ctl` was completed at `2026-11-16 15:47:43` and moved to `completed_stories.md` under "Later increments".
+- `hello-ctl-service` is `in progress` in `backlog.md`.
+- `hello-lux-color` is `todo`, depending on `hello-ctl-service`.
+- `hello-lux-pos` is `todo`, depending on `hello-lux-color`.
+- Do not move `hello-ctl-service` to `completed_stories.md` until the user asks to plan the next story.

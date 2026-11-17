@@ -270,3 +270,10 @@ Persist window position and inner size for `lil-d`, `paws`, and `dds-echo` throu
 - **Depends on:** none.
 - **Minimal test:** move and resize `lil-d`, `paws`, and `dds-echo`; close and relaunch each; verify both size and position restore. Legacy state without size still loads.
 - **Note:** verified with a temporary `LOCALAPPDATA`; the real runtime state was untouched.
+
+### paws-format-ctl
+Add DDS connectivity from `paws` to the format manager. Extended `FormatManagerInputTopic`, added `FormatManagerCommandCtlTopic`, relayed commands through `format-ctl-service`, added the display-library virtual cursor and menu operation, made the chooser navigable with spatial wrapping, added the paws service contract, and added `dds-echo` support.
+- **Completed:** 2026-11-16 15:47:43.
+- **Depends on:** none.
+- **Minimal test:** launch paws with a display id; move the cursor to the three-dot button, open the menu and `Formats` with A, verify D-pad wraps the chooser selection with the first format selected by default, A selects the highlighted format, and `dds-echo` shows the input/command-control samples.
+- **Note:** verified with a temporary `LOCALAPPDATA`; the real runtime state was untouched.

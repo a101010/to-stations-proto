@@ -11,25 +11,26 @@ Conventions:
 
 ## Stories
 
-### paws-format-ctl
-DDS connectivity for the paws app. Add high-level cursor, navigation, and pointer commands to `FormatManagerInputTopic`; `format-ctl-service` relays them on `FormatManagerCommandCtlTopic` to the display library. The right stick moves a virtual cursor; A/right-click aimed at the three-dot button opens the menu; D-pad selects the `Formats` row and A opens the chooser. In the chooser, the first format is selected by default, D-pad wraps spatially, and A activates the highlighted tile. Add a paws service contract and `dds-echo` support for the command topic.
-- **Depends on:** none
-- **Minimal test:** launch paws with a display id; move the virtual cursor to the three-dot button, open the menu with A, open `Formats`, verify D-pad wraps the chooser selection with the first format selected by default, A selects the highlighted format, and `dds-echo` shows the input/command-control samples.
+### hello-ctl-service
+Create the per-display hello_world controller and view foundation: a per-display `hello-ctl-service`, a per-display `hello-view-service`, ABI v4 mouse motion/wheel input, a horizontal touch-friendly format menu, Auto/Inspect mode with arcball rotation and inertia, per-display light color and position, and paws right-stick toggle input. Hello-view state is not persisted.
+- **Depends on:** none.
+- **Minimal test:** right-drag the globe to enter Inspect and rotate it; release quickly to impart inertia; toggle Auto/Inspect from the horizontal menu and from the paws right-stick toggle; verify a second display is unaffected.
 - **Status:** in progress.
 
-### hello-ctl-service
-Create the hello_world control service (`hello-ctl-service`): consume input events from the display libraries; user rotations and changes of the light vector and color, specific controls to be refined later. Also allow control via paws.
-Lighting is per display, as is the local view mode.
-The user can change the color and position of the light. To change the color of the light, the user opens the three-dot menu, which now has three new options: First menu position is Inspect/Auto, second position is Lux Color, third position in Lux Pos.
-Inspect/Auto shows the next mode rather than the current mode. So if hellow-view is in Inspect mode, the menu button is Auto, and vice versa. Inspect mode ignores the attitude from the hello-service and substitues a local view attitude managed by the hello-view service. It also hides the greeting text. Auto is baseline behavior. Inspect mode can be entered in several ways. Via the three-dot menu, or by the user grabbing the globe with mouse or controller events. Mouse mode requires a right-click to drag. Slowly dragging keeps cursor aligned with a point on the sphere, moving it like a trackball or arcball. If the mouse is released while moving quickly, it spins the globe as if imparting inertia. The globe has a friction constant that damps the rotation. When controlled with the controller, right-stick press toggles arcball mode. While in arcball mode, the right cursor rotates the globe. Grabbing the globe with the mouse or entering arcball mode with the right joystick enters Inspect mode.
-Selecting Lux Color opens a color picker format overlay and allows picking a color. Hue is selected with a ring around a triangle. Saturation and brightness are selected in the triangle. Either the mouse or controller can pick. Right-stick down toggles cursor and picker slider with the controller. There is a button pair Back and Done at the bottom right of the color picker that dismisses the overlay. While the overlay is visible, the Lux Color menu button shows World, which also dismisses the overlay if selected. Lux Pos shows a 3D rendered spotlight position control. It can be grabbed with the mouse, or controlled using the same arcball style of control with the controller. This mode shows a Back and Done button pair, and Lux Pos in the Menu is displayed as World while in Lux Pos mode.
-Selecting World goes back to whichever of Inspect or Auto mode was active before entering Lux Pos mode.
-- **Depends on:** paws-format-ctl
-- **Minimal test:** input events change the displayed world, including inputs sent from paws.
+### hello-lux-color
+Add the `Lux Color` color-picker overlay: a hue ring around a saturation/brightness triangle, mouse and controller picking, and a horizontal menu item that becomes `World` while open. The paws right-stick toggle changes the ring/triangle control only when the cursor is over the ring or triangle. Back/B cancel and restore the previous color; Done commits; World cancels. No persistence.
+- **Depends on:** hello-ctl-service.
+- **Minimal test:** open `Lux Color`, pick a color, and press Done; the light color changes. Reopen, change the color, and press Back or B; the previous color returns.
+- **Status:** todo.
+
+### hello-lux-pos
+Add the `Lux Pos` light-position overlay: show the globe at its last attitude with a live preview of the moved light, controlled with mouse/controller arcball. The horizontal menu item becomes `World` while open. The paws right-stick toggle works anywhere in this overlay. Back/B cancel and restore the previous light position; Done commits; World cancels. No persistence.
+- **Depends on:** hello-lux-color.
+- **Minimal test:** open `Lux Pos`, move the light, and press Done; the lighting changes. Reopen, move it again, and press Back or B; the previous light position returns.
 - **Status:** todo.
 
 ### TODO
-Need to shift to C++ here. Bring it up to date with hello-ctl-service. Replace this with C++ stories to do so.
+Need to shift to C++ here. Bring it up to date with hello-lux-pos. Replace this with C++ stories to do so.
 
 ### paws-two
 Create a game-controller window application (`paws-two`): a Slint window with a Saitek X-52 virtual controller. DDS and real-controller connectivity are out of scope.
@@ -45,7 +46,7 @@ Connect a Saitek X-52 to the paws-two app. Allow a `Virtual` mode and a controll
 
 ### paws-two-ctrl
 Determine control bindings to the format-chooser and hello-world formats for paws-two. After this story, any change that affects controller behavior should determine a common abstract command and a binding to that command for both paws and paws-two.
-- **Depends on:** paws-two; saitek-x-52; paws-format-ctl
+- **Depends on:** paws-two; saitek-x-52
 - **Minimal test:** with paws-two bound to an X-52, its controls drive the format chooser and hello-world through the shared abstract commands; the same commands work from paws.
 - **Status:** todo.
 
