@@ -13,9 +13,25 @@ use format_list::FormatList;
 use stations_dds::format_manager::FormatWindowAssignment;
 
 use crate::format_menu::{FormatMenu, MenuAction};
-use crate::formats::{self, Format, FormatCommand, FormatInput, FORMAT_CHOOSER};
+use crate::formats::{self, Format, FormatCommand, FormatInput, MenuItem, FORMAT_CHOOSER};
 use crate::ui::{self, Rect};
 use crate::DisplayError;
+
+/// The local pointer state tracked by the display library.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct PointerState {
+    pub(crate) position: Option<(i32, i32)>,
+    pub(crate) buttons: u32,
+}
+
+/// Which input last moved the format-window cursor.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum CursorSource {
+    #[default]
+    None,
+    Mouse,
+    Controller,
+}
 
 /// The active formats by format-window id.
 pub(crate) struct FormatManager {
@@ -27,6 +43,11 @@ pub(crate) struct FormatManager {
     region: (i32, i32, i32, i32),
     /// The virtual cursor position, if it has been moved at least once.
     cursor: Option<(i32, i32)>,
+    /// The local mouse pointer position and pressed-button bitset, used for the
+    /// single crosshair and future format picking.
+    pointer: PointerState,
+    /// Which input last moved the crosshair.
+    cursor_source: CursorSource,
 }
 
 /// Cursor bar color.
@@ -49,9 +70,10 @@ impl FormatManager {
         gl: &glow::Context,
         assets_root: &Path,
         state: crate::view::ViewState,
+        hello_input: Option<crate::view::HelloWorldInput>,
         formats: &FormatList,
     ) -> Result<Self, DisplayError> {
-        let renderers = formats::registry(gl, assets_root, state, formats)?;
+        let renderers = formats::registry(gl, assets_root, state, hello_input, formats)?;
         let menu = FormatMenu::new(gl, assets_root)?;
         Ok(Self {
             formats: renderers,
@@ -59,6 +81,8 @@ impl FormatManager {
             assignments: BTreeMap::new(),
             region: (0, 0, 0, 0),
             cursor: None,
+            pointer: PointerState::default(),
+            cursor_source: CursorSource::None,
         })
     }
 
@@ -75,6 +99,7 @@ impl FormatManager {
     ) {
         self.region = (x, y, width, height);
         let name = self.active_format_name(0);
+        let items = self.menu_items_for(name.as_deref());
         if let Some(name) = &name {
             if let Some(format) = self
                 .formats
@@ -88,7 +113,7 @@ impl FormatManager {
             if name.as_deref() == Some(FORMAT_CHOOSER) {
                 menu.close(0);
             } else {
-                menu.render(gl, framebuffer_height, self.region, 0);
+                menu.render(gl, framebuffer_height, self.region, 0, &items);
             }
         }
         self.render_cursor(gl, framebuffer_height);
@@ -99,36 +124,96 @@ impl FormatManager {
         if window != 0 {
             return None;
         }
-        if let FormatCommand::CursorMove { dx, dy } = command {
-            self.move_cursor(dx, dy);
-        }
 
         let active = self.active_format_name(0);
-        if active.as_deref() != Some(FORMAT_CHOOSER) {
+        let items = self.menu_items_for(active.as_deref());
+        let cursor_move = matches!(command, FormatCommand::CursorMove { .. });
+
+        if matches!(
+            command,
+            FormatCommand::ToggleMenu | FormatCommand::CancelMenu
+        ) {
+            if active.as_deref() == Some(FORMAT_CHOOSER) {
+                return None;
+            }
+            if let Some(menu) = &mut self.menu {
+                match command {
+                    FormatCommand::ToggleMenu => {
+                        menu.toggle(0);
+                        return None;
+                    }
+                    FormatCommand::CancelMenu => {
+                        if menu.cancel(0) {
+                            return None;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        if !cursor_move && active.as_deref() != Some(FORMAT_CHOOSER) {
             if let Some(menu) = &mut self.menu {
                 let cursor = self.cursor.unwrap_or((
                     self.region.0 + self.region.2 / 2,
                     self.region.1 + self.region.3 / 2,
                 ));
-                match menu.command(0, self.region, cursor, command) {
+                match menu.command(0, self.region, &items, cursor, command) {
                     MenuAction::Consumed => return None,
                     MenuAction::Select(format) => {
                         return Some(FormatAction::Select { window: 0, format })
                     }
+                    MenuAction::Item(id) => return self.menu_action(&id),
                     MenuAction::Ignored => {}
                 }
             }
         }
 
-        let name = active?;
+        let Some(name) = active else {
+            if let FormatCommand::CursorMove { dx, dy } = command {
+                self.move_cursor(dx, dy);
+            }
+            return None;
+        };
         let format = self
             .formats
             .iter_mut()
             .find(|format| format.name() == name.as_str())?;
         match format.command(command) {
+            FormatInput::Ignored if cursor_move => {
+                if let FormatCommand::CursorMove { dx, dy } = command {
+                    self.move_cursor(dx, dy);
+                }
+                None
+            }
             FormatInput::Select(format) => Some(FormatAction::Select { window: 0, format }),
             FormatInput::Ignored | FormatInput::Consumed => None,
         }
+    }
+
+    fn menu_action(&mut self, id: &str) -> Option<FormatAction> {
+        let name = self.active_format_name(0)?;
+        let format = self
+            .formats
+            .iter_mut()
+            .find(|format| format.name() == name.as_str())?;
+        match format.menu_action(id) {
+            FormatInput::Select(format) => Some(FormatAction::Select { window: 0, format }),
+            FormatInput::Ignored | FormatInput::Consumed => None,
+        }
+    }
+
+    fn menu_items_for(&self, active: Option<&str>) -> Vec<MenuItem> {
+        let mut items = vec![MenuItem {
+            id: FORMAT_CHOOSER.to_string(),
+            label: "Formats".to_string(),
+        }];
+        if let Some(name) = active {
+            if let Some(format) = self.formats.iter().find(|format| format.name() == name) {
+                items.extend(format.menu_items());
+            }
+        }
+        items
     }
 
     fn move_cursor(&mut self, dx: i32, dy: i32) {
@@ -145,10 +230,23 @@ impl FormatManager {
             (current_x + dx).clamp(left, right.max(left)),
             (current_y + dy).clamp(top, bottom.max(top)),
         ));
+        self.cursor_source = CursorSource::Controller;
+    }
+
+    /// The one crosshair position, from the input that last moved it.
+    fn active_cursor(&self) -> Option<(i32, i32)> {
+        match self.cursor_source {
+            CursorSource::None => None,
+            CursorSource::Mouse => {
+                let (x, y) = self.pointer.position?;
+                contains(self.region, x, y).then_some((x, y))
+            }
+            CursorSource::Controller => self.cursor,
+        }
     }
 
     fn render_cursor(&self, gl: &glow::Context, framebuffer_height: i32) {
-        let Some((x, y)) = self.cursor else {
+        let Some((x, y)) = self.active_cursor() else {
             return;
         };
         let shadow_horizontal = Rect::new(x - CURSOR_HALF - 1, y - 2, CURSOR_HALF * 2 + 3, 4);
@@ -161,33 +259,77 @@ impl FormatManager {
         ui::clear_rect(gl, framebuffer_height, vertical, CURSOR_COLOR);
     }
 
-    /// Handle a left-button press in window coordinates.
-    pub(crate) fn mouse_button(&mut self, x: i32, y: i32) -> Option<FormatAction> {
-        let active = self.active_format_name(0);
+    /// Handle a mouse button event in window coordinates.
+    pub(crate) fn mouse_button(
+        &mut self,
+        x: i32,
+        y: i32,
+        button: i32,
+        pressed: bool,
+    ) -> Option<FormatAction> {
+        self.pointer.position = Some((x, y));
+        self.cursor_source = CursorSource::Mouse;
+        let bit = 1u32 << button.clamp(0, 31) as u32;
+        if pressed {
+            self.pointer.buttons |= bit;
+        } else {
+            self.pointer.buttons &= !bit;
+        }
 
-        if active.as_deref() != Some(FORMAT_CHOOSER) {
+        let active = self.active_format_name(0);
+        let items = self.menu_items_for(active.as_deref());
+
+        if pressed && button == 0 && active.as_deref() != Some(FORMAT_CHOOSER) {
             if let Some(menu) = &mut self.menu {
-                match menu.click(0, self.region, x, y) {
+                match menu.click(0, self.region, &items, x, y) {
                     MenuAction::Consumed => return None,
                     MenuAction::Select(format) => {
                         return Some(FormatAction::Select { window: 0, format })
                     }
+                    MenuAction::Item(id) => return self.menu_action(&id),
                     MenuAction::Ignored => {}
                 }
             }
         }
 
-        if !contains(self.region, x, y) {
-            return None;
-        }
         let name = active?;
         let format = self
             .formats
             .iter_mut()
             .find(|format| format.name() == name.as_str())?;
-        match format.mouse_button(self.region, x, y) {
+        match format.mouse_button(self.region, x, y, button, pressed) {
             FormatInput::Ignored | FormatInput::Consumed => None,
             FormatInput::Select(format) => Some(FormatAction::Select { window: 0, format }),
+        }
+    }
+
+    /// Handle an absolute mouse-motion event.
+    pub(crate) fn mouse_motion(&mut self, x: i32, y: i32) {
+        self.pointer.position = Some((x, y));
+        self.cursor_source = CursorSource::Mouse;
+        let Some(name) = self.active_format_name(0) else {
+            return;
+        };
+        if let Some(format) = self
+            .formats
+            .iter_mut()
+            .find(|format| format.name() == name.as_str())
+        {
+            format.mouse_motion(self.region, x, y);
+        }
+    }
+
+    /// Handle a mouse-wheel event.
+    pub(crate) fn mouse_wheel(&mut self, delta: i32) {
+        let Some(name) = self.active_format_name(0) else {
+            return;
+        };
+        if let Some(format) = self
+            .formats
+            .iter_mut()
+            .find(|format| format.name() == name.as_str())
+        {
+            format.mouse_wheel(self.region, delta);
         }
     }
 
@@ -224,6 +366,8 @@ impl FormatManager {
             assignments: BTreeMap::new(),
             region,
             cursor: None,
+            pointer: PointerState::default(),
+            cursor_source: CursorSource::None,
         }
     }
 
@@ -273,7 +417,14 @@ mod tests {
         ) {
         }
 
-        fn mouse_button(&mut self, _region: (i32, i32, i32, i32), _x: i32, _y: i32) -> FormatInput {
+        fn mouse_button(
+            &mut self,
+            _region: (i32, i32, i32, i32),
+            _x: i32,
+            _y: i32,
+            _button: i32,
+            _pressed: bool,
+        ) -> FormatInput {
             self.input.clone()
         }
 
@@ -317,20 +468,20 @@ mod tests {
     #[test]
     fn ignored_active_input_produces_no_action() {
         let mut m = manager(FormatInput::Ignored);
-        assert_eq!(m.mouse_button(50, 50), None);
+        assert_eq!(m.mouse_button(50, 50, 0, true), None);
     }
 
     #[test]
     fn consumed_active_input_produces_no_action() {
         let mut m = manager(FormatInput::Consumed);
-        assert_eq!(m.mouse_button(50, 50), None);
+        assert_eq!(m.mouse_button(50, 50, 0, true), None);
     }
 
     #[test]
     fn selected_active_input_produces_a_select_action() {
         let mut m = manager(FormatInput::Select("default".to_string()));
         assert_eq!(
-            m.mouse_button(50, 50),
+            m.mouse_button(50, 50, 0, true),
             Some(FormatAction::Select {
                 window: 0,
                 format: "default".to_string(),
@@ -339,9 +490,15 @@ mod tests {
     }
 
     #[test]
-    fn click_outside_region_produces_no_action() {
+    fn outside_click_is_delegated_to_the_active_format() {
         let mut m = manager(FormatInput::Select("default".to_string()));
-        assert_eq!(m.mouse_button(150, 50), None);
+        assert_eq!(
+            m.mouse_button(150, 50, 0, true),
+            Some(FormatAction::Select {
+                window: 0,
+                format: "default".to_string(),
+            })
+        );
     }
 
     #[test]
@@ -377,6 +534,40 @@ mod tests {
     fn commands_for_other_windows_are_ignored() {
         let mut m = manager(FormatInput::Select("default".to_string()));
         assert_eq!(m.command(1, FormatCommand::Navigate { dx: 1, dy: 0 }), None);
+    }
+
+    #[test]
+    fn active_cursor_follows_the_last_input_source() {
+        let mut m = manager(FormatInput::Ignored);
+        assert_eq!(m.active_cursor(), None);
+
+        m.mouse_motion(30, 40);
+        assert_eq!(m.active_cursor(), Some((30, 40)));
+
+        m.command(0, FormatCommand::CursorMove { dx: 0, dy: 0 });
+        assert_eq!(m.active_cursor(), Some((50, 50)));
+
+        m.mouse_motion(30, 40);
+        assert_eq!(m.active_cursor(), Some((30, 40)));
+
+        m.mouse_motion(150, 40);
+        assert_eq!(m.active_cursor(), None);
+    }
+
+    #[test]
+    fn pointer_state_tracks_position_and_buttons() {
+        let mut m = manager(FormatInput::Ignored);
+        m.mouse_motion(30, 40);
+        assert_eq!(m.pointer.position, Some((30, 40)));
+        m.mouse_button(30, 40, 0, true);
+        assert_eq!(m.pointer.buttons, 1);
+        m.mouse_button(30, 40, 1, true);
+        assert_eq!(m.pointer.buttons, 0b11);
+        m.mouse_button(30, 40, 0, false);
+        assert_eq!(m.pointer.buttons, 0b10);
+        m.mouse_button(31, 41, 1, false);
+        assert_eq!(m.pointer.buttons, 0);
+        assert_eq!(m.pointer.position, Some((31, 41)));
     }
 
     #[test]

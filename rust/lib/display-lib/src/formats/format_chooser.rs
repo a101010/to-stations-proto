@@ -284,7 +284,17 @@ impl Format for FormatChooser {
         }
     }
 
-    fn mouse_button(&mut self, region: (i32, i32, i32, i32), x: i32, y: i32) -> FormatInput {
+    fn mouse_button(
+        &mut self,
+        region: (i32, i32, i32, i32),
+        x: i32,
+        y: i32,
+        button: i32,
+        pressed: bool,
+    ) -> FormatInput {
+        if !pressed || button != 0 {
+            return FormatInput::Ignored;
+        }
         let region = Rect::new(region.0, region.1, region.2, region.3);
         if !region.contains(x, y) {
             return FormatInput::Ignored;
@@ -311,9 +321,11 @@ impl Format for FormatChooser {
             } if !self.entries.is_empty() => {
                 FormatInput::Select(self.entries[self.selected].name.clone())
             }
-            FormatCommand::Pointer { .. } | FormatCommand::CursorMove { .. } => {
-                FormatInput::Consumed
-            }
+            FormatCommand::Pointer { .. }
+            | FormatCommand::CursorMove { .. }
+            | FormatCommand::ToggleArcball
+            | FormatCommand::ToggleMenu
+            | FormatCommand::CancelMenu => FormatInput::Consumed,
         }
     }
 }

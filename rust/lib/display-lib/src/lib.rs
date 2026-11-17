@@ -19,15 +19,15 @@ mod text;
 mod ui;
 mod view;
 
-use std::cell::RefCell;
-use std::ffi::{c_char, c_int, c_void, CString};
 use format_list::FormatList;
 use stations_dds::contract::TopicRegistry;
 use stations_dds::dds::Node;
+use std::cell::RefCell;
+use std::ffi::{c_char, c_int, c_void, CString};
 
 /// ABI version implemented by this library. Mirrors `DISPLAY_LIB_ABI_VERSION`
 /// in `include/display_lib.h`.
-const ABI_VERSION: u32 = 3;
+const ABI_VERSION: u32 = 4;
 
 /// A GL proc-address loader supplied by the display application.
 type GlLoader = extern "C" fn(*const c_char, *mut c_void) -> *const c_void;
@@ -69,6 +69,8 @@ struct Display {
     view: Option<view::ViewSource>,
     /// Format-manager assignments and logical input events.
     format_source: Option<format_source::FormatSource>,
+    /// Local hello-world input, stamped with this display's id.
+    hello_input: Option<view::HelloWorldInput>,
     /// This display's unique id, used to stamp and filter format-manager
     /// samples. `None` until the display application sets it.
     display_id: Option<u32>,
@@ -83,24 +85,35 @@ impl Display {
         let config = config_root();
         let formats = FormatList::load(&config.join("formats.toml"))
             .map_err(|e| DisplayError::Formats(e.to_string()))?;
-        let format_manager =
-            format_manager::FormatManager::new(&gl, &assets_root(), state.clone(), &formats)?;
 
         // Best-effort: without DDS/config the format renders black and local
         // clicks do not reach a controller.
         let node = TopicRegistry::load(&config.join("topics.toml"))
             .ok()
             .and_then(|registry| Node::new(0, registry).ok());
-        let view = node.as_ref().and_then(|node| view::ViewSource::new(node).ok());
+        let view = node
+            .as_ref()
+            .and_then(|node| view::ViewSource::new(node).ok());
         let format_source = node
             .as_ref()
             .and_then(|node| format_source::FormatSource::new(node).ok());
+        let hello_input = node
+            .as_ref()
+            .and_then(|node| view::HelloWorldInput::new(node).ok());
+        let format_manager = format_manager::FormatManager::new(
+            &gl,
+            &assets_root(),
+            state.clone(),
+            hello_input.clone(),
+            &formats,
+        )?;
 
         Ok(Self {
             gl,
             format_manager,
             view,
             format_source,
+            hello_input,
             display_id: None,
             state,
         })
@@ -110,7 +123,7 @@ impl Display {
     /// origin). `framebuffer_height` is the whole framebuffer height.
     fn render(&mut self, framebuffer_height: i32, x: i32, y: i32, width: i32, height: i32) {
         if let Some(view) = &self.view {
-            view.poll(&self.state);
+            view.poll(&self.state, self.display_id);
         }
         if let Some(format_source) = &self.format_source {
             format_source.poll(&mut self.format_manager, self.display_id);
@@ -119,14 +132,9 @@ impl Display {
             .render(&self.gl, framebuffer_height, x, y, width, height);
     }
 
-    /// Forward a mouse button event (physical pixels, top-left origin). A left
-    /// press may toggle the menu, select a format, or be consumed by the active
-    /// format.
+    /// Forward a mouse button event (physical pixels, top-left origin).
     fn mouse_button(&mut self, x: i32, y: i32, button: i32, pressed: bool) {
-        if button != 0 || !pressed {
-            return;
-        }
-        let Some(action) = self.format_manager.mouse_button(x, y) else {
+        let Some(action) = self.format_manager.mouse_button(x, y, button, pressed) else {
             return;
         };
         if let Some(format_source) = &self.format_source {
@@ -136,6 +144,16 @@ impl Display {
                 }
             }
         }
+    }
+
+    /// Forward an absolute mouse-motion event (physical pixels, top-left).
+    fn mouse_motion(&mut self, x: i32, y: i32) {
+        self.format_manager.mouse_motion(x, y);
+    }
+
+    /// Forward a mouse-wheel event.
+    fn mouse_wheel(&mut self, delta: i32) {
+        self.format_manager.mouse_wheel(delta);
     }
 }
 
@@ -208,6 +226,9 @@ pub extern "C" fn display_lib_set_identity(display: *mut c_void, display_id: u32
     }
     let display = unsafe { &mut *(display as *mut Display) };
     display.display_id = Some(display_id);
+    if let Some(input) = &display.hello_input {
+        input.set_display_id(display_id);
+    }
 }
 
 /// Renders into `(x, y, width, height)` (physical pixels, top-left origin).
@@ -243,6 +264,27 @@ pub extern "C" fn display_lib_mouse_button(
     }
     let display = unsafe { &mut *(display as *mut Display) };
     display.mouse_button(x, y, button, pressed != 0);
+}
+
+/// Forwards an absolute mouse-motion event in physical pixels from the
+/// window's top-left.
+#[no_mangle]
+pub extern "C" fn display_lib_mouse_motion(display: *mut c_void, x: c_int, y: c_int) {
+    if display.is_null() {
+        return;
+    }
+    let display = unsafe { &mut *(display as *mut Display) };
+    display.mouse_motion(x, y);
+}
+
+/// Forwards a mouse-wheel event; positive is up/away from the user.
+#[no_mangle]
+pub extern "C" fn display_lib_mouse_wheel(display: *mut c_void, delta: c_int) {
+    if display.is_null() {
+        return;
+    }
+    let display = unsafe { &mut *(display as *mut Display) };
+    display.mouse_wheel(delta);
 }
 
 /// Destroys a display library created by [`display_lib_create`].

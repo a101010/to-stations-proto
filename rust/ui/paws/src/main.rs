@@ -290,6 +290,9 @@ impl AppState {
             if let Some(pad) = gilrs.connected_gamepad(id) {
                 let controls = Controls::read(&pad);
                 if controls != self.last_controls {
+                    if controls.r3 && !self.last_controls.r3 {
+                        ui.set_r3_checked(!ui.get_r3_checked());
+                    }
                     controls.apply(ui);
                     self.last_controls = controls;
                 }

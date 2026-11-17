@@ -50,11 +50,12 @@ in vec3 v_dir;
 in vec3 v_normal;
 uniform samplerCube u_cube;
 uniform vec3 u_light;
+uniform vec3 u_color;
 out vec4 f_color;
 void main() {
     float diff = max(dot(normalize(v_normal), normalize(u_light)), 0.0);
     vec3 tex = texture(u_cube, normalize(v_dir)).rgb;
-    f_color = vec4(tex * (0.15 + diff), 1.0);
+    f_color = vec4(tex * u_color * (0.15 + diff), 1.0);
 }"#;
 
 /// The earth: a cube map, a sphere mesh, and a shader program.
@@ -70,6 +71,7 @@ pub(crate) struct Earth {
     viewproj_loc: Option<glow::UniformLocation>,
     attitude_loc: Option<glow::UniformLocation>,
     light_loc: Option<glow::UniformLocation>,
+    color_loc: Option<glow::UniformLocation>,
     cube_loc: Option<glow::UniformLocation>,
 }
 
@@ -94,7 +96,11 @@ impl Earth {
             gl.vertex_attrib_pointer_f32(0, 3, glow::FLOAT, false, 12, 0);
 
             gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(ebo));
-            gl.buffer_data_u8_slice(glow::ELEMENT_ARRAY_BUFFER, as_bytes(&indices), glow::STATIC_DRAW);
+            gl.buffer_data_u8_slice(
+                glow::ELEMENT_ARRAY_BUFFER,
+                as_bytes(&indices),
+                glow::STATIC_DRAW,
+            );
 
             gl.bind_vertex_array(None);
             (vao, vbo, ebo)
@@ -102,11 +108,12 @@ impl Earth {
 
         let texture = load_cube_map(gl, assets_root)?;
 
-        let (viewproj_loc, attitude_loc, light_loc, cube_loc) = unsafe {
+        let (viewproj_loc, attitude_loc, light_loc, color_loc, cube_loc) = unsafe {
             (
                 gl.get_uniform_location(program, "u_viewproj"),
                 gl.get_uniform_location(program, "u_attitude"),
                 gl.get_uniform_location(program, "u_light"),
+                gl.get_uniform_location(program, "u_color"),
                 gl.get_uniform_location(program, "u_cube"),
             )
         };
@@ -121,6 +128,7 @@ impl Earth {
             viewproj_loc,
             attitude_loc,
             light_loc,
+            color_loc,
             cube_loc,
         })
     }
@@ -135,6 +143,7 @@ impl Earth {
         height: i32,
         attitude: [f32; 4],
         light: [f32; 3],
+        color: [f32; 3],
     ) {
         if width <= 0 || height <= 0 {
             return;
@@ -143,11 +152,13 @@ impl Earth {
         let viewproj = perspective_view_proj(aspect);
         let attitude = quat_to_mat3(attitude);
         let light = normalize3(light);
+        let color = color.map(|value| value.clamp(0.0, 1.0));
         unsafe {
             gl.use_program(Some(self.program));
             gl.uniform_matrix_4_f32_slice(self.viewproj_loc.as_ref(), false, &viewproj);
             gl.uniform_matrix_3_f32_slice(self.attitude_loc.as_ref(), false, &attitude);
             gl.uniform_3_f32(self.light_loc.as_ref(), light[0], light[1], light[2]);
+            gl.uniform_3_f32(self.color_loc.as_ref(), color[0], color[1], color[2]);
             gl.active_texture(glow::TEXTURE0);
             gl.bind_texture(glow::TEXTURE_CUBE_MAP, Some(self.texture));
             gl.uniform_1_i32(self.cube_loc.as_ref(), 0);
@@ -202,9 +213,21 @@ fn load_cube_map(gl: &glow::Context, assets_root: &Path) -> Result<glow::Texture
             glow::TEXTURE_MIN_FILTER,
             glow::LINEAR_MIPMAP_LINEAR as i32,
         );
-        gl.tex_parameter_i32(glow::TEXTURE_CUBE_MAP, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
-        gl.tex_parameter_i32(glow::TEXTURE_CUBE_MAP, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
-        gl.tex_parameter_i32(glow::TEXTURE_CUBE_MAP, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
+        gl.tex_parameter_i32(
+            glow::TEXTURE_CUBE_MAP,
+            glow::TEXTURE_MAG_FILTER,
+            glow::LINEAR as i32,
+        );
+        gl.tex_parameter_i32(
+            glow::TEXTURE_CUBE_MAP,
+            glow::TEXTURE_WRAP_S,
+            glow::CLAMP_TO_EDGE as i32,
+        );
+        gl.tex_parameter_i32(
+            glow::TEXTURE_CUBE_MAP,
+            glow::TEXTURE_WRAP_T,
+            glow::CLAMP_TO_EDGE as i32,
+        );
         gl.generate_mipmap(glow::TEXTURE_CUBE_MAP);
         gl.bind_texture(glow::TEXTURE_CUBE_MAP, None);
     }
@@ -221,11 +244,7 @@ pub(crate) fn sphere_vertices(stacks: u32, slices: u32) -> Vec<[f32; 3]> {
         let phi = std::f32::consts::PI * i as f32 / stacks as f32;
         for j in 0..=slices {
             let theta = 2.0 * std::f32::consts::PI * j as f32 / slices as f32;
-            out.push([
-                phi.sin() * theta.cos(),
-                phi.cos(),
-                phi.sin() * theta.sin(),
-            ]);
+            out.push([phi.sin() * theta.cos(), phi.cos(), phi.sin() * theta.sin()]);
         }
     }
     out

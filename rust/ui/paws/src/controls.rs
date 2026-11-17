@@ -26,6 +26,7 @@ pub(crate) struct Controls {
     pub(crate) right_dpad: bool,
     pub(crate) back: bool,
     pub(crate) start: bool,
+    pub(crate) r3: bool,
 }
 
 /// The subset of gamepad state the mapper reads. Implemented for gilrs
@@ -68,6 +69,7 @@ impl Controls {
             right_dpad: pad.pressed(Button::DPadRight),
             back: pad.pressed(Button::Select),
             start: pad.pressed(Button::Start),
+            r3: pad.pressed(Button::RightThumb),
         }
     }
 
@@ -204,13 +206,14 @@ mod tests {
                 Button::DPadRight,
                 Button::Select,
                 Button::Start,
+                Button::RightThumb,
             ],
         };
         let controls = Controls::read(&pad);
         assert!(controls.a && controls.b && controls.x && controls.y);
         assert!(controls.lb && controls.rb);
         assert!(controls.up && controls.down && controls.left_dpad && controls.right_dpad);
-        assert!(controls.back && controls.start);
+        assert!(controls.back && controls.start && controls.r3);
         assert!(!controls.lt && !controls.rt);
     }
 

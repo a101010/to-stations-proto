@@ -14,6 +14,18 @@ qos = "best_effort"
 key = []
 
 [[topics]]
+name = "HelloWorldInputTopic"
+type = "hello_world::HelloWorldInputTopic"
+qos = "reliable"
+key = []
+
+[[topics]]
+name = "HelloWorldCtlTopic"
+type = "hello_world::HelloWorldCtlTopic"
+qos = "reliable"
+key = []
+
+[[topics]]
 name = "FormatManagerInputTopic"
 type = "format_manager::FormatManagerInputTopic"
 qos = "reliable"

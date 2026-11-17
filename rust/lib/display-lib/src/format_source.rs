@@ -5,8 +5,9 @@
 //! nothing about these topics.
 
 use format_list::{
-    FORMAT_COMMAND_CURSOR_MOVE, FORMAT_COMMAND_NAVIGATE, FORMAT_COMMAND_POINTER,
-    FORMAT_COMMAND_SELECT,
+    FORMAT_COMMAND_CURSOR_MOVE, FORMAT_COMMAND_MENU_CANCEL, FORMAT_COMMAND_MENU_TOGGLE,
+    FORMAT_COMMAND_NAVIGATE, FORMAT_COMMAND_POINTER, FORMAT_COMMAND_SELECT,
+    FORMAT_COMMAND_TOGGLE_ARCBALL,
 };
 use stations_dds::cyclonedds::{DataReader, DataWriter};
 use stations_dds::dds::Node;
@@ -119,6 +120,9 @@ fn to_command(sample: &FormatManagerCommandCtlTopic) -> Option<FormatCommand> {
             button: sample.button,
             pressed: sample.pressed,
         }),
+        FORMAT_COMMAND_TOGGLE_ARCBALL => Some(FormatCommand::ToggleArcball),
+        FORMAT_COMMAND_MENU_TOGGLE => Some(FormatCommand::ToggleMenu),
+        FORMAT_COMMAND_MENU_CANCEL => Some(FormatCommand::CancelMenu),
         _ => None,
     }
 }
@@ -180,6 +184,18 @@ mod tests {
                 pressed: true
             })
         );
+
+        let sample = FormatManagerCommandCtlTopic {
+            command: FORMAT_COMMAND_MENU_TOGGLE,
+            ..sample
+        };
+        assert_eq!(to_command(&sample), Some(FormatCommand::ToggleMenu));
+
+        let sample = FormatManagerCommandCtlTopic {
+            command: FORMAT_COMMAND_MENU_CANCEL,
+            ..sample
+        };
+        assert_eq!(to_command(&sample), Some(FormatCommand::CancelMenu));
     }
 
     #[test]

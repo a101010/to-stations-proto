@@ -98,6 +98,52 @@ component ControllerButton inherits Rectangle {
     }
 }
 
+component R3Toggle inherits Rectangle {
+    in property <bool> checked: false;
+    callback toggled(bool);
+
+    background: #1d2228;
+    border-radius: 8px;
+    border-width: 2px;
+    border-color: root.checked ? #6fc2ff : #3a4048;
+
+    Rectangle {
+        x: 6px;
+        y: (root.height - self.height) / 2;
+        height: root.height * 0.52;
+        width: self.height;
+        border-radius: 4px;
+        border-width: 2px;
+        border-color: root.checked ? #a9dfff : #4b535d;
+        background: root.checked ? #6fc2ff : #15171b;
+    }
+
+    Text {
+        x: root.height * 0.52 + 12px;
+        y: 0;
+        width: root.width - root.height * 0.52 - 18px;
+        height: root.height;
+        text: root.checked ? "R3 On" : "R3 Off";
+        color: #e8edf2;
+        font-size: root.height * 0.42;
+        font-weight: 600;
+        horizontal-alignment: left;
+        vertical-alignment: center;
+    }
+
+    TouchArea {
+        width: parent.width;
+        height: parent.height;
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.down) {
+                root.toggled(!root.checked);
+                return EventResult.accept;
+            }
+            return EventResult.reject;
+        }
+    }
+}
+
 export component MainWindow inherits Window {
     title: "paws";
     preferred-width: 960px;
@@ -128,6 +174,7 @@ export component MainWindow inherits Window {
     in-out property <bool> right-down: false;
     in-out property <bool> back-down: false;
     in-out property <bool> start-down: false;
+    in-out property <bool> r3-checked: false;
 
     callback stick-drag(int, length, length, length);
     callback stick-release(int);
@@ -242,6 +289,15 @@ export component MainWindow inherits Window {
                     interactive: root.virtual-mode;
                     drag(dx, dy, radius) => { root.stick-drag(1, dx, dy, radius); }
                     released => { root.stick-release(1); }
+                }
+
+                R3Toggle {
+                    x: body.width * 0.65;
+                    y: body.height * 0.88;
+                    width: body.width * 0.22;
+                    height: body.height * 0.085;
+                    checked: root.r3-checked;
+                    toggled(value) => { root.r3-checked = value; }
                 }
 
                 // D-pad: up, down, left, right around a center point.

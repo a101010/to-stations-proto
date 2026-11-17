@@ -34,6 +34,14 @@ mod tests {
             "hello_world::HelloWorldTopic"
         );
         assert_eq!(
+            <hello_world::HelloWorldInputTopic as DdsType>::type_name(),
+            "hello_world::HelloWorldInputTopic"
+        );
+        assert_eq!(
+            <hello_world::HelloWorldCtlTopic as DdsType>::type_name(),
+            "hello_world::HelloWorldCtlTopic"
+        );
+        assert_eq!(
             <format_manager::FormatManagerInputTopic as DdsType>::type_name(),
             "format_manager::FormatManagerInputTopic"
         );

@@ -6,3 +6,6 @@ topic = "HelloWorldViewTopic"
 
 [[subscribe]]
 topic = "HelloWorldTopic"
+
+[[subscribe]]
+topic = "HelloWorldCtlTopic"

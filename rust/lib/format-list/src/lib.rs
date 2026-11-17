@@ -18,6 +18,12 @@ pub const FORMAT_COMMAND_CURSOR_MOVE: i32 = 10;
 pub const FORMAT_COMMAND_NAVIGATE: i32 = 11;
 /// `FormatManagerInputTopic.command`: pointer button event.
 pub const FORMAT_COMMAND_POINTER: i32 = 12;
+/// `FormatManagerInputTopic.command`: toggle the hello-world arcball.
+pub const FORMAT_COMMAND_TOGGLE_ARCBALL: i32 = 13;
+/// `FormatManagerInputTopic.command`: toggle the three-dot menu.
+pub const FORMAT_COMMAND_MENU_TOGGLE: i32 = 14;
+/// `FormatManagerInputTopic.command`: cancel/close the three-dot menu.
+pub const FORMAT_COMMAND_MENU_CANCEL: i32 = 15;
 /// `FormatManagerInputTopic.button`: right mouse button.
 pub const FORMAT_POINTER_RIGHT: i32 = 1;
 
@@ -25,9 +31,49 @@ pub const FORMAT_POINTER_RIGHT: i32 = 1;
 pub fn is_control_command(command: i32) -> bool {
     matches!(
         command,
-        FORMAT_COMMAND_CURSOR_MOVE | FORMAT_COMMAND_NAVIGATE | FORMAT_COMMAND_POINTER
+        FORMAT_COMMAND_CURSOR_MOVE
+            | FORMAT_COMMAND_NAVIGATE
+            | FORMAT_COMMAND_POINTER
+            | FORMAT_COMMAND_TOGGLE_ARCBALL
+            | FORMAT_COMMAND_MENU_TOGGLE
+            | FORMAT_COMMAND_MENU_CANCEL
     )
 }
+
+/// `HelloWorldViewTopic.mode`: automatic model attitude.
+pub const HELLO_MODE_AUTO: i32 = 0;
+/// `HelloWorldViewTopic.mode`: local, arcball-controlled attitude.
+pub const HELLO_MODE_INSPECT: i32 = 1;
+
+/// `HelloWorldInputTopic.action`: begin an arcball drag.
+pub const HELLO_ACTION_GRAB: i32 = 0;
+/// `HelloWorldInputTopic.action`: continue an arcball drag.
+pub const HELLO_ACTION_DRAG: i32 = 1;
+/// `HelloWorldInputTopic.action`: end an arcball drag, applying inertia.
+pub const HELLO_ACTION_RELEASE: i32 = 2;
+/// `HelloWorldInputTopic.action`: toggle right-stick arcball control.
+pub const HELLO_ACTION_TOGGLE_ARCBALL: i32 = 3;
+/// `HelloWorldInputTopic.action`: toggle Auto/Inspect.
+pub const HELLO_ACTION_MODE_TOGGLE: i32 = 4;
+/// `HelloWorldInputTopic.action`: rotate from a right-stick movement.
+pub const HELLO_ACTION_ROTATE: i32 = 5;
+/// `HelloWorldInputTopic.action`: toggle the Lux Color placeholder overlay.
+pub const HELLO_ACTION_TOGGLE_LUX_COLOR: i32 = 6;
+/// `HelloWorldInputTopic.action`: toggle the Lux Pos placeholder overlay.
+pub const HELLO_ACTION_TOGGLE_LUX_POS: i32 = 7;
+
+/// The hello-world menu item that toggles Auto/Inspect.
+pub const HELLO_MENU_MODE: &str = "mode";
+/// The hello-world menu item for the Lux Color placeholder overlay.
+pub const HELLO_MENU_LUX_COLOR: &str = "lux-color";
+/// The hello-world menu item for the Lux Pos placeholder overlay.
+pub const HELLO_MENU_LUX_POS: &str = "lux-pos";
+/// `HelloWorldViewTopic.overlay`: no overlay is open.
+pub const HELLO_OVERLAY_NONE: i32 = 0;
+/// `HelloWorldViewTopic.overlay`: the Lux Color overlay is open.
+pub const HELLO_OVERLAY_COLOR: i32 = 1;
+/// `HelloWorldViewTopic.overlay`: the Lux Pos overlay is open.
+pub const HELLO_OVERLAY_POS: i32 = 2;
 
 /// One saved format-window assignment.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -261,6 +307,9 @@ name = "a"
         assert!(is_control_command(FORMAT_COMMAND_CURSOR_MOVE));
         assert!(is_control_command(FORMAT_COMMAND_NAVIGATE));
         assert!(is_control_command(FORMAT_COMMAND_POINTER));
+        assert!(is_control_command(FORMAT_COMMAND_TOGGLE_ARCBALL));
+        assert!(is_control_command(FORMAT_COMMAND_MENU_TOGGLE));
+        assert!(is_control_command(FORMAT_COMMAND_MENU_CANCEL));
         assert!(!is_control_command(99));
     }
 }

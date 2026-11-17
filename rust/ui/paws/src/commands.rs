@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use format_list::{
-    FORMAT_COMMAND_CURSOR_MOVE, FORMAT_COMMAND_NAVIGATE, FORMAT_COMMAND_POINTER,
+    FORMAT_COMMAND_CURSOR_MOVE, FORMAT_COMMAND_MENU_CANCEL, FORMAT_COMMAND_MENU_TOGGLE,
+    FORMAT_COMMAND_NAVIGATE, FORMAT_COMMAND_POINTER, FORMAT_COMMAND_TOGGLE_ARCBALL,
     FORMAT_POINTER_RIGHT,
 };
 use stations_dds::contract::{ServiceContract, TopicRegistry};
@@ -25,6 +26,9 @@ struct Inputs {
     left: bool,
     right_dpad: bool,
     a: bool,
+    b: bool,
+    start: bool,
+    r3_checked: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,6 +48,9 @@ struct CommandState {
     last_left: bool,
     last_right: bool,
     last_a: bool,
+    last_b: bool,
+    last_start: bool,
+    last_r3_checked: bool,
 }
 
 impl CommandState {
@@ -109,6 +116,39 @@ impl CommandState {
         }
         self.last_a = inputs.a;
 
+        if inputs.b && !self.last_b {
+            commands.push(WireCommand {
+                command: FORMAT_COMMAND_MENU_CANCEL,
+                x: 0,
+                y: 0,
+                button: 0,
+                pressed: true,
+            });
+        }
+        self.last_b = inputs.b;
+
+        if inputs.start && !self.last_start {
+            commands.push(WireCommand {
+                command: FORMAT_COMMAND_MENU_TOGGLE,
+                x: 0,
+                y: 0,
+                button: 0,
+                pressed: true,
+            });
+        }
+        self.last_start = inputs.start;
+
+        if inputs.r3_checked != self.last_r3_checked {
+            commands.push(WireCommand {
+                command: FORMAT_COMMAND_TOGGLE_ARCBALL,
+                x: 0,
+                y: 0,
+                button: 0,
+                pressed: true,
+            });
+            self.last_r3_checked = inputs.r3_checked;
+        }
+
         commands
     }
 }
@@ -136,6 +176,9 @@ impl CommandSender {
             left: ui.get_left_down(),
             right_dpad: ui.get_right_down(),
             a: ui.get_a_down(),
+            b: ui.get_b_down(),
+            start: ui.get_start_down(),
+            r3_checked: ui.get_r3_checked(),
         };
         for command in self.state.update(inputs, Instant::now()) {
             self.send(command);
@@ -284,6 +327,61 @@ mod tests {
         assert!(state.update(pressed, now).is_empty());
         assert!(state.update(inputs(), now).is_empty());
         assert_eq!(state.update(pressed, now).len(), 1);
+    }
+
+    #[test]
+    fn r3_checkbox_sends_a_toggle_on_each_change() {
+        let mut state = CommandState::default();
+        let now = Instant::now();
+        let mut checked = inputs();
+        checked.r3_checked = true;
+        assert_eq!(
+            state.update(checked, now),
+            vec![WireCommand {
+                command: FORMAT_COMMAND_TOGGLE_ARCBALL,
+                x: 0,
+                y: 0,
+                button: 0,
+                pressed: true,
+            }]
+        );
+        assert!(state.update(checked, now).is_empty());
+        assert_eq!(state.update(inputs(), now).len(), 1);
+    }
+
+    #[test]
+    fn b_and_start_send_menu_commands_on_press_edges() {
+        let mut state = CommandState::default();
+        let now = Instant::now();
+        let mut b = inputs();
+        b.b = true;
+        assert_eq!(
+            state.update(b, now),
+            vec![WireCommand {
+                command: FORMAT_COMMAND_MENU_CANCEL,
+                x: 0,
+                y: 0,
+                button: 0,
+                pressed: true,
+            }]
+        );
+        assert!(state.update(b, now).is_empty());
+        assert!(state.update(inputs(), now).is_empty());
+
+        let mut start = inputs();
+        start.start = true;
+        assert_eq!(
+            state.update(start, now),
+            vec![WireCommand {
+                command: FORMAT_COMMAND_MENU_TOGGLE,
+                x: 0,
+                y: 0,
+                button: 0,
+                pressed: true,
+            }]
+        );
+        assert!(state.update(start, now).is_empty());
+        assert!(state.update(inputs(), now).is_empty());
     }
 
     #[test]

@@ -4,14 +4,14 @@ Launches the Rust configuration.
 
 .DESCRIPTION
 Starts the applications of the Rust configuration from build/deploy: the
-hello_world model service, the view service, one format-manager service pair per
-display, the small displays (lil-d), and one paws virtual-controller window per
-display id.
+hello_world model service, one hello_world view/controller service pair and one
+format-manager service pair per display, the small displays (lil-d), and one paws
+virtual-controller window per display id.
 
 Every display has a unique numeric display id. The same id is given to its
-format controller, format view service, and lil-d. After everything starts, the
-lil-d windows are raised above the service console windows, then the paws
-windows are opened on top.
+hello view/controller services, format controller, format view service, and
+lil-d. After everything starts, the lil-d windows are raised above the service
+console windows, then the paws windows are opened on top.
 
 All participants read the shared DDS configuration; this script sets
 CYCLONEDDS_URI before starting them.
@@ -41,12 +41,13 @@ $bin = Join-Path $repoRoot 'build\deploy\bin'
 $config = Join-Path $repoRoot 'build\deploy\config\cyclonedds-config.xml'
 
 $model = Join-Path $bin 'hello-service.exe'
-$view = Join-Path $bin 'hello-view-service.exe'
+$helloCtl = Join-Path $bin 'hello-ctl-service.exe'
+$helloView = Join-Path $bin 'hello-view-service.exe'
 $formatCtl = Join-Path $bin 'format-ctl-service.exe'
 $formatView = Join-Path $bin 'format-view-service.exe'
 $display = Join-Path $bin 'lil-d.exe'
 $paws = Join-Path $bin 'paws.exe'
-if (-not (Test-Path $model) -or -not (Test-Path $view) -or -not (Test-Path $formatCtl) -or -not (Test-Path $formatView) -or -not (Test-Path $display) -or -not (Test-Path $paws) -or -not (Test-Path $config)) {
+if (-not (Test-Path $model) -or -not (Test-Path $helloCtl) -or -not (Test-Path $helloView) -or -not (Test-Path $formatCtl) -or -not (Test-Path $formatView) -or -not (Test-Path $display) -or -not (Test-Path $paws) -or -not (Test-Path $config)) {
     throw "Not built: run scripts\build.ps1 first."
 }
 
@@ -56,11 +57,13 @@ $env:CYCLONEDDS_URI = 'file://' + ($config -replace '\\', '/')
 
 Start-Process -FilePath $model
 Start-Sleep -Milliseconds 500
-Start-Process -FilePath $view
-Start-Sleep -Milliseconds 500
 
 $displayProcesses = @()
 foreach ($id in $DisplayId) {
+    Start-Process -FilePath $helloCtl -ArgumentList '--display-id', $id
+    Start-Sleep -Milliseconds 300
+    Start-Process -FilePath $helloView -ArgumentList '--display-id', $id
+    Start-Sleep -Milliseconds 300
     Start-Process -FilePath $formatCtl -ArgumentList '--display-id', $id
     Start-Sleep -Milliseconds 300
     Start-Process -FilePath $formatView -ArgumentList '--display-id', $id
@@ -117,4 +120,4 @@ foreach ($process in $pawsProcesses) {
     Show-DisplayWindow $process
 }
 
-Write-Host "Started hello-service, hello-view-service, lil-d and paws for display ids: $($DisplayId -join ', ')"
+Write-Host "Started hello-service, per-display hello services, format services, lil-d and paws for display ids: $($DisplayId -join ', ')"

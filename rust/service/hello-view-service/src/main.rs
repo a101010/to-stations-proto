@@ -1,5 +1,5 @@
-//! The hello_world view service: subscribes to `HelloWorldTopic` and relays it
-//! as `HelloWorldViewTopic` for the display library to render.
+//! The hello_world view service: merges the global model with this display's
+//! local view state and publishes `HelloWorldViewTopic` for the display library.
 //!
 //! The relay republishes the latest model sample at a fixed rate. If no model
 //! sample arrives for two seconds, the view data is marked invalid and the
@@ -13,7 +13,7 @@ use clap::Parser;
 use single_instance::Acquire;
 use stations_dds::contract::{ServiceContract, TopicRegistry};
 use stations_dds::dds::Node;
-use stations_dds::hello_world::{HelloWorldTopic, HelloWorldViewTopic};
+use stations_dds::hello_world::{HelloWorldCtlTopic, HelloWorldTopic, HelloWorldViewTopic};
 
 mod relay;
 
@@ -31,6 +31,10 @@ struct Args {
     /// Contracts directory (default: `<exe_dir>/../config`, else `./contracts`).
     #[arg(long)]
     config: Option<PathBuf>,
+
+    /// Numeric display id this service renders for.
+    #[arg(long)]
+    display_id: Option<u32>,
 
     /// Print this service's contract and exit.
     #[arg(long)]
@@ -61,7 +65,12 @@ fn run(args: &Args) -> Result<(), String> {
         return Ok(());
     }
 
-    let _guard = match single_instance::acquire("hello-view-service") {
+    let display_id = args
+        .display_id
+        .ok_or_else(|| "--display-id is required".to_string())?;
+
+    let _guard = match single_instance::acquire(&format!("hello-view-service-display-{display_id}"))
+    {
         Acquire::Primary(guard) => guard,
         Acquire::Duplicate => return Err("an instance is already running".to_string()),
     };
@@ -70,21 +79,32 @@ fn run(args: &Args) -> Result<(), String> {
     let writer = node
         .writer::<HelloWorldViewTopic>("HelloWorldViewTopic")
         .map_err(|e| e.to_string())?;
-    let reader = node
+    let model_reader = node
         .reader::<HelloWorldTopic>("HelloWorldTopic")
+        .map_err(|e| e.to_string())?;
+    let control_reader = node
+        .reader::<HelloWorldCtlTopic>("HelloWorldCtlTopic")
         .map_err(|e| e.to_string())?;
 
     let period = Duration::from_millis(args.rate_ms.max(1));
-    let mut relay = relay::ViewRelay::new(Instant::now());
+    let mut relay = relay::ViewRelay::new(Instant::now(), display_id);
     loop {
         let now = Instant::now();
-        match reader.take() {
+        match model_reader.take() {
             Ok(samples) => {
                 if let Some(sample) = samples.into_iter().last() {
                     relay.update(sample, now);
                 }
             }
             Err(e) => eprintln!("hello-view-service: model reader: {e}"),
+        }
+        match control_reader.take() {
+            Ok(samples) => {
+                for sample in samples {
+                    relay.control(&sample, now);
+                }
+            }
+            Err(e) => eprintln!("hello-view-service: control reader: {e}"),
         }
         if let Some(view) = relay.view(now) {
             writer.write(&view).map_err(|e| e.to_string())?;

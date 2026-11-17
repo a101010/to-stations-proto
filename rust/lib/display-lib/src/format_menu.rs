@@ -1,8 +1,8 @@
 //! The three-dot format menu overlay.
 //!
-//! The menu button is drawn in the upper-left of a format window over every
-//! format except the chooser. Its single `Formats` row publishes a logical
-//! `Select` event for the chooser through the display library's format source.
+//! The button and the open menu occupy the same top band at the format
+//! window's left edge. The menu is a single horizontal row of equal,
+//! fixed-width slots; it has no wrap or shrink-to-fit fallback.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -11,17 +11,24 @@ use glow::HasContext as _;
 
 use format_list::FORMAT_POINTER_RIGHT;
 
-use crate::formats::{FormatCommand, FORMAT_CHOOSER};
+use crate::formats::{FormatCommand, MenuItem, FORMAT_CHOOSER};
 use crate::text::{TextRenderer, FONT_FILE};
 use crate::ui::{self, Rect};
 use crate::DisplayError;
 
 const BUTTON_BG: [f32; 4] = [0.08, 0.08, 0.10, 1.0];
 const PANEL_BG: [f32; 4] = [0.10, 0.10, 0.13, 1.0];
-const SELECTED_ROW_BG: [f32; 4] = [0.20, 0.32, 0.24, 1.0];
+const SELECTED_ITEM_BG: [f32; 4] = [0.20, 0.32, 0.24, 1.0];
 const TEXT_COLOR: [f32; 4] = [0.95, 0.95, 0.95, 1.0];
 const DOTS: &str = "...";
-const LABEL: &str = "Formats";
+/// Height of the top band at the 720 px reference size.
+const BAND_HEIGHT: f32 = 56.0;
+/// Menu label size at the 720 px reference size.
+const FONT_SIZE: f32 = 20.0;
+/// Left/right inset inside each fixed slot.
+const SLOT_INSET: f32 = 14.0;
+/// Gap between equal slots.
+const SLOT_GAP: f32 = 2.0;
 
 /// What menu input did.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -29,71 +36,65 @@ pub(crate) enum MenuAction {
     Ignored,
     Consumed,
     Select(String),
+    Item(String),
 }
 
 /// The menu's geometry for the last format region.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct MenuLayout {
     pub(crate) button: Rect,
     pub(crate) panel: Rect,
-    pub(crate) row: Rect,
-    pub(crate) font_size: f32,
-    pub(crate) padding: i32,
+    pub(crate) items: Vec<Rect>,
+    pub(crate) font_size: i32,
+    pub(crate) inset: i32,
 }
 
 impl MenuLayout {
-    pub(crate) fn new(region: (i32, i32, i32, i32)) -> Self {
+    pub(crate) fn new(
+        region: (i32, i32, i32, i32),
+        count: usize,
+        slot_width: i32,
+        font_size: f32,
+        inset: i32,
+        gap: i32,
+    ) -> Self {
         let (x, y, width, height) = region;
         let zero = Rect::new(x, y, 0, 0);
         if width <= 0 || height <= 0 {
             return Self {
                 button: zero,
                 panel: zero,
-                row: zero,
-                font_size: 0.0,
-                padding: 0,
+                items: Vec::new(),
+                font_size: 0,
+                inset: 0,
             };
         }
 
         let scale = ui::scale_for_height(height);
-        let margin = (12.0 * scale).round() as i32;
-        let button_size = (40.0 * scale).round() as i32;
-        let row_height = (40.0 * scale).round() as i32;
-        let padding = (8.0 * scale).round() as i32;
-        let font_size = 20.0 * scale;
+        let band = ((BAND_HEIGHT * scale).round() as i32).clamp(1, width.min(height).max(1));
+        let button = Rect::new(x, y, band, band);
+        let panel_width = if count == 0 {
+            0
+        } else {
+            count as i32 * slot_width + (count as i32 - 1) * gap
+        };
+        let panel = Rect::new(x, y, panel_width, band);
 
-        let button = Rect::new(
-            x + margin,
-            y + margin,
-            button_size.min((width - 2 * margin).max(1)),
-            button_size.min((height - 2 * margin).max(1)),
-        );
-        let panel_x = button.x;
-        let panel_y = button.y + button.h + margin / 2;
-        let panel = Rect::new(
-            panel_x,
-            panel_y,
-            ((220.0 * scale).round() as i32).min((x + width - margin - panel_x).max(1)),
-            (row_height + 2 * padding).min((y + height - margin - panel_y).max(1)),
-        );
-
-        let row_width = (panel.w - 2 * padding).max(1);
-        let row_y = panel.y + padding;
-        let remaining = panel.y + panel.h - padding - row_y;
-        let row = Rect::new(
-            panel.x + padding,
-            row_y,
-            row_width,
-            row_height.min(remaining).max(0),
-        );
+        let items = (0..count)
+            .map(|index| Rect::new(x + index as i32 * (slot_width + gap), y, slot_width, band))
+            .collect();
 
         Self {
             button,
             panel,
-            row,
-            font_size,
-            padding,
+            items,
+            font_size: font_size.round() as i32,
+            inset,
         }
+    }
+
+    fn item_at(&self, x: i32, y: i32) -> Option<usize> {
+        self.items.iter().position(|rect| rect.contains(x, y))
     }
 }
 
@@ -101,22 +102,50 @@ impl MenuLayout {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct MenuState {
     open: bool,
-    selected_row: usize,
+    selected: usize,
 }
 
 impl MenuState {
-    fn click(&mut self, layout: &MenuLayout, x: i32, y: i32) -> MenuAction {
-        if layout.button.contains(x, y) {
-            self.open = !self.open;
-            self.selected_row = 0;
+    fn activate(&mut self, items: &[MenuItem]) -> MenuAction {
+        self.open = false;
+        let Some(item) = items.get(self.selected) else {
+            return MenuAction::Consumed;
+        };
+        let action = if item.id == FORMAT_CHOOSER {
+            MenuAction::Select(item.id.clone())
+        } else {
+            MenuAction::Item(item.id.clone())
+        };
+        self.selected = 0;
+        action
+    }
+
+    fn toggle(&mut self) {
+        self.open = !self.open;
+        self.selected = 0;
+    }
+
+    fn cancel(&mut self) -> bool {
+        let was_open = self.open;
+        self.open = false;
+        self.selected = 0;
+        was_open
+    }
+
+    fn click(&mut self, layout: &MenuLayout, items: &[MenuItem], x: i32, y: i32) -> MenuAction {
+        if self.open {
+            if let Some(index) = layout.item_at(x, y) {
+                self.selected = index;
+                return self.activate(items);
+            }
+            self.open = false;
+            self.selected = 0;
             return MenuAction::Consumed;
         }
 
-        if self.open {
-            self.open = false;
-            if layout.row.contains(x, y) {
-                return MenuAction::Select(FORMAT_CHOOSER.to_string());
-            }
+        if layout.button.contains(x, y) {
+            self.open = true;
+            self.selected = 0;
             return MenuAction::Consumed;
         }
 
@@ -126,6 +155,7 @@ impl MenuState {
     fn command(
         &mut self,
         layout: &MenuLayout,
+        items: &[MenuItem],
         cursor: (i32, i32),
         command: FormatCommand,
     ) -> MenuAction {
@@ -135,20 +165,21 @@ impl MenuState {
                 pressed: true,
             } if button == FORMAT_POINTER_RIGHT => {
                 if self.open {
-                    self.open = false;
-                    self.selected_row = 0;
-                    return MenuAction::Select(FORMAT_CHOOSER.to_string());
+                    return self.activate(items);
                 }
                 if layout.button.contains(cursor.0, cursor.1) {
                     self.open = true;
-                    self.selected_row = 0;
+                    self.selected = 0;
                     return MenuAction::Consumed;
                 }
                 MenuAction::Ignored
             }
-            FormatCommand::Navigate { .. } if self.open => {
-                // One row for now; keep it selected.
-                self.selected_row = 0;
+            FormatCommand::Navigate { dx, .. } if self.open => {
+                if dx != 0 && !items.is_empty() {
+                    let direction = dx.signum();
+                    let count = items.len() as i32;
+                    self.selected = (self.selected as i32 + direction).rem_euclid(count) as usize;
+                }
                 MenuAction::Consumed
             }
             _ => MenuAction::Ignored,
@@ -171,16 +202,36 @@ impl FormatMenu {
         })
     }
 
-    /// Handle a left-button press.
+    /// The fixed-slot layout for `items`. The slot width comes from the widest
+    /// planned label; there is deliberately no wrap or shrink fallback.
+    fn layout(&self, region: (i32, i32, i32, i32), items: &[MenuItem]) -> MenuLayout {
+        let scale = ui::scale_for_height(region.3);
+        let font_size = FONT_SIZE * scale;
+        let inset = (SLOT_INSET * scale).round() as i32;
+        let gap = (SLOT_GAP * scale).round() as i32;
+        let slot_width = items
+            .iter()
+            .map(|item| self.renderer.text_width(&item.label, font_size).ceil() as i32)
+            .max()
+            .unwrap_or(0)
+            + 2 * inset;
+        MenuLayout::new(region, items.len(), slot_width, font_size, inset, gap)
+    }
+
+    /// Handle a mouse press.
     pub(crate) fn click(
         &mut self,
         window: i32,
         region: (i32, i32, i32, i32),
+        items: &[MenuItem],
         x: i32,
         y: i32,
     ) -> MenuAction {
-        let layout = MenuLayout::new(region);
-        self.states.entry(window).or_default().click(&layout, x, y)
+        let layout = self.layout(region, items);
+        self.states
+            .entry(window)
+            .or_default()
+            .click(&layout, items, x, y)
     }
 
     /// Handle a high-level controller command aimed at the menu.
@@ -188,53 +239,56 @@ impl FormatMenu {
         &mut self,
         window: i32,
         region: (i32, i32, i32, i32),
+        items: &[MenuItem],
         cursor: (i32, i32),
         command: FormatCommand,
     ) -> MenuAction {
-        let layout = MenuLayout::new(region);
+        let layout = self.layout(region, items);
         self.states
             .entry(window)
             .or_default()
-            .command(&layout, cursor, command)
+            .command(&layout, items, cursor, command)
+    }
+
+    /// Toggle the menu, used by the Xbox Start button.
+    pub(crate) fn toggle(&mut self, window: i32) {
+        self.states.entry(window).or_default().toggle();
+    }
+
+    /// Cancel the menu, used by the Xbox B button. Returns whether it was open.
+    pub(crate) fn cancel(&mut self, window: i32) -> bool {
+        self.states.entry(window).or_default().cancel()
     }
 
     /// Close the menu, for example when the chooser becomes active.
     pub(crate) fn close(&mut self, window: i32) {
         let state = self.states.entry(window).or_default();
         state.open = false;
-        state.selected_row = 0;
+        state.selected = 0;
     }
 
-    /// Draw the button, and the open panel, over the active format.
+    /// Draw the closed button or the open item bar over the active format.
     pub(crate) fn render(
         &mut self,
         gl: &glow::Context,
         framebuffer_height: i32,
         region: (i32, i32, i32, i32),
         window: i32,
+        items: &[MenuItem],
     ) {
-        let layout = MenuLayout::new(region);
+        let layout = self.layout(region, items);
         if layout.button.w <= 0 || layout.button.h <= 0 {
             return;
         }
 
-        ui::clear_rect(gl, framebuffer_height, layout.button, BUTTON_BG);
-
-        let open = self
-            .states
-            .get(&window)
-            .map(|state| state.open)
-            .unwrap_or(false);
-        if open {
+        let state = self.states.get(&window).copied().unwrap_or_default();
+        if state.open {
             ui::clear_rect(gl, framebuffer_height, layout.panel, PANEL_BG);
-            let selected = self
-                .states
-                .get(&window)
-                .map(|state| state.selected_row)
-                .unwrap_or(0);
-            if selected == 0 && layout.row.h > 0 {
-                ui::clear_rect(gl, framebuffer_height, layout.row, SELECTED_ROW_BG);
+            if let Some(rect) = layout.items.get(state.selected) {
+                ui::clear_rect(gl, framebuffer_height, *rect, SELECTED_ITEM_BG);
             }
+        } else {
+            ui::clear_rect(gl, framebuffer_height, layout.button, BUTTON_BG);
         }
 
         let y_gl = framebuffer_height - region.1 - region.3;
@@ -243,28 +297,28 @@ impl FormatMenu {
             gl.disable(glow::DEPTH_TEST);
         }
 
-        let dot_size = (layout.button.h as f32 * 0.55).max(10.0);
-        let dots_width = self.renderer.text_width(DOTS, dot_size);
-        self.draw_text(
-            gl,
-            region,
-            layout.button,
-            DOTS,
-            dot_size,
-            ((layout.button.w as f32 - dots_width) / 2.0).max(0.0),
-            ((layout.button.h as f32 - dot_size) / 2.0).max(0.0),
-        );
-
-        if open && layout.row.h > 0 {
-            let top = ((layout.row.h as f32 - layout.font_size) / 2.0).max(0.0);
+        if state.open {
+            for (index, item) in items.iter().enumerate() {
+                let Some(rect) = layout.items.get(index) else {
+                    continue;
+                };
+                let font_size = layout.font_size as f32;
+                let text_width = self.renderer.text_width(&item.label, font_size);
+                let left = ((rect.w as f32 - text_width) / 2.0).max(0.0);
+                let top = ((rect.h as f32 - font_size) / 2.0).max(0.0);
+                self.draw_text(gl, region, *rect, &item.label, font_size, left, top);
+            }
+        } else {
+            let dot_size = (layout.button.h as f32 * 0.55).max(10.0);
+            let dots_width = self.renderer.text_width(DOTS, dot_size);
             self.draw_text(
                 gl,
                 region,
-                layout.row,
-                LABEL,
-                layout.font_size,
-                layout.padding as f32,
-                top,
+                layout.button,
+                DOTS,
+                dot_size,
+                ((layout.button.w as f32 - dots_width) / 2.0).max(0.0),
+                ((layout.button.h as f32 - dot_size) / 2.0).max(0.0),
             );
         }
     }
@@ -296,8 +350,29 @@ impl FormatMenu {
 mod tests {
     use super::*;
 
+    fn items() -> Vec<MenuItem> {
+        vec![
+            MenuItem {
+                id: FORMAT_CHOOSER.to_string(),
+                label: "Formats".to_string(),
+            },
+            MenuItem {
+                id: "mode".to_string(),
+                label: "Inspect".to_string(),
+            },
+            MenuItem {
+                id: "lux-color".to_string(),
+                label: "Lux Color".to_string(),
+            },
+            MenuItem {
+                id: "lux-pos".to_string(),
+                label: "Lux Pos".to_string(),
+            },
+        ]
+    }
+
     fn layout() -> MenuLayout {
-        MenuLayout::new((0, 0, 720, 720))
+        MenuLayout::new((0, 0, 720, 720), 4, 120, 20.0, 14, 2)
     }
 
     fn center(rect: Rect) -> (i32, i32) {
@@ -305,36 +380,62 @@ mod tests {
     }
 
     #[test]
-    fn layout_stays_inside_the_region() {
+    fn layout_is_left_aligned_and_uses_equal_fixed_slots() {
         let layout = layout();
-        for rect in [layout.button, layout.panel, layout.row] {
-            assert!(rect.x >= 0 && rect.y >= 0);
-            assert!(rect.x + rect.w <= 720);
-            assert!(rect.y + rect.h <= 720);
+        assert_eq!(layout.button.x, 0);
+        assert_eq!(layout.button.y, 0);
+        assert_eq!(layout.panel.x, 0);
+        assert_eq!(layout.panel.y, 0);
+        assert_eq!(layout.items.len(), 4);
+        assert_eq!(layout.items[0].x, 0);
+        assert!(layout.items.iter().all(|item| item.w == 120));
+        assert!(layout.items.iter().all(|item| item.y == 0));
+        assert!(layout.panel.w <= 720);
+        for item in &layout.items {
+            assert!(item.x + item.w <= 720);
         }
     }
 
     #[test]
-    fn button_click_toggles_open_and_closed() {
+    fn open_menu_replaces_the_button_area_with_the_first_item() {
         let mut state = MenuState::default();
         let layout = layout();
-        let (x, y) = center(layout.button);
-        assert_eq!(state.click(&layout, x, y), MenuAction::Consumed);
+        assert_eq!(state.click(&layout, &items(), 10, 10), MenuAction::Consumed);
         assert!(state.open);
-        assert_eq!(state.click(&layout, x, y), MenuAction::Consumed);
+        assert_eq!(
+            state.click(&layout, &items(), 10, 10),
+            MenuAction::Select(FORMAT_CHOOSER.to_string())
+        );
         assert!(!state.open);
     }
 
     #[test]
-    fn row_click_selects_the_chooser_and_closes() {
+    fn start_style_toggle_opens_and_closes_the_menu() {
+        let mut state = MenuState::default();
+        state.toggle();
+        assert!(state.open);
+        state.toggle();
+        assert!(!state.open);
+    }
+
+    #[test]
+    fn cancel_closes_only_an_open_menu() {
+        let mut state = MenuState::default();
+        assert!(!state.cancel());
+        state.open = true;
+        assert!(state.cancel());
+        assert!(!state.open);
+    }
+
+    #[test]
+    fn clicking_an_open_item_activates_it() {
         let mut state = MenuState::default();
         let layout = layout();
-        let (x, y) = center(layout.button);
-        state.click(&layout, x, y);
-        let (x, y) = center(layout.row);
+        state.click(&layout, &items(), 10, 10);
+        let item = layout.items[2];
         assert_eq!(
-            state.click(&layout, x, y),
-            MenuAction::Select(FORMAT_CHOOSER.to_string())
+            state.click(&layout, &items(), center(item).0, center(item).1),
+            MenuAction::Item("lux-color".to_string())
         );
         assert!(!state.open);
     }
@@ -342,26 +443,23 @@ mod tests {
     #[test]
     fn click_outside_open_menu_closes_it() {
         let mut state = MenuState::default();
-        let layout = layout();
         state.open = true;
-        assert_eq!(state.click(&layout, 700, 700), MenuAction::Consumed);
+        assert_eq!(
+            state.click(&layout(), &items(), 700, 700),
+            MenuAction::Consumed
+        );
         assert!(!state.open);
     }
 
     #[test]
-    fn closed_menu_outside_click_is_ignored() {
-        let mut state = MenuState::default();
-        assert_eq!(state.click(&layout(), 700, 700), MenuAction::Ignored);
-    }
-    #[test]
     fn controller_right_click_over_button_opens_menu() {
         let mut state = MenuState::default();
         let layout = layout();
-        let cursor = center(layout.button);
         assert_eq!(
             state.command(
                 &layout,
-                cursor,
+                &items(),
+                center(layout.button),
                 FormatCommand::Pointer {
                     button: FORMAT_POINTER_RIGHT,
                     pressed: true,
@@ -370,15 +468,16 @@ mod tests {
             MenuAction::Consumed
         );
         assert!(state.open);
-        assert_eq!(state.selected_row, 0);
+        assert_eq!(state.selected, 0);
     }
 
     #[test]
-    fn controller_right_click_activates_open_menu() {
+    fn controller_right_click_activates_the_selected_item() {
         let mut state = MenuState::default();
         let layout = layout();
         state.command(
             &layout,
+            &items(),
             center(layout.button),
             FormatCommand::Pointer {
                 button: FORMAT_POINTER_RIGHT,
@@ -388,6 +487,7 @@ mod tests {
         assert_eq!(
             state.command(
                 &layout,
+                &items(),
                 (700, 700),
                 FormatCommand::Pointer {
                     button: FORMAT_POINTER_RIGHT,
@@ -400,36 +500,43 @@ mod tests {
     }
 
     #[test]
-    fn controller_outside_button_is_ignored_when_closed() {
-        let mut state = MenuState::default();
+    fn controller_navigation_cycles_all_four_items() {
+        let mut state = MenuState {
+            open: true,
+            selected: 0,
+        };
+        for expected in [1, 2, 3, 0] {
+            assert_eq!(
+                state.command(
+                    &layout(),
+                    &items(),
+                    (0, 0),
+                    FormatCommand::Navigate { dx: 1, dy: 0 },
+                ),
+                MenuAction::Consumed
+            );
+            assert_eq!(state.selected, expected);
+        }
         assert_eq!(
             state.command(
                 &layout(),
-                (700, 700),
-                FormatCommand::Pointer {
-                    button: FORMAT_POINTER_RIGHT,
-                    pressed: true,
-                },
+                &items(),
+                (0, 0),
+                FormatCommand::Navigate { dx: -1, dy: 0 },
             ),
-            MenuAction::Ignored
+            MenuAction::Consumed
         );
+        assert_eq!(state.selected, 3);
     }
 
     #[test]
-    fn controller_navigation_is_consumed_while_open() {
-        let mut state = MenuState {
-            open: true,
-            selected_row: 0,
-        };
-        assert_eq!(
-            state.command(&layout(), (0, 0), FormatCommand::Navigate { dx: 0, dy: 1 },),
-            MenuAction::Consumed
-        );
+    fn controller_navigation_is_ignored_when_closed() {
         assert_eq!(
             MenuState::default().command(
                 &layout(),
+                &items(),
                 (0, 0),
-                FormatCommand::Navigate { dx: 0, dy: 1 },
+                FormatCommand::Navigate { dx: 1, dy: 0 },
             ),
             MenuAction::Ignored
         );
@@ -440,6 +547,7 @@ mod tests {
         assert_eq!(
             MenuState::default().command(
                 &layout(),
+                &items(),
                 (0, 0),
                 FormatCommand::CursorMove { dx: 1, dy: 1 },
             ),

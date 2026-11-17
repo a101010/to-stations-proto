@@ -5,4 +5,14 @@ module math {
     double z;
     double w;
   };
+  struct Vector3 {
+    double x;
+    double y;
+    double z;
+  };
+  struct Color {
+    double r;
+    double g;
+    double b;
+  };
 };

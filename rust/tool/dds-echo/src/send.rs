@@ -15,7 +15,9 @@ use stations_dds::format_manager::{
     FormatManagerCommandCtlTopic, FormatManagerCtlTopic, FormatManagerInputTopic,
     FormatManagerViewTopic,
 };
-use stations_dds::hello_world::{HelloWorldTopic, HelloWorldViewTopic};
+use stations_dds::hello_world::{
+    HelloWorldCtlTopic, HelloWorldInputTopic, HelloWorldTopic, HelloWorldViewTopic,
+};
 
 /// How a field is edited in the Send form.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -186,6 +188,12 @@ pub fn schema_for(idl_type: &str) -> Option<&'static DynamicTypeSchema> {
         "hello_world::HelloWorldViewTopic" => {
             Some(<HelloWorldViewTopic as DdsFieldMetadata>::field_schema())
         }
+        "hello_world::HelloWorldInputTopic" => {
+            Some(<HelloWorldInputTopic as DdsFieldMetadata>::field_schema())
+        }
+        "hello_world::HelloWorldCtlTopic" => {
+            Some(<HelloWorldCtlTopic as DdsFieldMetadata>::field_schema())
+        }
         "format_manager::FormatManagerInputTopic" => {
             Some(<FormatManagerInputTopic as DdsFieldMetadata>::field_schema())
         }
@@ -206,6 +214,8 @@ pub fn schema_for(idl_type: &str) -> Option<&'static DynamicTypeSchema> {
 pub enum TopicWriter {
     HelloWorld(DataWriter<HelloWorldTopic>),
     HelloWorldView(DataWriter<HelloWorldViewTopic>),
+    HelloWorldInput(DataWriter<HelloWorldInputTopic>),
+    HelloWorldCtl(DataWriter<HelloWorldCtlTopic>),
     FormatManagerInput(DataWriter<FormatManagerInputTopic>),
     FormatManagerCtl(DataWriter<FormatManagerCtlTopic>),
     FormatManagerView(DataWriter<FormatManagerViewTopic>),
@@ -222,6 +232,14 @@ impl TopicWriter {
             "hello_world::HelloWorldViewTopic" => node
                 .writer::<HelloWorldViewTopic>(topic)
                 .map(TopicWriter::HelloWorldView)
+                .map_err(|e| e.to_string()),
+            "hello_world::HelloWorldInputTopic" => node
+                .writer::<HelloWorldInputTopic>(topic)
+                .map(TopicWriter::HelloWorldInput)
+                .map_err(|e| e.to_string()),
+            "hello_world::HelloWorldCtlTopic" => node
+                .writer::<HelloWorldCtlTopic>(topic)
+                .map(TopicWriter::HelloWorldCtl)
                 .map_err(|e| e.to_string()),
             "format_manager::FormatManagerInputTopic" => node
                 .writer::<FormatManagerInputTopic>(topic)
@@ -254,6 +272,14 @@ impl TopicWriter {
                 .matched_subscriptions()
                 .map(|handles| handles.len())
                 .map_err(|e| e.to_string()),
+            TopicWriter::HelloWorldInput(writer) => writer
+                .matched_subscriptions()
+                .map(|handles| handles.len())
+                .map_err(|e| e.to_string()),
+            TopicWriter::HelloWorldCtl(writer) => writer
+                .matched_subscriptions()
+                .map(|handles| handles.len())
+                .map_err(|e| e.to_string()),
             TopicWriter::FormatManagerInput(writer) => writer
                 .matched_subscriptions()
                 .map(|handles| handles.len())
@@ -283,6 +309,16 @@ impl TopicWriter {
             TopicWriter::HelloWorldView(writer) => {
                 let sample = HelloWorldViewTopic::from_dynamic_value(value)
                     .map_err(|e| format!("HelloWorldViewTopic: {e}"))?;
+                writer.write(&sample).map_err(|e| e.to_string())
+            }
+            TopicWriter::HelloWorldInput(writer) => {
+                let sample = HelloWorldInputTopic::from_dynamic_value(value)
+                    .map_err(|e| format!("HelloWorldInputTopic: {e}"))?;
+                writer.write(&sample).map_err(|e| e.to_string())
+            }
+            TopicWriter::HelloWorldCtl(writer) => {
+                let sample = HelloWorldCtlTopic::from_dynamic_value(value)
+                    .map_err(|e| format!("HelloWorldCtlTopic: {e}"))?;
                 writer.write(&sample).map_err(|e| e.to_string())
             }
             TopicWriter::FormatManagerInput(writer) => {

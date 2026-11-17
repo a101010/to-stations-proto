@@ -110,6 +110,10 @@ impl App {
         self.egui_glow = Some(egui_glow);
         self.display = Some(display);
         self.state.format_on = true;
+        // The display library draws the only cursor over the format region.
+        if let Some(gl_window) = self.gl_window.as_ref() {
+            gl_window.window().set_cursor_visible(false);
+        }
         // Paint one frame while hidden, then show the window.
         self.render();
         if let Some(gl_window) = self.gl_window.as_ref() {
@@ -159,6 +163,7 @@ impl App {
         }
         if action.toggle_power {
             self.state.format_on = !self.state.format_on;
+            self.update_native_cursor();
             if let Some(gl_window) = self.gl_window.as_ref() {
                 gl_window.window().request_redraw();
             }
@@ -173,14 +178,14 @@ impl App {
         }
     }
 
-    /// Forward an unconsumed left-button event in the format region to the
-    /// display library, then repaint in case the active format changed.
+    /// Forward a mouse-button event to the display library, then repaint in
+    /// case the active format changed. The library hit-tests its format region.
     fn forward_mouse(
         &mut self,
         state: winit::event::ElementState,
         button: winit::event::MouseButton,
     ) {
-        if !self.state.format_on || button != winit::event::MouseButton::Left {
+        if !self.state.format_on {
             return;
         }
         let Some(position) = self.cursor else {
@@ -191,11 +196,70 @@ impl App {
                 return;
             };
             let pressed = state == winit::event::ElementState::Pressed;
-            display.mouse_button(position.x as i32, position.y as i32, 0, pressed);
+            display.mouse_button(
+                position.x as i32,
+                position.y as i32,
+                mouse_button_index(button),
+                pressed,
+            );
         }
         if let Some(gl_window) = self.gl_window.as_ref() {
             gl_window.window().request_redraw();
         }
+    }
+
+    fn forward_motion(&mut self) {
+        if !self.state.format_on {
+            return;
+        }
+        let Some(position) = self.cursor else {
+            return;
+        };
+        if let Some(display) = self.display.as_mut() {
+            display.mouse_motion(position.x as i32, position.y as i32);
+        }
+        if let Some(gl_window) = self.gl_window.as_ref() {
+            gl_window.window().request_redraw();
+        }
+    }
+
+    fn forward_wheel(&mut self, delta: &winit::event::MouseScrollDelta) {
+        if !self.state.format_on {
+            return;
+        }
+        let delta = match delta {
+            winit::event::MouseScrollDelta::LineDelta(_, y) => y.round() as i32,
+            winit::event::MouseScrollDelta::PixelDelta(position) => {
+                let value = position.y / 50.0;
+                if value > 0.0 {
+                    value.ceil() as i32
+                } else if value < 0.0 {
+                    value.floor() as i32
+                } else {
+                    0
+                }
+            }
+        };
+        if delta == 0 {
+            return;
+        }
+        if let Some(display) = self.display.as_mut() {
+            display.mouse_wheel(delta);
+        }
+        if let Some(gl_window) = self.gl_window.as_ref() {
+            gl_window.window().request_redraw();
+        }
+    }
+
+    /// Hide the native cursor over the format region so the display library's
+    /// crosshair is the only cursor there; keep the native arrow over the console.
+    fn update_native_cursor(&self) {
+        let (Some(gl_window), Some(cursor)) = (self.gl_window.as_ref(), self.cursor) else {
+            return;
+        };
+        let layout = layout::compute(gl_window.size(), gl_window.scale_factor());
+        let over_format = self.state.format_on && inside_rect(layout.format, cursor.x, cursor.y);
+        gl_window.window().set_cursor_visible(!over_format);
     }
 
     /// Save the last window position. Monitor changes and forced saves bypass
@@ -236,14 +300,14 @@ impl ApplicationHandler for App {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
-        // Let egui see the event first (mouse, keyboard, focus). `consumed`
-        // tells us whether egui used the event (e.g. the console power button).
-        let mut consumed = false;
+        // Let egui see the event first for the console and repaint requests.
+        // Pointer forwarding deliberately ignores egui's `consumed` flag: the
+        // display library hit-tests its own format region, and gating motion on
+        // egui consumption breaks right-button drags.
         if let (Some(gl_window), Some(egui_glow)) =
             (self.gl_window.as_ref(), self.egui_glow.as_mut())
         {
             let response = egui_glow.on_window_event(gl_window.window(), &event);
-            consumed = response.consumed;
             if response.repaint {
                 gl_window.window().request_redraw();
             }
@@ -263,11 +327,14 @@ impl ApplicationHandler for App {
             WindowEvent::Focused(false) => self.flush_position(true),
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor = Some(position);
+                self.update_native_cursor();
+                self.forward_motion();
             }
             WindowEvent::MouseInput { state, button, .. } => {
-                if !consumed {
-                    self.forward_mouse(state, button);
-                }
+                self.forward_mouse(state, button);
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                self.forward_wheel(&delta);
             }
             WindowEvent::Resized(size) => {
                 if let Some(gl_window) = self.gl_window.as_ref() {
@@ -278,6 +345,7 @@ impl ApplicationHandler for App {
                     gl_window.resize(width, height);
                     gl_window.window().request_redraw();
                     self.position_dirty = true;
+                    self.update_native_cursor();
                     self.flush_position(false);
                 }
             }
@@ -309,5 +377,55 @@ fn clear(gl: &glow::Context, gl_window: &GlWindow, color: [f32; 4]) {
         gl.viewport(0, 0, size.width as i32, size.height as i32);
         gl.clear_color(color[0], color[1], color[2], color[3]);
         gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
+    }
+}
+
+/// Whether a window-relative position is inside a layout rectangle.
+fn inside_rect(rect: layout::Rect, x: f64, y: f64) -> bool {
+    x >= rect.x as f64
+        && x < (rect.x + rect.w) as f64
+        && y >= rect.y as f64
+        && y < (rect.y + rect.h) as f64
+}
+
+/// The ABI mouse-button number for a winit button.
+fn mouse_button_index(button: winit::event::MouseButton) -> i32 {
+    match button {
+        winit::event::MouseButton::Left => 0,
+        winit::event::MouseButton::Right => 1,
+        winit::event::MouseButton::Middle => 2,
+        winit::event::MouseButton::Back => 3,
+        winit::event::MouseButton::Forward => 4,
+        winit::event::MouseButton::Other(_) => 5,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cursor_hiding_uses_the_format_region() {
+        let rect = layout::Rect {
+            x: 10,
+            y: 20,
+            w: 100,
+            h: 80,
+        };
+        assert!(inside_rect(rect, 10.0, 20.0));
+        assert!(inside_rect(rect, 109.0, 99.0));
+        assert!(!inside_rect(rect, 110.0, 99.0));
+        assert!(!inside_rect(rect, 109.0, 100.0));
+    }
+
+    #[test]
+    fn winit_mouse_buttons_map_to_the_abi_numbers() {
+        use winit::event::MouseButton;
+        assert_eq!(mouse_button_index(MouseButton::Left), 0);
+        assert_eq!(mouse_button_index(MouseButton::Right), 1);
+        assert_eq!(mouse_button_index(MouseButton::Middle), 2);
+        assert_eq!(mouse_button_index(MouseButton::Back), 3);
+        assert_eq!(mouse_button_index(MouseButton::Forward), 4);
+        assert_eq!(mouse_button_index(MouseButton::Other(9)), 5);
     }
 }

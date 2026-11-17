@@ -12,7 +12,9 @@ use stations_dds::format_manager::{
     FormatManagerCommandCtlTopic, FormatManagerCtlTopic, FormatManagerInputTopic,
     FormatManagerViewTopic,
 };
-use stations_dds::hello_world::{HelloWorldTopic, HelloWorldViewTopic};
+use stations_dds::hello_world::{
+    HelloWorldCtlTopic, HelloWorldInputTopic, HelloWorldTopic, HelloWorldViewTopic,
+};
 
 /// Decode a known-type DATA payload (encapsulation header + CDR) into a
 /// human-readable field dump. Returns `None` for an unknown type, a
@@ -25,6 +27,14 @@ pub fn decode(idl_type: &str, payload: &[u8]) -> Option<String> {
         }
         "hello_world::HelloWorldViewTopic" => {
             let sample = deserialize::<HelloWorldViewTopic>(payload)?;
+            Some(format!("{sample:#?}"))
+        }
+        "hello_world::HelloWorldInputTopic" => {
+            let sample = deserialize::<HelloWorldInputTopic>(payload)?;
+            Some(format!("{sample:#?}"))
+        }
+        "hello_world::HelloWorldCtlTopic" => {
+            let sample = deserialize::<HelloWorldCtlTopic>(payload)?;
             Some(format!("{sample:#?}"))
         }
         "format_manager::FormatManagerInputTopic" => {
@@ -121,6 +131,7 @@ mod tests {
     #[test]
     fn decodes_hello_world_view_fields() {
         let sample = HelloWorldViewTopic {
+            display_id: 7,
             greeting: "Hello, world!".to_string(),
             attitude: Quaternion {
                 x: 0.0,
@@ -129,13 +140,57 @@ mod tests {
                 w: 1.0,
             },
             valid: true,
+            mode: 1,
+            arcball: true,
+            light: stations_dds::math::Vector3 {
+                x: 0.6,
+                y: 0.8,
+                z: 0.7,
+            },
+            color: stations_dds::math::Color {
+                r: 1.0,
+                g: 0.5,
+                b: 0.25,
+            },
+            overlay: 0,
         };
         let cdr = CdrSerializer::serialize(&sample, CdrEncoding::Xcdr1).unwrap();
         let mut payload = vec![0x00, 0x01, 0x00, 0x00];
         payload.extend_from_slice(&cdr);
         let dump = decode("hello_world::HelloWorldViewTopic", &payload).expect("decoded");
         assert!(dump.contains("Hello, world!"));
+        assert!(dump.contains("display_id: 7"));
         assert!(dump.contains("attitude"));
+        assert!(dump.contains("arcball: true"));
+    }
+
+    #[test]
+    fn decodes_hello_world_input_and_control() {
+        let input = HelloWorldInputTopic {
+            display_id: 1,
+            action: 3,
+            x: 0.25,
+            y: -0.5,
+            z: 0.0,
+            pressed: true,
+        };
+        let dump =
+            decode("hello_world::HelloWorldInputTopic", &framed(&input)).expect("decoded input");
+        assert!(dump.contains("display_id: 1"));
+        assert!(dump.contains("action: 3"));
+
+        let control = HelloWorldCtlTopic {
+            display_id: input.display_id,
+            action: 1,
+            x: input.x,
+            y: input.y,
+            z: input.z,
+            pressed: input.pressed,
+        };
+        let dump =
+            decode("hello_world::HelloWorldCtlTopic", &framed(&control)).expect("decoded control");
+        assert!(dump.contains("action: 1"));
+        assert!(dump.contains("pressed: true"));
     }
 
     #[test]
@@ -237,6 +292,10 @@ mod tests {
             match idl_type {
                 "hello_world::HelloWorldTopic" => Some(framed(&HelloWorldTopic::default())),
                 "hello_world::HelloWorldViewTopic" => Some(framed(&HelloWorldViewTopic::default())),
+                "hello_world::HelloWorldInputTopic" => {
+                    Some(framed(&HelloWorldInputTopic::default()))
+                }
+                "hello_world::HelloWorldCtlTopic" => Some(framed(&HelloWorldCtlTopic::default())),
                 "format_manager::FormatManagerInputTopic" => {
                     Some(framed(&FormatManagerInputTopic::default()))
                 }

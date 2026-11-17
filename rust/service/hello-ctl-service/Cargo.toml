@@ -1,0 +1,15 @@
+[package]
+name = "hello-ctl-service"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "hello-ctl-service"
+path = "src/main.rs"
+
+[dependencies]
+stations-dds = { workspace = true }
+format-list = { workspace = true }
+clap = { workspace = true }
+single-instance = { workspace = true }

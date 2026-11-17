@@ -7,8 +7,9 @@ Stops the applications of every configuration by image name. The launch scripts
 start them from build/deploy; this script stops all of them.
 
 The list of applications grows as stories add executables; the Rust launch
-script starts the hello_world model service, view service, one format-manager
-service pair per display id, and one small display (lil-d) per display id. The
+script starts the hello_world model service, one hello_world view/controller service
+pair and one format-manager service pair per display id, and one small display
+(lil-d) per display id. The
 image-name stop below stops every instance.
 #>
 [CmdletBinding()]
@@ -43,7 +44,7 @@ if ($displays) {
 
 # Every application launched by a configuration launch script. Later stories
 # append the services and the other displays as they are added.
-$apps = @('lil-d', 'paws', 'hello-service', 'hello-view-service', 'format-ctl-service', 'format-view-service')
+$apps = @('lil-d', 'paws', 'hello-service', 'hello-view-service', 'hello-ctl-service', 'format-ctl-service', 'format-view-service')
 
 foreach ($name in $apps) {
     $procs = Get-Process -Name $name -ErrorAction SilentlyContinue

@@ -87,7 +87,10 @@ fn round_trips_hello_world_topic() {
         other => panic!("expected struct value, got {other:?}"),
     }
 
-    assert_eq!(HelloWorldTopic::from_dynamic_value(&dynamic).unwrap(), original);
+    assert_eq!(
+        HelloWorldTopic::from_dynamic_value(&dynamic).unwrap(),
+        original
+    );
 }
 
 #[test]
@@ -117,9 +120,7 @@ fn gets_and_sets_topic_fields() {
         .unwrap();
     assert_eq!(topic.attitude, attitude);
 
-    assert!(topic
-        .set_field("greeting", DynamicValue::Int32(1))
-        .is_err());
+    assert!(topic.set_field("greeting", DynamicValue::Int32(1)).is_err());
 }
 
 #[test]
@@ -142,9 +143,15 @@ fn enumerates_and_round_trips_view_topic() {
     assert_eq!(
         HelloWorldViewTopic::field_names(),
         vec![
+            "display_id".to_string(),
             "greeting".to_string(),
             "attitude".to_string(),
-            "valid".to_string()
+            "valid".to_string(),
+            "mode".to_string(),
+            "arcball".to_string(),
+            "light".to_string(),
+            "color".to_string(),
+            "overlay".to_string()
         ]
     );
     let valid = fields
@@ -157,9 +164,23 @@ fn enumerates_and_round_trips_view_topic() {
     );
 
     let original = HelloWorldViewTopic {
+        display_id: 4,
         greeting: "Hello, world!".to_string(),
         attitude: quaternion(),
         valid: true,
+        mode: 1,
+        arcball: true,
+        light: stations_dds::math::Vector3 {
+            x: 0.6,
+            y: 0.8,
+            z: 0.7,
+        },
+        color: stations_dds::math::Color {
+            r: 1.0,
+            g: 0.5,
+            b: 0.25,
+        },
+        overlay: 0,
     };
     let dynamic = original.to_dynamic_value();
     assert_eq!(

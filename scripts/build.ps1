@@ -89,11 +89,11 @@ finally {
 # Validate the service contracts, scan the application crates for raw DDS
 # topic-API bypasses, and regenerate the readable summary. The scan scope is
 # the crates being built (here the application/tool crates), never the shared
-# libraries, so the Node implementation is out of scope. No application crate
-# uses DDS yet, so the scan currently passes vacuously.
+# libraries, so the Node implementation is out of scope. The application crates
+# create endpoints only through `Node`, so the scan passes.
 $ddsContracts = Join-Path $repoRoot "$toolDir\dds-contracts.exe"
 $scanArgs = @()
-foreach ($src in @('rust\ui\lil-d\src', 'rust\ui\paws\src', 'rust\tool\equirect-to-cubemap\src', 'rust\tool\dds-echo\src', 'rust\service\hello-service\src', 'rust\service\hello-view-service\src', 'rust\service\format-ctl-service\src', 'rust\service\format-view-service\src')) {
+foreach ($src in @('rust\ui\lil-d\src', 'rust\ui\paws\src', 'rust\tool\equirect-to-cubemap\src', 'rust\tool\dds-echo\src', 'rust\service\hello-service\src', 'rust\service\hello-view-service\src', 'rust\service\hello-ctl-service\src', 'rust\service\format-ctl-service\src', 'rust\service\format-view-service\src')) {
     $scanArgs += @('--scan', (Join-Path $repoRoot $src))
 }
 & $ddsContracts '--contracts' (Join-Path $repoRoot 'contracts') @scanArgs '--summary' (Join-Path $repoRoot 'build\topics.md')
@@ -115,6 +115,7 @@ if (-not $Test) {
     Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\dds-echo.exe') -Destination $deployBin -Force
     Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\hello-service.exe') -Destination $deployBin -Force
     Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\hello-view-service.exe') -Destination $deployBin -Force
+    Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\hello-ctl-service.exe') -Destination $deployBin -Force
     Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\format-ctl-service.exe') -Destination $deployBin -Force
     Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\format-view-service.exe') -Destination $deployBin -Force
 
@@ -130,5 +131,5 @@ if (-not $Test) {
     Copy-Item -Path (Join-Path $repoRoot 'contracts\topics.toml') -Destination $deployConfig -Force
     Copy-Item -Path (Join-Path $repoRoot 'contracts\formats.toml') -Destination $deployConfig -Force
     Copy-Item -Path (Join-Path $repoRoot 'contracts\services') -Destination $deployConfig -Recurse -Force
-    Write-Host "Deployed lil-d.exe, paws.exe, hello-service.exe, hello-view-service.exe, format-ctl-service.exe, format-view-service.exe, dds-echo.exe, display_lib.dll, assets, the HarfBuzz runtime, and the DDS config + contracts"
+    Write-Host "Deployed lil-d.exe, paws.exe, hello-service.exe, hello-view-service.exe, hello-ctl-service.exe, format-ctl-service.exe, format-view-service.exe, dds-echo.exe, display_lib.dll, assets, the HarfBuzz runtime, and the DDS config + contracts"
 }

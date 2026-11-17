@@ -23,7 +23,7 @@ extern "C" {
 #endif
 
 /* ABI version. A display application checks this before use. */
-#define DISPLAY_LIB_ABI_VERSION 3u
+#define DISPLAY_LIB_ABI_VERSION 4u
 
 /* Opaque display library handle. */
 typedef struct display_lib display_lib;
@@ -49,6 +49,13 @@ void display_lib_render(display_lib* d, int framebuffer_height,
  * pressed: nonzero on press, zero on release. The library hit-tests the region
  * it was last asked to render and may change the active format. */
 void display_lib_mouse_button(display_lib* d, int x, int y, int button, int pressed);
+
+/* Absolute mouse motion. (x, y) are physical pixels from the window's
+ * top-left. */
+void display_lib_mouse_motion(display_lib* d, int x, int y);
+
+/* Mouse wheel. Positive delta is up/away from the user. */
+void display_lib_mouse_wheel(display_lib* d, int delta);
 
 void display_lib_destroy(display_lib* d);
 

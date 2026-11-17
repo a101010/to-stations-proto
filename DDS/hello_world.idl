@@ -7,8 +7,30 @@ module hello_world {
     math::Quaternion attitude;
   };
   struct HelloWorldViewTopic {
+    unsigned long display_id;
     string greeting;
     math::Quaternion attitude;
     boolean valid;
+    long mode;
+    boolean arcball;
+    math::Vector3 light;
+    math::Color color;
+    long overlay;
+  };
+  struct HelloWorldInputTopic {
+    unsigned long display_id;
+    long action;
+    double x;
+    double y;
+    double z;
+    boolean pressed;
+  };
+  struct HelloWorldCtlTopic {
+    unsigned long display_id;
+    long action;
+    double x;
+    double y;
+    double z;
+    boolean pressed;
   };
 };

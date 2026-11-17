@@ -26,6 +26,13 @@ pub(crate) struct FormatMeta {
     pub(crate) icon_file: &'static str,
 }
 
+/// One format-specific item in the horizontal menu.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct MenuItem {
+    pub(crate) id: String,
+    pub(crate) label: String,
+}
+
 /// What active-format input did.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum FormatInput {
@@ -40,6 +47,9 @@ pub(crate) enum FormatCommand {
     CursorMove { dx: i32, dy: i32 },
     Navigate { dx: i32, dy: i32 },
     Pointer { button: i32, pressed: bool },
+    ToggleArcball,
+    ToggleMenu,
+    CancelMenu,
 }
 
 /// A displayable format.
@@ -65,15 +75,45 @@ pub(crate) trait Format {
         height: i32,
     );
 
-    /// Handle a left-button press inside the format region.
-    fn mouse_button(&mut self, region: (i32, i32, i32, i32), x: i32, y: i32) -> FormatInput {
+    /// Handle a mouse button event.
+    fn mouse_button(
+        &mut self,
+        region: (i32, i32, i32, i32),
+        x: i32,
+        y: i32,
+        button: i32,
+        pressed: bool,
+    ) -> FormatInput {
+        let _ = (region, x, y, button, pressed);
+        FormatInput::Ignored
+    }
+
+    /// Handle an absolute mouse-motion event.
+    fn mouse_motion(&mut self, region: (i32, i32, i32, i32), x: i32, y: i32) -> FormatInput {
         let _ = (region, x, y);
+        FormatInput::Ignored
+    }
+
+    /// Handle a mouse-wheel event.
+    fn mouse_wheel(&mut self, region: (i32, i32, i32, i32), delta: i32) -> FormatInput {
+        let _ = (region, delta);
         FormatInput::Ignored
     }
 
     /// Handle a high-level controller command.
     fn command(&mut self, command: FormatCommand) -> FormatInput {
         let _ = command;
+        FormatInput::Ignored
+    }
+
+    /// The format-specific items shown after `Formats`.
+    fn menu_items(&self) -> Vec<MenuItem> {
+        Vec::new()
+    }
+
+    /// Activate one of this format's menu items.
+    fn menu_action(&mut self, id: &str) -> FormatInput {
+        let _ = id;
         FormatInput::Ignored
     }
 }
@@ -85,6 +125,7 @@ pub(crate) fn registry(
     gl: &glow::Context,
     assets_root: &Path,
     state: crate::view::ViewState,
+    hello_input: Option<crate::view::HelloWorldInput>,
     formats: &FormatList,
 ) -> Result<Vec<Box<dyn Format>>, DisplayError> {
     let names = formats.names();
@@ -95,7 +136,12 @@ pub(crate) fn registry(
         match name.as_str() {
             FORMAT_CHOOSER => slots.push(None),
             "hello-world" => {
-                let format = hello_world::HelloWorld::new(gl, assets_root, state.clone())?;
+                let format = hello_world::HelloWorld::new(
+                    gl,
+                    assets_root,
+                    state.clone(),
+                    hello_input.clone(),
+                )?;
                 catalog.push(meta(name, &format));
                 slots.push(Some(Box::new(format)));
             }

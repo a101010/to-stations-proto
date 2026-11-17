@@ -2058,6 +2058,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
+name = "hello-ctl-service"
+version = "0.0.0"
+dependencies = [
+ "clap",
+ "format-list",
+ "single-instance",
+ "stations-dds",
+]
+
+[[package]]
 name = "hello-service"
 version = "0.0.0"
 dependencies = [
@@ -2071,6 +2081,7 @@ name = "hello-view-service"
 version = "0.0.0"
 dependencies = [
  "clap",
+ "format-list",
  "single-instance",
  "stations-dds",
 ]
