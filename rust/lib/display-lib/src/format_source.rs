@@ -6,8 +6,8 @@
 
 use format_list::{
     FORMAT_COMMAND_CURSOR_MOVE, FORMAT_COMMAND_MENU_CANCEL, FORMAT_COMMAND_MENU_TOGGLE,
-    FORMAT_COMMAND_NAVIGATE, FORMAT_COMMAND_POINTER, FORMAT_COMMAND_SELECT,
-    FORMAT_COMMAND_TOGGLE_ARCBALL,
+    FORMAT_COMMAND_NAVIGATE, FORMAT_COMMAND_OVERLAY_CANCEL, FORMAT_COMMAND_POINTER,
+    FORMAT_COMMAND_SELECT, FORMAT_COMMAND_TOGGLE_ARCBALL,
 };
 use stations_dds::cyclonedds::{DataReader, DataWriter};
 use stations_dds::dds::Node;
@@ -123,6 +123,7 @@ fn to_command(sample: &FormatManagerCommandCtlTopic) -> Option<FormatCommand> {
         FORMAT_COMMAND_TOGGLE_ARCBALL => Some(FormatCommand::ToggleArcball),
         FORMAT_COMMAND_MENU_TOGGLE => Some(FormatCommand::ToggleMenu),
         FORMAT_COMMAND_MENU_CANCEL => Some(FormatCommand::CancelMenu),
+        FORMAT_COMMAND_OVERLAY_CANCEL => Some(FormatCommand::OverlayCancel),
         _ => None,
     }
 }
@@ -196,6 +197,12 @@ mod tests {
             ..sample
         };
         assert_eq!(to_command(&sample), Some(FormatCommand::CancelMenu));
+
+        let sample = FormatManagerCommandCtlTopic {
+            command: FORMAT_COMMAND_OVERLAY_CANCEL,
+            ..sample
+        };
+        assert_eq!(to_command(&sample), Some(FormatCommand::OverlayCancel));
     }
 
     #[test]

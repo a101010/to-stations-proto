@@ -5,8 +5,8 @@ use std::time::{Duration, Instant};
 
 use format_list::{
     FORMAT_COMMAND_CURSOR_MOVE, FORMAT_COMMAND_MENU_CANCEL, FORMAT_COMMAND_MENU_TOGGLE,
-    FORMAT_COMMAND_NAVIGATE, FORMAT_COMMAND_POINTER, FORMAT_COMMAND_TOGGLE_ARCBALL,
-    FORMAT_POINTER_RIGHT,
+    FORMAT_COMMAND_NAVIGATE, FORMAT_COMMAND_OVERLAY_CANCEL, FORMAT_COMMAND_POINTER,
+    FORMAT_COMMAND_TOGGLE_ARCBALL, FORMAT_POINTER_RIGHT,
 };
 use stations_dds::contract::{ServiceContract, TopicRegistry};
 use stations_dds::cyclonedds::DataWriter;
@@ -27,6 +27,7 @@ struct Inputs {
     right_dpad: bool,
     a: bool,
     b: bool,
+    back: bool,
     start: bool,
     r3_checked: bool,
 }
@@ -49,6 +50,7 @@ struct CommandState {
     last_right: bool,
     last_a: bool,
     last_b: bool,
+    last_back: bool,
     last_start: bool,
     last_r3_checked: bool,
 }
@@ -127,6 +129,17 @@ impl CommandState {
         }
         self.last_b = inputs.b;
 
+        if inputs.back && !self.last_back {
+            commands.push(WireCommand {
+                command: FORMAT_COMMAND_OVERLAY_CANCEL,
+                x: 0,
+                y: 0,
+                button: 0,
+                pressed: true,
+            });
+        }
+        self.last_back = inputs.back;
+
         if inputs.start && !self.last_start {
             commands.push(WireCommand {
                 command: FORMAT_COMMAND_MENU_TOGGLE,
@@ -177,6 +190,7 @@ impl CommandSender {
             right_dpad: ui.get_right_down(),
             a: ui.get_a_down(),
             b: ui.get_b_down(),
+            back: ui.get_back_down(),
             start: ui.get_start_down(),
             r3_checked: ui.get_r3_checked(),
         };
@@ -366,6 +380,21 @@ mod tests {
             }]
         );
         assert!(state.update(b, now).is_empty());
+        assert!(state.update(inputs(), now).is_empty());
+
+        let mut back = inputs();
+        back.back = true;
+        assert_eq!(
+            state.update(back, now),
+            vec![WireCommand {
+                command: FORMAT_COMMAND_OVERLAY_CANCEL,
+                x: 0,
+                y: 0,
+                button: 0,
+                pressed: true,
+            }]
+        );
+        assert!(state.update(back, now).is_empty());
         assert!(state.update(inputs(), now).is_empty());
 
         let mut start = inputs();

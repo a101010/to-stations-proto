@@ -9,9 +9,11 @@
 use std::time::{Duration, Instant};
 
 use format_list::{
-    HELLO_ACTION_DRAG, HELLO_ACTION_GRAB, HELLO_ACTION_MODE_TOGGLE, HELLO_ACTION_RELEASE,
-    HELLO_ACTION_ROTATE, HELLO_ACTION_TOGGLE_ARCBALL, HELLO_ACTION_TOGGLE_LUX_COLOR,
-    HELLO_ACTION_TOGGLE_LUX_POS, HELLO_OVERLAY_COLOR, HELLO_OVERLAY_NONE, HELLO_OVERLAY_POS,
+    HELLO_ACTION_COLOR_CANCEL, HELLO_ACTION_COLOR_COMMIT, HELLO_ACTION_COLOR_HUE,
+    HELLO_ACTION_COLOR_SV, HELLO_ACTION_DRAG, HELLO_ACTION_GRAB, HELLO_ACTION_MODE_TOGGLE,
+    HELLO_ACTION_RELEASE, HELLO_ACTION_ROTATE, HELLO_ACTION_TOGGLE_ARCBALL,
+    HELLO_ACTION_TOGGLE_LUX_COLOR, HELLO_ACTION_TOGGLE_LUX_POS, HELLO_OVERLAY_COLOR,
+    HELLO_OVERLAY_NONE, HELLO_OVERLAY_POS,
 };
 use format_list::{HELLO_MODE_AUTO, HELLO_MODE_INSPECT};
 use stations_dds::hello_world::{HelloWorldCtlTopic, HelloWorldTopic, HelloWorldViewTopic};
@@ -32,6 +34,15 @@ struct Drag {
     previous_at: Instant,
 }
 
+/// A snapshot of the color and HSV state before opening Lux Color.
+#[derive(Clone)]
+struct ColorSnapshot {
+    color: Color,
+    hue: f64,
+    saturation: f64,
+    value: f64,
+}
+
 /// Keeps the latest model sample and the per-display view state, and decides
 /// what view sample to publish.
 pub(crate) struct ViewRelay {
@@ -45,6 +56,10 @@ pub(crate) struct ViewRelay {
     velocity: [f64; 3],
     light: Vector3,
     color: Color,
+    hue: f64,
+    saturation: f64,
+    value: f64,
+    pre_color: Option<ColorSnapshot>,
     overlay: i32,
     drag: Option<Drag>,
     last_tick: Instant,
@@ -71,6 +86,10 @@ impl ViewRelay {
                 g: 1.0,
                 b: 1.0,
             },
+            hue: 0.0,
+            saturation: 0.0,
+            value: 1.0,
+            pre_color: None,
             overlay: HELLO_OVERLAY_NONE,
             drag: None,
             last_tick: started,
@@ -88,27 +107,24 @@ impl ViewRelay {
             return;
         }
         match sample.action {
-            HELLO_ACTION_GRAB => {
-                self.enter_inspect();
-                self.drag = Some(Drag {
-                    previous: trackball(sample.x, sample.y),
-                    previous_at: now,
-                });
-                self.velocity = [0.0; 3];
+            HELLO_ACTION_COLOR_HUE if self.overlay == HELLO_OVERLAY_COLOR => {
+                self.set_hsv(sample.x, self.saturation, self.value);
             }
-            HELLO_ACTION_DRAG => self.drag_to(trackball(sample.x, sample.y), now),
-            HELLO_ACTION_RELEASE => {
-                self.drag = None;
+            HELLO_ACTION_COLOR_SV if self.overlay == HELLO_OVERLAY_COLOR => {
+                self.set_hsv(self.hue, sample.x, sample.y);
             }
-            HELLO_ACTION_TOGGLE_ARCBALL => {
-                self.arcball = !self.arcball;
-                if self.arcball {
-                    self.enter_inspect();
-                }
-                self.velocity = [0.0; 3];
-                self.drag = None;
+            HELLO_ACTION_COLOR_COMMIT if self.overlay == HELLO_OVERLAY_COLOR => {
+                self.commit_color();
             }
+            HELLO_ACTION_COLOR_CANCEL if self.overlay == HELLO_OVERLAY_COLOR => {
+                self.cancel_color();
+            }
+            HELLO_ACTION_TOGGLE_LUX_COLOR => self.toggle_color(),
+            HELLO_ACTION_TOGGLE_LUX_POS => self.toggle_pos(),
             HELLO_ACTION_MODE_TOGGLE => {
+                if self.overlay == HELLO_OVERLAY_COLOR {
+                    self.cancel_color();
+                }
                 if self.mode == HELLO_MODE_AUTO {
                     self.enter_inspect();
                 } else {
@@ -118,15 +134,35 @@ impl ViewRelay {
                     self.drag = None;
                 }
             }
-            HELLO_ACTION_ROTATE if self.arcball => {
+            HELLO_ACTION_GRAB if self.overlay != HELLO_OVERLAY_COLOR => {
+                self.enter_inspect();
+                self.drag = Some(Drag {
+                    previous: trackball(sample.x, sample.y),
+                    previous_at: now,
+                });
+                self.velocity = [0.0; 3];
+            }
+            HELLO_ACTION_DRAG if self.overlay != HELLO_OVERLAY_COLOR => {
+                self.drag_to(trackball(sample.x, sample.y), now)
+            }
+            HELLO_ACTION_RELEASE if self.overlay != HELLO_OVERLAY_COLOR => {
+                self.drag = None;
+            }
+            HELLO_ACTION_TOGGLE_ARCBALL if self.overlay != HELLO_OVERLAY_COLOR => {
+                self.arcball = !self.arcball;
+                if self.arcball {
+                    self.enter_inspect();
+                }
+                self.velocity = [0.0; 3];
+                self.drag = None;
+            }
+            HELLO_ACTION_ROTATE if self.arcball && self.overlay != HELLO_OVERLAY_COLOR => {
                 self.mode = HELLO_MODE_INSPECT;
                 let yaw = axis_angle([0.0, 1.0, 0.0], sample.x * STICK_RADIANS);
                 let pitch = axis_angle([1.0, 0.0, 0.0], sample.y * STICK_RADIANS);
                 self.local = mul(&mul(&yaw, &pitch), &self.local);
                 self.velocity = [0.0; 3];
             }
-            HELLO_ACTION_TOGGLE_LUX_COLOR => self.toggle_overlay(HELLO_OVERLAY_COLOR),
-            HELLO_ACTION_TOGGLE_LUX_POS => self.toggle_overlay(HELLO_OVERLAY_POS),
             _ => {}
         }
     }
@@ -168,18 +204,69 @@ impl ViewRelay {
             arcball: self.arcball,
             light: self.light.clone(),
             color: self.color.clone(),
+            hue: self.hue,
+            saturation: self.saturation,
+            value: self.value,
             overlay: self.overlay,
         })
     }
 
-    /// Toggle a placeholder overlay. Placeholder overlays are mutually exclusive
-    /// even though no overlay is drawn yet.
-    fn toggle_overlay(&mut self, overlay: i32) {
-        self.overlay = if self.overlay == overlay {
-            HELLO_OVERLAY_NONE
+    /// Open the Lux Color overlay, snapshotting the committed color first.
+    fn open_color(&mut self) {
+        if self.overlay == HELLO_OVERLAY_COLOR {
+            return;
+        }
+        self.pre_color = Some(ColorSnapshot {
+            color: self.color.clone(),
+            hue: self.hue,
+            saturation: self.saturation,
+            value: self.value,
+        });
+        self.overlay = HELLO_OVERLAY_COLOR;
+    }
+
+    /// Cancel Lux Color and restore the snapshot.
+    fn cancel_color(&mut self) {
+        if let Some(snapshot) = self.pre_color.take() {
+            self.color = snapshot.color;
+            self.hue = snapshot.hue;
+            self.saturation = snapshot.saturation;
+            self.value = snapshot.value;
+        }
+        self.overlay = HELLO_OVERLAY_NONE;
+    }
+
+    /// Commit Lux Color and keep its current color.
+    fn commit_color(&mut self) {
+        self.pre_color = None;
+        self.overlay = HELLO_OVERLAY_NONE;
+    }
+
+    fn toggle_color(&mut self) {
+        if self.overlay == HELLO_OVERLAY_COLOR {
+            self.cancel_color();
         } else {
-            overlay
-        };
+            self.overlay = HELLO_OVERLAY_NONE;
+            self.open_color();
+        }
+    }
+
+    fn toggle_pos(&mut self) {
+        if self.overlay == HELLO_OVERLAY_POS {
+            self.overlay = HELLO_OVERLAY_NONE;
+        } else {
+            if self.overlay == HELLO_OVERLAY_COLOR {
+                self.cancel_color();
+            }
+            self.overlay = HELLO_OVERLAY_POS;
+        }
+    }
+
+    fn set_hsv(&mut self, hue: f64, saturation: f64, value: f64) {
+        self.hue = hue.clamp(0.0, 1.0);
+        self.saturation = saturation.clamp(0.0, 1.0);
+        self.value = value.clamp(0.0, 1.0);
+        self.color = hsv_to_rgb(self.hue, self.saturation, self.value);
     }
 
     /// Enter Inspect from Auto at the model attitude currently on screen.
@@ -241,6 +328,24 @@ impl ViewRelay {
             self.velocity[2] * damping,
         ];
     }
+}
+
+fn hsv_to_rgb(hue: f64, saturation: f64, value: f64) -> Color {
+    let h = (hue.rem_euclid(1.0)) * 6.0;
+    let sector = h.floor() as i32;
+    let f = h - sector as f64;
+    let p = value * (1.0 - saturation);
+    let q = value * (1.0 - saturation * f);
+    let t = value * (1.0 - saturation * (1.0 - f));
+    let (r, g, b) = match sector.rem_euclid(6) {
+        0 => (value, t, p),
+        1 => (q, value, p),
+        2 => (p, value, t),
+        3 => (p, q, value),
+        4 => (t, p, value),
+        _ => (value, p, q),
+    };
+    Color { r, g, b }
 }
 
 fn no_conn(elapsed: Duration) -> String {
@@ -606,6 +711,112 @@ mod tests {
             relay.view(base + Duration::from_millis(9)).unwrap().overlay,
             HELLO_OVERLAY_NONE
         );
+    }
+
+    #[test]
+    fn color_overlay_updates_hsv_and_commits() {
+        let base = Instant::now();
+        let mut relay = ViewRelay::new(base, 0);
+        relay.update(sample("Hello", 0.5), base);
+        relay.control(
+            &control(0, HELLO_ACTION_TOGGLE_LUX_COLOR, 0.0, 0.0),
+            base + Duration::from_millis(1),
+        );
+        relay.control(
+            &control(0, HELLO_ACTION_COLOR_HUE, 0.5, 0.0),
+            base + Duration::from_millis(2),
+        );
+        relay.control(
+            &control(0, HELLO_ACTION_COLOR_SV, 1.0, 1.0),
+            base + Duration::from_millis(3),
+        );
+        let picked = relay.view(base + Duration::from_millis(4)).unwrap();
+        assert_eq!(picked.overlay, HELLO_OVERLAY_COLOR);
+        assert_eq!(picked.hue, 0.5);
+        assert_eq!(picked.saturation, 1.0);
+        assert_eq!(picked.value, 1.0);
+        assert!(picked.color.g > 0.9 && picked.color.b > 0.9 && picked.color.r < 0.1);
+
+        relay.control(
+            &control(0, HELLO_ACTION_COLOR_COMMIT, 0.0, 0.0),
+            base + Duration::from_millis(5),
+        );
+        let committed = relay.view(base + Duration::from_millis(6)).unwrap();
+        assert_eq!(committed.overlay, HELLO_OVERLAY_NONE);
+        assert_eq!(committed.hue, 0.5);
+    }
+
+    #[test]
+    fn color_cancel_restores_the_snapshot() {
+        let base = Instant::now();
+        let mut relay = ViewRelay::new(base, 0);
+        relay.update(sample("Hello", 0.5), base);
+        relay.control(
+            &control(0, HELLO_ACTION_TOGGLE_LUX_COLOR, 0.0, 0.0),
+            base + Duration::from_millis(1),
+        );
+        relay.control(
+            &control(0, HELLO_ACTION_COLOR_HUE, 0.0, 0.0),
+            base + Duration::from_millis(2),
+        );
+        relay.control(
+            &control(0, HELLO_ACTION_COLOR_SV, 1.0, 1.0),
+            base + Duration::from_millis(3),
+        );
+        relay.control(
+            &control(0, HELLO_ACTION_COLOR_CANCEL, 0.0, 0.0),
+            base + Duration::from_millis(4),
+        );
+        let view = relay.view(base + Duration::from_millis(5)).unwrap();
+        assert_eq!(view.overlay, HELLO_OVERLAY_NONE);
+        assert_eq!(view.color.r, 1.0);
+        assert_eq!(view.color.g, 1.0);
+        assert_eq!(view.color.b, 1.0);
+        assert_eq!(view.saturation, 0.0);
+        assert_eq!(view.value, 1.0);
+    }
+
+    #[test]
+    fn lux_pos_and_mode_toggle_cancel_color_first() {
+        let base = Instant::now();
+        let mut relay = ViewRelay::new(base, 0);
+        relay.update(sample("Hello", 0.5), base);
+        relay.control(
+            &control(0, HELLO_ACTION_TOGGLE_LUX_COLOR, 0.0, 0.0),
+            base + Duration::from_millis(1),
+        );
+        relay.control(
+            &control(0, HELLO_ACTION_TOGGLE_LUX_POS, 0.0, 0.0),
+            base + Duration::from_millis(2),
+        );
+        assert_eq!(
+            relay.view(base + Duration::from_millis(3)).unwrap().overlay,
+            HELLO_OVERLAY_POS
+        );
+
+        relay.control(
+            &control(0, HELLO_ACTION_TOGGLE_LUX_COLOR, 0.0, 0.0),
+            base + Duration::from_millis(4),
+        );
+        relay.control(
+            &control(0, HELLO_ACTION_MODE_TOGGLE, 0.0, 0.0),
+            base + Duration::from_millis(5),
+        );
+        let view = relay.view(base + Duration::from_millis(6)).unwrap();
+        assert_eq!(view.overlay, HELLO_OVERLAY_NONE);
+        assert_eq!(view.mode, HELLO_MODE_INSPECT);
+    }
+
+    #[test]
+    fn hsv_to_rgb_handles_primaries() {
+        let red = hsv_to_rgb(0.0, 1.0, 1.0);
+        assert!(red.r > 0.99 && red.g < 0.01 && red.b < 0.01);
+        let green = hsv_to_rgb(1.0 / 3.0, 1.0, 1.0);
+        assert!(green.r < 0.01 && green.g > 0.99 && green.b < 0.01);
+        let blue = hsv_to_rgb(2.0 / 3.0, 1.0, 1.0);
+        assert!(blue.r < 0.01 && blue.g < 0.01 && blue.b > 0.99);
+        let white = hsv_to_rgb(0.4, 0.0, 1.0);
+        assert!(white.r > 0.99 && white.g > 0.99 && white.b > 0.99);
     }
 
     #[test]

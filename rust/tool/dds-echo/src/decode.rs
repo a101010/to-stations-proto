@@ -152,6 +152,9 @@ mod tests {
                 g: 0.5,
                 b: 0.25,
             },
+            hue: 0.1,
+            saturation: 0.5,
+            value: 0.75,
             overlay: 0,
         };
         let cdr = CdrSerializer::serialize(&sample, CdrEncoding::Xcdr1).unwrap();

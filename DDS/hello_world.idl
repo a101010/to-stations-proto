@@ -15,6 +15,9 @@ module hello_world {
     boolean arcball;
     math::Vector3 light;
     math::Color color;
+    double hue;
+    double saturation;
+    double value;
     long overlay;
   };
   struct HelloWorldInputTopic {

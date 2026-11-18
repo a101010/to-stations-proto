@@ -50,6 +50,8 @@ pub(crate) enum FormatCommand {
     ToggleArcball,
     ToggleMenu,
     CancelMenu,
+    OverlayCancel,
+    ReleaseCapture,
 }
 
 /// A displayable format.
@@ -101,9 +103,14 @@ pub(crate) trait Format {
     }
 
     /// Handle a high-level controller command.
-    fn command(&mut self, command: FormatCommand) -> FormatInput {
-        let _ = command;
+    fn command(&mut self, command: FormatCommand, cursor: Option<(i32, i32)>) -> FormatInput {
+        let _ = (command, cursor);
         FormatInput::Ignored
+    }
+
+    /// Whether the format is hiding the display library's virtual cursor.
+    fn cursor_hidden(&self) -> bool {
+        false
     }
 
     /// The format-specific items shown after `Formats`.

@@ -260,6 +260,11 @@ impl FormatMenu {
         self.states.entry(window).or_default().cancel()
     }
 
+    /// Whether the menu is currently open for `window`.
+    pub(crate) fn is_open(&self, window: i32) -> bool {
+        self.states.get(&window).map(|state| state.open).unwrap_or(false)
+    }
+
     /// Close the menu, for example when the chooser becomes active.
     pub(crate) fn close(&mut self, window: i32) {
         let state = self.states.entry(window).or_default();

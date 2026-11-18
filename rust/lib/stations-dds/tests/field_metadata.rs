@@ -151,6 +151,9 @@ fn enumerates_and_round_trips_view_topic() {
             "arcball".to_string(),
             "light".to_string(),
             "color".to_string(),
+            "hue".to_string(),
+            "saturation".to_string(),
+            "value".to_string(),
             "overlay".to_string()
         ]
     );
@@ -180,6 +183,9 @@ fn enumerates_and_round_trips_view_topic() {
             g: 0.5,
             b: 0.25,
         },
+        hue: 0.1,
+        saturation: 0.5,
+        value: 0.75,
         overlay: 0,
     };
     let dynamic = original.to_dynamic_value();

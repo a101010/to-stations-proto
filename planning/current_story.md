@@ -204,7 +204,7 @@ Input:
 - Mouse press anywhere releases controller capture.
 - Controller CursorMove while captured adjusts the focused control rate-based; otherwise it remains a cursor move.
 - D-pad changes focus in the confirmed order.
-- A/right-click uses cursor hit first, then focused Back/Done activation, then focused ring/triangle capture.
+- A/right-click activates a button under the cursor; otherwise activates focused Back/Done; otherwise picks/captures the ring/triangle under the cursor; otherwise captures the focused ring/triangle.
 - R3 follows the overlay rules.
 - B follows menu/capture/cancel layering.
 - Back sends color cancel.

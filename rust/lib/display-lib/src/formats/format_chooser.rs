@@ -309,7 +309,7 @@ impl Format for FormatChooser {
         }
     }
 
-    fn command(&mut self, command: FormatCommand) -> FormatInput {
+    fn command(&mut self, command: FormatCommand, _cursor: Option<(i32, i32)>) -> FormatInput {
         match command {
             FormatCommand::Navigate { dx, dy } => {
                 self.selected = wrap_index(self.selected, self.entries.len(), dx, dy);
@@ -325,7 +325,9 @@ impl Format for FormatChooser {
             | FormatCommand::CursorMove { .. }
             | FormatCommand::ToggleArcball
             | FormatCommand::ToggleMenu
-            | FormatCommand::CancelMenu => FormatInput::Consumed,
+            | FormatCommand::CancelMenu
+            | FormatCommand::OverlayCancel
+            | FormatCommand::ReleaseCapture => FormatInput::Consumed,
         }
     }
 }

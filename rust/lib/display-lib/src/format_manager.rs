@@ -116,7 +116,14 @@ impl FormatManager {
                 menu.render(gl, framebuffer_height, self.region, 0, &items);
             }
         }
-        self.render_cursor(gl, framebuffer_height);
+        let hide_cursor = name
+            .as_deref()
+            .and_then(|name| self.formats.iter().find(|format| format.name() == name))
+            .map(|format| format.cursor_hidden())
+            .unwrap_or(false);
+        if !hide_cursor {
+            self.render_cursor(gl, framebuffer_height);
+        }
     }
 
     /// Handle a high-level controller command for `window`.
@@ -135,6 +142,9 @@ impl FormatManager {
         ) {
             if active.as_deref() == Some(FORMAT_CHOOSER) {
                 return None;
+            }
+            if matches!(command, FormatCommand::ToggleMenu) {
+                self.release_capture();
             }
             if let Some(menu) = &mut self.menu {
                 match command {
@@ -161,7 +171,8 @@ impl FormatManager {
                 match menu.command(0, self.region, &items, cursor, command) {
                     MenuAction::Consumed => return None,
                     MenuAction::Select(format) => {
-                        return Some(FormatAction::Select { window: 0, format })
+                        self.cancel_overlay();
+                        return Some(FormatAction::Select { window: 0, format });
                     }
                     MenuAction::Item(id) => return self.menu_action(&id),
                     MenuAction::Ignored => {}
@@ -179,15 +190,44 @@ impl FormatManager {
             .formats
             .iter_mut()
             .find(|format| format.name() == name.as_str())?;
-        match format.command(command) {
+        match format.command(command, self.cursor) {
             FormatInput::Ignored if cursor_move => {
                 if let FormatCommand::CursorMove { dx, dy } = command {
                     self.move_cursor(dx, dy);
                 }
                 None
             }
-            FormatInput::Select(format) => Some(FormatAction::Select { window: 0, format }),
+            FormatInput::Select(format) => {
+                self.cancel_overlay();
+                Some(FormatAction::Select { window: 0, format })
+            }
             FormatInput::Ignored | FormatInput::Consumed => None,
+        }
+    }
+
+    fn release_capture(&mut self) {
+        let name = self.active_format_name(0);
+        if let Some(name) = name {
+            if let Some(format) = self
+                .formats
+                .iter_mut()
+                .find(|format| format.name() == name.as_str())
+            {
+                format.command(FormatCommand::ReleaseCapture, self.cursor);
+            }
+        }
+    }
+
+    fn cancel_overlay(&mut self) {
+        let name = self.active_format_name(0);
+        if let Some(name) = name {
+            if let Some(format) = self
+                .formats
+                .iter_mut()
+                .find(|format| format.name() == name.as_str())
+            {
+                format.command(FormatCommand::OverlayCancel, self.cursor);
+            }
         }
     }
 
@@ -259,6 +299,17 @@ impl FormatManager {
         ui::clear_rect(gl, framebuffer_height, vertical, CURSOR_COLOR);
     }
 
+    fn active_cursor_hidden(&self) -> bool {
+        let Some(name) = self.active_format_name(0) else {
+            return false;
+        };
+        self.formats
+            .iter()
+            .find(|format| format.name() == name)
+            .map(|format| format.cursor_hidden())
+            .unwrap_or(false)
+    }
+
     /// Handle a mouse button event in window coordinates.
     pub(crate) fn mouse_button(
         &mut self,
@@ -280,15 +331,24 @@ impl FormatManager {
         let items = self.menu_items_for(active.as_deref());
 
         if pressed && button == 0 && active.as_deref() != Some(FORMAT_CHOOSER) {
-            if let Some(menu) = &mut self.menu {
-                match menu.click(0, self.region, &items, x, y) {
-                    MenuAction::Consumed => return None,
-                    MenuAction::Select(format) => {
-                        return Some(FormatAction::Select { window: 0, format })
-                    }
-                    MenuAction::Item(id) => return self.menu_action(&id),
-                    MenuAction::Ignored => {}
+            let (action, opened) = if let Some(menu) = &mut self.menu {
+                let was_open = menu.is_open(0);
+                let action = menu.click(0, self.region, &items, x, y);
+                (action, !was_open && menu.is_open(0))
+            } else {
+                (MenuAction::Ignored, false)
+            };
+            if opened {
+                self.release_capture();
+            }
+            match action {
+                MenuAction::Consumed => return None,
+                MenuAction::Select(format) => {
+                    self.cancel_overlay();
+                    return Some(FormatAction::Select { window: 0, format });
                 }
+                MenuAction::Item(id) => return self.menu_action(&id),
+                MenuAction::Ignored => {}
             }
         }
 
@@ -306,7 +366,9 @@ impl FormatManager {
     /// Handle an absolute mouse-motion event.
     pub(crate) fn mouse_motion(&mut self, x: i32, y: i32) {
         self.pointer.position = Some((x, y));
-        self.cursor_source = CursorSource::Mouse;
+        if !self.active_cursor_hidden() {
+            self.cursor_source = CursorSource::Mouse;
+        }
         let Some(name) = self.active_format_name(0) else {
             return;
         };
@@ -428,7 +490,7 @@ mod tests {
             self.input.clone()
         }
 
-        fn command(&mut self, _command: FormatCommand) -> FormatInput {
+        fn command(&mut self, _command: FormatCommand, _cursor: Option<(i32, i32)>) -> FormatInput {
             self.input.clone()
         }
     }

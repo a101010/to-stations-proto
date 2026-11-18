@@ -24,6 +24,9 @@ pub(crate) struct View {
     pub arcball: bool,
     pub light: [f32; 3],
     pub color: [f32; 3],
+    pub hue: f32,
+    pub saturation: f32,
+    pub value: f32,
     pub overlay: i32,
 }
 
@@ -37,6 +40,9 @@ impl Default for View {
             arcball: false,
             light: [0.6, 0.8, 0.7],
             color: [1.0, 1.0, 1.0],
+            hue: 0.0,
+            saturation: 0.0,
+            value: 1.0,
             overlay: HELLO_OVERLAY_NONE,
         }
     }
@@ -94,6 +100,9 @@ impl ViewSource {
                         sample.color.g as f32,
                         sample.color.b as f32,
                     ],
+                    hue: sample.hue as f32,
+                    saturation: sample.saturation as f32,
+                    value: sample.value as f32,
                     overlay: sample.overlay,
                 });
             }
@@ -187,6 +196,9 @@ mod tests {
                 g: 0.5,
                 b: 0.6,
             },
+            hue: 0.25,
+            saturation: 0.5,
+            value: 0.75,
             overlay: HELLO_OVERLAY_NONE,
         }
     }
@@ -207,6 +219,8 @@ mod tests {
         assert_eq!(view.mode, HELLO_MODE_AUTO);
         assert!(!view.arcball);
         assert_eq!(view.color, [1.0, 1.0, 1.0]);
+        assert_eq!(view.saturation, 0.0);
+        assert_eq!(view.value, 1.0);
         assert_eq!(view.overlay, HELLO_OVERLAY_NONE);
     }
 
@@ -230,6 +244,9 @@ mod tests {
                 sample.color.g as f32,
                 sample.color.b as f32,
             ],
+            hue: sample.hue as f32,
+            saturation: sample.saturation as f32,
+            value: sample.value as f32,
             overlay: sample.overlay,
         });
         let view = state.borrow().clone().unwrap();
@@ -237,5 +254,8 @@ mod tests {
         assert!(view.arcball);
         assert_eq!(view.light, [0.1, 0.2, 0.3]);
         assert_eq!(view.color, [0.4, 0.5, 0.6]);
+        assert_eq!(view.hue, 0.25);
+        assert_eq!(view.saturation, 0.5);
+        assert_eq!(view.value, 0.75);
     }
 }

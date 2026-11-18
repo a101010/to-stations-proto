@@ -24,6 +24,8 @@ pub const FORMAT_COMMAND_TOGGLE_ARCBALL: i32 = 13;
 pub const FORMAT_COMMAND_MENU_TOGGLE: i32 = 14;
 /// `FormatManagerInputTopic.command`: cancel/close the three-dot menu.
 pub const FORMAT_COMMAND_MENU_CANCEL: i32 = 15;
+/// `FormatManagerInputTopic.command`: cancel the active overlay.
+pub const FORMAT_COMMAND_OVERLAY_CANCEL: i32 = 16;
 /// `FormatManagerInputTopic.button`: right mouse button.
 pub const FORMAT_POINTER_RIGHT: i32 = 1;
 
@@ -37,6 +39,7 @@ pub fn is_control_command(command: i32) -> bool {
             | FORMAT_COMMAND_TOGGLE_ARCBALL
             | FORMAT_COMMAND_MENU_TOGGLE
             | FORMAT_COMMAND_MENU_CANCEL
+            | FORMAT_COMMAND_OVERLAY_CANCEL
     )
 }
 
@@ -61,6 +64,14 @@ pub const HELLO_ACTION_ROTATE: i32 = 5;
 pub const HELLO_ACTION_TOGGLE_LUX_COLOR: i32 = 6;
 /// `HelloWorldInputTopic.action`: toggle the Lux Pos placeholder overlay.
 pub const HELLO_ACTION_TOGGLE_LUX_POS: i32 = 7;
+/// `HelloWorldInputTopic.action`: set the color overlay's normalized hue.
+pub const HELLO_ACTION_COLOR_HUE: i32 = 8;
+/// `HelloWorldInputTopic.action`: set the color overlay's saturation/value.
+pub const HELLO_ACTION_COLOR_SV: i32 = 9;
+/// `HelloWorldInputTopic.action`: commit the color overlay.
+pub const HELLO_ACTION_COLOR_COMMIT: i32 = 10;
+/// `HelloWorldInputTopic.action`: cancel and restore the color overlay.
+pub const HELLO_ACTION_COLOR_CANCEL: i32 = 11;
 
 /// The hello-world menu item that toggles Auto/Inspect.
 pub const HELLO_MENU_MODE: &str = "mode";
@@ -310,6 +321,7 @@ name = "a"
         assert!(is_control_command(FORMAT_COMMAND_TOGGLE_ARCBALL));
         assert!(is_control_command(FORMAT_COMMAND_MENU_TOGGLE));
         assert!(is_control_command(FORMAT_COMMAND_MENU_CANCEL));
+        assert!(is_control_command(FORMAT_COMMAND_OVERLAY_CANCEL));
         assert!(!is_control_command(99));
     }
 }

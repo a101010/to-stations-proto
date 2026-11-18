@@ -8,6 +8,7 @@
 //! Every function that calls OpenGL assumes a glow context is current on the
 //! calling thread (see `architecture.md`, "OpenGL context and safety").
 
+mod color_picker;
 mod earth;
 mod format_manager;
 mod format_menu;
