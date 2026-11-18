@@ -44,6 +44,7 @@ struct WireCommand {
 #[derive(Default)]
 struct CommandState {
     last_cursor: Option<Instant>,
+    last_right_active: bool,
     last_up: bool,
     last_down: bool,
     last_left: bool,
@@ -60,10 +61,11 @@ impl CommandState {
         let mut commands = Vec::new();
 
         let magnitude = inputs.right.0.abs().max(inputs.right.1.abs());
+        let active = magnitude > 0.1;
         let cursor_due = self
             .last_cursor
             .is_none_or(|last| now.duration_since(last) >= CURSOR_INTERVAL);
-        if magnitude > 0.1 && cursor_due {
+        if active && cursor_due {
             let dx = (inputs.right.0 * CURSOR_SPEED).round() as i32;
             let dy = (inputs.right.1 * CURSOR_SPEED).round() as i32;
             if dx != 0 || dy != 0 {
@@ -76,7 +78,16 @@ impl CommandState {
                 });
                 self.last_cursor = Some(now);
             }
+        } else if !active && self.last_right_active {
+            commands.push(WireCommand {
+                command: FORMAT_COMMAND_CURSOR_MOVE,
+                x: 0,
+                y: 0,
+                button: 0,
+                pressed: false,
+            });
         }
+        self.last_right_active = active;
 
         for (pressed, was, dx, dy) in [
             (inputs.up, self.last_up, 0, -1),
@@ -320,6 +331,31 @@ mod tests {
                 pressed: false,
             }]
         );
+    }
+
+    #[test]
+    fn right_stick_rest_sends_one_zero_move() {
+        let mut state = CommandState::default();
+        let now = Instant::now();
+        let mut held = inputs();
+        held.right = (1.0, 0.0);
+        assert_eq!(state.update(held, now).len(), 1);
+        assert!(state.update(held, now).is_empty());
+
+        let rest = state.update(inputs(), now + Duration::from_millis(10));
+        assert_eq!(
+            rest,
+            vec![WireCommand {
+                command: FORMAT_COMMAND_CURSOR_MOVE,
+                x: 0,
+                y: 0,
+                button: 0,
+                pressed: false,
+            }]
+        );
+        assert!(state
+            .update(inputs(), now + Duration::from_millis(20))
+            .is_empty());
     }
 
     #[test]

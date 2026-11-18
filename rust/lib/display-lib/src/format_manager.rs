@@ -299,17 +299,6 @@ impl FormatManager {
         ui::clear_rect(gl, framebuffer_height, vertical, CURSOR_COLOR);
     }
 
-    fn active_cursor_hidden(&self) -> bool {
-        let Some(name) = self.active_format_name(0) else {
-            return false;
-        };
-        self.formats
-            .iter()
-            .find(|format| format.name() == name)
-            .map(|format| format.cursor_hidden())
-            .unwrap_or(false)
-    }
-
     /// Handle a mouse button event in window coordinates.
     pub(crate) fn mouse_button(
         &mut self,
@@ -366,9 +355,7 @@ impl FormatManager {
     /// Handle an absolute mouse-motion event.
     pub(crate) fn mouse_motion(&mut self, x: i32, y: i32) {
         self.pointer.position = Some((x, y));
-        if !self.active_cursor_hidden() {
-            self.cursor_source = CursorSource::Mouse;
-        }
+        self.cursor_source = CursorSource::Mouse;
         let Some(name) = self.active_format_name(0) else {
             return;
         };

@@ -20,6 +20,8 @@ const BUTTON_WIDTH: f32 = 120.0;
 const BUTTON_HEIGHT: f32 = 44.0;
 const BUTTON_GAP: f32 = 12.0;
 const BUTTON_MARGIN: f32 = 12.0;
+const PREVIEW_HEIGHT: f32 = 36.0;
+const WHEEL_MAX_DELTA: f32 = 20.0;
 
 const BACKGROUND: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
 const BUTTON_BG: [f32; 4] = [0.10, 0.10, 0.13, 1.0];
@@ -28,6 +30,7 @@ const TEXT_COLOR: [f32; 4] = [0.95, 0.95, 0.95, 1.0];
 const FOCUS_COLOR: [f32; 4] = [0.75, 1.0, 0.80, 1.0];
 const MARKER_DARK: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
 const MARKER_LIGHT: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
+const PREVIEW_BORDER: [f32; 4] = [0.65, 0.65, 0.70, 1.0];
 
 /// A focusable picker control.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -54,6 +57,47 @@ impl PickerControl {
     }
 }
 
+/// Latches the hue wheel's direction until the stick returns to rest.
+#[derive(Debug, Default)]
+pub(crate) struct WheelLatch {
+    direction: Option<i32>,
+}
+
+impl WheelLatch {
+    pub(crate) fn clear(&mut self) {
+        self.direction = None;
+    }
+
+    /// The direction and speed for one stick movement. A zero movement resets
+    /// the latch and returns `None`.
+    pub(crate) fn motion(&mut self, dx: i32, dy: i32) -> Option<(i32, f32)> {
+        if dx == 0 && dy == 0 {
+            self.clear();
+            return None;
+        }
+        let direction = *self.direction.get_or_insert_with(|| {
+            let projection = dx - dy;
+            if projection > 0 {
+                1
+            } else if projection < 0 {
+                -1
+            } else if dx.abs() >= dy.abs() {
+                if dx >= 0 {
+                    1
+                } else {
+                    -1
+                }
+            } else if dy >= 0 {
+                1
+            } else {
+                -1
+            }
+        });
+        let magnitude = ((dx * dx + dy * dy) as f32).sqrt().min(WHEEL_MAX_DELTA);
+        Some((direction, magnitude))
+    }
+}
+
 /// What is under a picker point.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PickerHit {
@@ -72,6 +116,7 @@ pub(crate) struct PickerLayout {
     pub(crate) outer: f32,
     pub(crate) inner: f32,
     pub(crate) triangle: [(f32, f32); 3],
+    pub(crate) preview: Rect,
     pub(crate) back: Rect,
     pub(crate) done: Rect,
     scale: f32,
@@ -88,6 +133,7 @@ impl PickerLayout {
                 outer: 0.0,
                 inner: 0.0,
                 triangle: [(x as f32, y as f32); 3],
+                preview: zero,
                 back: zero,
                 done: zero,
                 scale: 1.0,
@@ -123,7 +169,10 @@ impl PickerLayout {
         let button_x = (center.0.round() as i32 - total / 2)
             .max(x)
             .min((x + width - total).max(x));
-        let button_y = (center.1 + outer + margin as f32).round() as i32;
+        let preview_y = (center.1 + outer + margin as f32).round() as i32;
+        let preview_h = (PREVIEW_HEIGHT * scale).round() as i32;
+        let preview = Rect::new(button_x, preview_y, total, preview_h);
+        let button_y = preview_y + preview_h + margin;
         let back = Rect::new(button_x, button_y, button_w, button_h);
         let done = Rect::new(button_x + button_w + gap, button_y, button_w, button_h);
 
@@ -133,6 +182,7 @@ impl PickerLayout {
             outer,
             inner,
             triangle,
+            preview,
             back,
             done,
             scale,
@@ -185,6 +235,22 @@ impl PickerLayout {
         let w0 = v - s;
         let w1 = s;
         let w2 = 1.0 - v;
+        (
+            self.triangle[0].0 * w0 + self.triangle[1].0 * w1 + self.triangle[2].0 * w2,
+            self.triangle[0].1 * w0 + self.triangle[1].1 * w1 + self.triangle[2].1 * w2,
+        )
+    }
+
+    /// Project a point back inside the triangle.
+    pub(crate) fn clamp_triangle(&self, x: f32, y: f32) -> (f32, f32) {
+        let weights = barycentric((x, y), self.triangle);
+        let total = weights.iter().map(|weight| weight.max(0.0)).sum::<f32>();
+        if total <= 1e-6 {
+            return self.sv_marker(0.0, 0.0);
+        }
+        let w0 = weights[0].max(0.0) / total;
+        let w1 = weights[1].max(0.0) / total;
+        let w2 = weights[2].max(0.0) / total;
         (
             self.triangle[0].0 * w0 + self.triangle[1].0 * w1 + self.triangle[2].0 * w2,
             self.triangle[0].1 * w0 + self.triangle[1].1 * w1 + self.triangle[2].1 * w2,
@@ -290,6 +356,8 @@ impl ColorPicker {
         hue: f32,
         saturation: f32,
         value: f32,
+        output_color: [f32; 3],
+        triangle_marker: Option<(f32, f32)>,
         focus: PickerControl,
         captured: bool,
     ) {
@@ -356,7 +424,7 @@ impl ColorPicker {
             hy,
             captured && focus == PickerControl::HueRing,
         );
-        let (sx, sy) = layout.sv_marker(saturation, value);
+        let (sx, sy) = triangle_marker.unwrap_or_else(|| layout.sv_marker(saturation, value));
         draw_marker(
             gl,
             framebuffer_height,
@@ -364,6 +432,15 @@ impl ColorPicker {
             sy,
             captured && focus == PickerControl::Triangle,
         );
+
+        // Output color preview.
+        ui::clear_rect(
+            gl,
+            framebuffer_height,
+            layout.preview,
+            [output_color[0], output_color[1], output_color[2], 1.0],
+        );
+        draw_outline(gl, framebuffer_height, layout.preview, PREVIEW_BORDER);
 
         // Buttons.
         let button_font = (18.0 * layout.scale).max(10.0);
@@ -545,10 +622,57 @@ mod tests {
     }
 
     #[test]
+    fn wheel_latch_keeps_direction_through_a_circle() {
+        let mut wheel = WheelLatch::default();
+        assert_eq!(wheel.motion(20, 0), Some((1, 20.0)));
+        assert_eq!(wheel.motion(0, -20), Some((1, 20.0)));
+        assert_eq!(wheel.motion(-20, 0), Some((1, 20.0)));
+        assert_eq!(wheel.motion(0, 20), Some((1, 20.0)));
+    }
+
+    #[test]
+    fn wheel_latch_changes_direction_only_after_rest() {
+        let mut wheel = WheelLatch::default();
+        assert_eq!(wheel.motion(20, 0), Some((1, 20.0)));
+        assert_eq!(wheel.motion(0, 0), None);
+        assert_eq!(wheel.motion(-20, 0), Some((-1, 20.0)));
+    }
+
+    #[test]
+    fn wheel_latch_speed_is_capped() {
+        let mut wheel = WheelLatch::default();
+        assert_eq!(wheel.motion(20, 20), Some((1, 20.0)));
+    }
+
+    #[test]
     fn back_is_left_of_done() {
         let layout = layout();
         assert!(layout.back.x + layout.back.w <= layout.done.x);
         assert_eq!(layout.back.y, layout.done.y);
+    }
+
+    #[test]
+    fn preview_sits_between_the_ring_and_buttons() {
+        let layout = layout();
+        assert!(layout.preview.y as f32 > layout.center.1 + layout.outer);
+        assert!(layout.preview.y + layout.preview.h < layout.back.y);
+        assert_eq!(layout.preview.x, layout.back.x);
+        assert_eq!(
+            layout.preview.w,
+            layout.done.x + layout.done.w - layout.back.x
+        );
+    }
+
+    #[test]
+    fn triangle_points_are_clamped_inside() {
+        let layout = layout();
+        let inside = layout.sv_marker(0.3, 0.7);
+        let clamped = layout.clamp_triangle(inside.0, inside.1);
+        assert!((clamped.0 - inside.0).abs() < 1e-3);
+        assert!((clamped.1 - inside.1).abs() < 1e-3);
+
+        let outside = layout.clamp_triangle(layout.center.0, layout.center.1 + layout.outer);
+        assert!(point_in_triangle(outside, layout.triangle));
     }
 
     #[test]

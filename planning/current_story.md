@@ -20,41 +20,55 @@ Activate the existing `Lux Color` menu item as the color-picker overlay: an opaq
 ## Decisions
 
 1. **The Lux Color overlay is opaque black.** The Earth and greeting are hidden while it is open.
-2. **The picker is a hue ring around a saturation/value triangle**, with a visible hue marker and SV marker.
-3. **Back is immediately left of Done** in a row below the picker.
-4. **The menu item reads `World` while Lux Color is open.** Selecting it cancels and restores the pre-overlay color.
-5. **Done commits the current color and closes the overlay.**
-6. **Back and B cancel and restore the pre-overlay color.** Back also cancels when captured.
-7. **Opening the overlay snapshots RGB and HSV.** Canceling restores the snapshot; committing keeps the current color.
-8. **No persistence.** The color, HSV, overlay state, focus, and capture reset on restart.
-9. **The view topic carries `hue`, `saturation`, and `value`** in addition to RGB `color`.
-10. **Mouse picking is left-button only.** Left press/drag on the ring sets hue; left press/drag on the triangle sets saturation/value. Local right-click remains a no-op.
-11. **D-pad focus order is `HueRing -> Triangle -> Back -> Done`**, reverse in the opposite direction.
-12. **Cursor+A picks a control or button.** Picking ring/triangle focuses and captures that control. Picking Back/Done activates the button.
-13. **A when focus is Back/Done activates that button.** A when focus is ring/triangle and the cursor is not over another control/button enters capture of the focused control.
-14. **The virtual cursor is captured while adjusting a ring/triangle.** It is hidden during capture and restored when capture ends.
-15. **The right stick is rate-based while captured.** It adjusts hue on the ring or saturation/value in the triangle; it does not move the cursor.
-16. **B releases capture first when the menu is closed.** With capture released, the next B cancels/restores the overlay. B with the menu open closes the menu first.
-17. **Start releases capture and opens the menu.** Start with the menu open closes it. Opening the menu with the mouse three-dot button also releases capture.
-18. **R3 keeps its existing arcball behavior outside the overlay.** Inside Lux Color it does not toggle arcball.
-19. **R3 changes ring/triangle focus only when the cursor is over the ring or triangle.** While captured, R3 switches ring/triangle focus and keeps capture.
-20. **D-pad focus from ring/triangle to Back/Done releases capture.**
-21. **D-pad focus between ring and triangle while captured keeps capture.**
-22. **A local mouse press releases controller capture first**, then handles the mouse action.
-23. **Selecting another menu item cancels/restores the color overlay first**, then performs the selected action.
-24. **Selecting Lux Pos while Lux Color is open cancels/restores Lux Color first**, then toggles the Lux Pos placeholder.
-25. **The Lux Pos item remains a label-cycling placeholder** in this story.
-26. **Pointer input remains mouse-only.** Touch is deferred.
-27. **C++ remains out of scope.**
+2. **The picker is a hue ring around a saturation/value triangle**, with visible hue and SV markers.
+3. **The final output color is shown in a rectangle between the picker and the buttons.**
+4. **Back is immediately left of Done** in a row below the preview rectangle.
+5. **The menu item reads `World` while Lux Color is open.** Selecting it cancels and restores the pre-overlay color.
+6. **Done commits the current color and closes the overlay.**
+7. **Back and B cancel and restore the pre-overlay color.**
+8. **Opening the overlay snapshots RGB and HSV.** Canceling restores the snapshot; committing keeps the current color.
+9. **No persistence.** Color, HSV, overlay state, focus, and capture reset on restart.
+10. **The view topic carries `hue`, `saturation`, and `value`** in addition to RGB `color`.
+11. **Mouse picking is left-button only.** Left press/drag on the ring sets hue; left press/drag on the triangle sets saturation/value. Local right-click remains a no-op.
+12. **Lux Color opens with the wheel focused and controller-captured.** The virtual cursor is hidden until the local mouse moves.
+13. **Local mouse motion releases capture immediately.** A local mouse press also releases it.
+14. **D-pad focus order is `HueRing -> Triangle -> Back -> Done`**, reverse in the opposite direction, and retains capture.
+15. **While focus is Back/Done, the right stick does nothing and capture remains active.**
+16. **Cursor+A activates a button under the cursor; otherwise it activates focused Back/Done; otherwise it picks/captures the ring or triangle under the cursor; otherwise it captures the focused ring/triangle.**
+17. **A on focused Back/Done activates that button.**
+18. **A on focused ring/triangle with no picker under the cursor enters capture.**
+19. **The virtual cursor is captured while adjusting a ring/triangle.** It is hidden during capture and restored when capture ends.
+20. **The right stick is rate-based while captured.** It adjusts hue on the ring or moves the triangle cursor in screen x-y; it does not move the virtual cursor.
+21. **Wheel direction is latched until stick rest.** The first non-rest deflection chooses clockwise/counterclockwise from `dx - dy`; a circular stick motion keeps speed and direction; a zero `CursorMove` from Paws resets the latch.
+22. **Triangle movement is screen x-y.** The local triangle cursor moves in x-y, is clamped inside the triangle, and saturation/value are derived from its barycentric position.
+23. **B releases capture first when the menu is closed.** With capture released, the next B cancels/restores the overlay. B with the menu open closes the menu first.
+24. **Start releases capture and opens the menu.** Start with the menu open closes it. Opening the menu with the mouse three-dot button also releases capture.
+25. **R3 keeps arcball behavior outside the overlay.** Inside Lux Color it does not toggle arcball.
+26. **R3 changes ring/triangle focus only when the cursor is over the ring or triangle.** While captured, R3 switches ring/triangle focus and keeps capture.
+27. **A local mouse press releases controller capture first**, then handles the mouse action.
+28. **Selecting another menu item cancels/restores the color overlay first**, then performs the selected action.
+29. **Selecting Lux Pos while Lux Color is open cancels/restores Lux Color first**, then toggles the Lux Pos placeholder.
+30. **The Lux Pos item remains a label-cycling placeholder** in this story.
+31. **Pointer input remains mouse-only.** Touch is deferred.
+32. **C++ remains out of scope.**
 
 ## Capture transitions
 
 ### Enter capture
 
-1. Cursor+A over the hue ring.
-2. Cursor+A over the SV triangle.
-3. A while focus is hue ring/triangle and the cursor is not over another control/button.
-4. Mouse drag is separate and does not enter controller capture.
+1. Opening Lux Color: wheel focus, captured immediately.
+2. Cursor+A over the hue ring.
+3. Cursor+A over the SV triangle.
+4. A while focus is hue ring/triangle and the cursor is not over another control/button.
+5. Mouse drag is separate and does not enter controller capture.
+
+### Capture state rules
+
+1. D-pad focus changes retain capture.
+2. While focus is Back/Done, the right stick does nothing and capture remains active.
+3. Right stick on the wheel uses latched direction: chosen on first movement after rest, maintained through circular motion, reset only by a zero `CursorMove`.
+4. Right stick on the triangle moves the local triangle cursor in screen x-y.
+5. R3 while captured switches ring/triangle focus and retains capture.
 
 ### Exit capture
 
@@ -67,12 +81,10 @@ Activate the existing `Lux Color` menu item as the color-picker overlay: an opaq
 7. Done: commit and close overlay.
 8. World menu item: cancel/restore and close overlay.
 9. Formats/Inspect/Auto/Lux Pos selected: cancel/restore first, then perform that action.
-10. D-pad focus moves from ring/triangle to Back/Done: capture releases automatically.
-11. D-pad focus moves between ring/triangle while captured: capture remains.
-12. R3 while captured: switch ring/triangle focus; capture remains.
-13. Local mouse press anywhere in the overlay: release controller capture first.
-14. Overlay closes or changes to none/Lux Pos: reset focus to HueRing and clear capture.
-15. Window focus loss/controller disconnect: deferred; capture stays until an explicit action.
+10. Local mouse motion anywhere in the overlay: release controller capture first.
+11. Local mouse press anywhere in the overlay: release controller capture first.
+12. Overlay closes or changes to none/Lux Pos: reset focus to HueRing and clear capture.
+13. Window focus loss/controller disconnect: deferred; capture stays until an explicit action.
 
 ## Scope
 
@@ -80,10 +92,13 @@ Activate the existing `Lux Color` menu item as the color-picker overlay: an opaq
 
 - Real Lux Color overlay rendering.
 - Hue ring, SV triangle, hue/SV markers, focus highlight.
+- Output color preview rectangle between the picker and buttons.
 - Back and Done buttons with Back left of Done.
 - HSV state in the view service and view topic.
 - Mouse picking and dragging on ring/triangle.
-- Controller focus, capture, rate-based adjustment, and R3 behavior.
+- Controller focus, initial wheel capture, capture retained by D-pad, and R3 behavior.
+- Latched wheel direction with Paws stick-rest signal.
+- Triangle cursor movement in screen x-y.
 - Start/B/Back/World/Done behavior.
 - Cancel/restore and commit semantics.
 - Paws Back command.
@@ -158,6 +173,7 @@ Add `rust/lib/display-lib/src/color_picker.rs`.
   - center,
   - outer and inner ring radii,
   - triangle vertices,
+  - output preview rectangle,
   - Back and Done rectangles.
 - `PickerHit`:
   - HueRing,
@@ -176,7 +192,8 @@ Add `rust/lib/display-lib/src/color_picker.rs`.
   - hue ring shader/geometry,
   - SV triangle shader/geometry,
   - hue marker,
-  - SV marker,
+  - SV marker (or the local triangle cursor while adjusting),
+  - output color preview,
   - focus highlight,
   - Back and Done labels.
 - Tests for hit testing, hue mapping, barycentric mapping, and marker positions.
@@ -186,9 +203,10 @@ Add `rust/lib/display-lib/src/color_picker.rs`.
 Add local overlay UI state:
 
 - focus: HueRing, Triangle, Back, Done,
-- captured: bool,
+- captured: bool, initially active on the wheel when Lux Color opens,
 - mouse picking: none, ring, triangle,
-- last virtual cursor position before capture if needed.
+- local triangle cursor position for controller x-y movement,
+- latched wheel direction reset by a zero CursorMove.
 
 Render:
 
@@ -199,11 +217,14 @@ Render:
 
 Input:
 
+- Mouse motion or press anywhere releases controller capture.
 - Mouse left press/drag on ring/triangle picks.
 - Mouse left click on Back/Done activates.
-- Mouse press anywhere releases controller capture.
-- Controller CursorMove while captured adjusts the focused control rate-based; otherwise it remains a cursor move.
-- D-pad changes focus in the confirmed order.
+- Controller CursorMove while captured adjusts the focused control; otherwise it remains a cursor move.
+- Wheel movement uses latched direction and magnitude; triangle movement uses screen x-y.
+- Zero CursorMove resets the wheel direction latch.
+- D-pad changes focus in the confirmed order and retains capture.
+- Right stick does nothing on focused Back/Done.
 - A/right-click activates a button under the cursor; otherwise activates focused Back/Done; otherwise picks/captures the ring/triangle under the cursor; otherwise captures the focused ring/triangle.
 - R3 follows the overlay rules.
 - B follows menu/capture/cancel layering.
@@ -228,6 +249,7 @@ Input:
 
 - Add a Back press-edge command.
 - Send `FORMAT_COMMAND_OVERLAY_CANCEL` on Back.
+- Send one zero `CursorMove` when the right stick returns to rest.
 - Keep Start, B, A/right-click, D-pad, and R3 behavior.
 - No new Paws buttons.
 
@@ -248,10 +270,15 @@ Automated:
 - Hue angle, ring hit testing, and hue marker position.
 - SV barycentric mapping, triangle hit testing, and marker position.
 - Back/Done hit testing.
-- Focus cycle order.
+- Output preview placement.
+- Triangle x-y movement and clamping.
+- Focus cycle order and retained capture.
+- Initial wheel capture and mouse-motion release.
+- Wheel direction latch, circular motion, and rest reset.
 - Capture entry/exit transition table.
 - R3 focus behavior.
 - Mouse ring/triangle/Back/Done handling.
+- Paws zero-move rest edge.
 - View-service open/cancel/commit/World/Lux-Pos/mode transitions.
 - Menu labels for Lux Color/World and Lux Pos placeholder.
 - Paws Back command edge.
@@ -259,16 +286,18 @@ Automated:
 
 Manual, using a temporary `LOCALAPPDATA`:
 
-1. Open Lux Color from the menu; verify the opaque black overlay, ring, triangle, Back, and Done.
-2. Verify Back is immediately left of Done.
+1. Open Lux Color from the menu; verify the opaque black overlay, ring, triangle, preview rectangle, Back, and Done.
+2. Verify the preview is between the picker and buttons, and Back is immediately left of Done.
 3. Mouse-drag the hue ring; verify the hue marker and current color state.
 4. Mouse-drag the SV triangle; verify saturation/value.
 5. Mouse Back restores the previous color.
 6. Reopen, mouse Done commits the picked color.
-7. Controller D-pad focus cycles Ring -> Triangle -> Back -> Done.
-8. Cursor+A on ring/triangle captures; right stick adjusts rate-based; B releases capture.
-9. A on focused Back/Done activates.
-10. R3 outside the overlay toggles arcball; inside the overlay it follows the ring/triangle focus rules.
+7. Open Lux Color with the controller and verify the wheel is captured immediately; move the mouse and verify capture releases.
+8. Controller D-pad focus cycles Ring -> Triangle -> Back -> Done without releasing capture.
+9. Right stick on the wheel: any direction starts motion, circular motion keeps speed/direction, and returning to rest then deflecting opposite reverses it.
+10. Right stick on the triangle moves its cursor freely in x-y.
+11. B releases capture; A on focused Back/Done activates.
+12. R3 outside the overlay toggles arcball; inside the overlay it follows the ring/triangle focus rules.
 11. Start releases capture and opens the menu; Start closes it.
 12. World cancels/restores; Lux Pos, Formats, and Inspect/Auto cancel Lux Color first.
 13. Display 1 is unaffected.
@@ -277,9 +306,11 @@ Manual, using a temporary `LOCALAPPDATA`:
 
 ## Acceptance
 
-- Lux Color renders as an opaque picker with ring, triangle, Back, and Done.
-- Back is left of Done.
+- Lux Color renders as an opaque picker with ring, triangle, output preview, Back, and Done.
+- The preview is between the picker and buttons; Back is left of Done.
 - Mouse and controller can pick hue and saturation/value.
+- The wheel is initially captured; mouse motion releases capture; D-pad retains it.
+- Wheel direction latches until stick rest; triangle cursor moves in x-y.
 - Controller capture, B release, R3 focus, D-pad order, and Start menu release work as specified.
 - Done commits; Back/B/World cancel and restore.
 - Other menu items cancel the overlay first.

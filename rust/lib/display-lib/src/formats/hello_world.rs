@@ -17,7 +17,7 @@ use format_list::{
     HELLO_OVERLAY_NONE, HELLO_OVERLAY_POS,
 };
 
-use crate::color_picker::{ColorPicker, PickerControl, PickerHit, PickerLayout};
+use crate::color_picker::{ColorPicker, PickerControl, PickerHit, PickerLayout, WheelLatch};
 use crate::earth::Earth;
 use crate::formats::{FormatCommand, FormatInput, MenuItem};
 use crate::text::{TextRenderer, FONT_FILE};
@@ -41,6 +41,8 @@ const MAX_TEXT: &str = "Bonjour le monde!";
 const STICK_FRACTION: f64 = 0.5;
 /// Rate at which the right stick moves the color picker selection.
 const STICK_COLOR_RATE: f64 = 0.5;
+/// Fraction of the supplied right-stick delta used for triangle x-y movement.
+const TRIANGLE_STICK_STEP: f32 = 0.5;
 
 /// The hello-world format.
 pub(crate) struct HelloWorld {
@@ -56,6 +58,8 @@ pub(crate) struct HelloWorld {
     picker_focus: PickerControl,
     picker_captured: bool,
     mouse_picking: Option<PickerHit>,
+    triangle_cursor: Option<(f32, f32)>,
+    wheel: WheelLatch,
     last_overlay: i32,
 }
 
@@ -82,6 +86,8 @@ impl HelloWorld {
             picker_focus: PickerControl::HueRing,
             picker_captured: false,
             mouse_picking: None,
+            triangle_cursor: None,
+            wheel: WheelLatch::default(),
             last_overlay: HELLO_OVERLAY_NONE,
         })
     }
@@ -118,28 +124,42 @@ impl HelloWorld {
 
     fn sync_overlay(&mut self, overlay: i32) {
         if overlay != self.last_overlay {
+            let opening = overlay == HELLO_OVERLAY_COLOR;
             self.picker_focus = PickerControl::HueRing;
-            self.picker_captured = false;
+            self.picker_captured = opening;
             self.mouse_picking = None;
+            self.triangle_cursor = None;
+            self.wheel.clear();
             self.last_overlay = overlay;
         }
     }
 
-    fn send_commit(&mut self) {
-        self.send(HELLO_ACTION_COLOR_COMMIT, 0.0, 0.0, true);
+    fn clear_capture(&mut self) {
         self.picker_captured = false;
         self.mouse_picking = None;
+        self.triangle_cursor = None;
+        self.wheel.clear();
+    }
+
+    fn send_commit(&mut self) {
+        self.send(HELLO_ACTION_COLOR_COMMIT, 0.0, 0.0, true);
+        self.clear_capture();
     }
 
     fn send_cancel(&mut self) {
         self.send(HELLO_ACTION_COLOR_CANCEL, 0.0, 0.0, true);
-        self.picker_captured = false;
-        self.mouse_picking = None;
+        self.clear_capture();
     }
 
     fn focus_picker(&mut self, focus: PickerControl, capture: bool) {
         self.picker_focus = focus;
         self.picker_captured = capture;
+        self.triangle_cursor = if capture && focus == PickerControl::Triangle {
+            let (_, saturation, value) = self.color_state();
+            Some(PickerLayout::new(self.region).sv_marker(saturation, value))
+        } else {
+            None
+        };
     }
 
     fn picker_hit_at(&self, cursor: Option<(i32, i32)>) -> PickerHit {
@@ -155,7 +175,33 @@ impl HelloWorld {
         } else {
             PickerControl::HueRing
         };
-        self.picker_focus = next;
+        self.focus_picker(next, self.picker_captured);
+    }
+
+    fn move_triangle_cursor(&mut self, dx: i32, dy: i32) {
+        let layout = PickerLayout::new(self.region);
+        let (_, saturation, value) = self.color_state();
+        let current = self
+            .triangle_cursor
+            .unwrap_or_else(|| layout.sv_marker(saturation, value));
+        let point = layout.clamp_triangle(
+            current.0 + dx as f32 * TRIANGLE_STICK_STEP,
+            current.1 + dy as f32 * TRIANGLE_STICK_STEP,
+        );
+        self.triangle_cursor = Some(point);
+        let (saturation, value) = layout.sv_at(point.0, point.1);
+        self.send(HELLO_ACTION_COLOR_SV, saturation as f64, value as f64, true);
+    }
+
+    fn move_hue_wheel(&mut self, dx: i32, dy: i32) {
+        let Some((direction, magnitude)) = self.wheel.motion(dx, dy) else {
+            return;
+        };
+        let half = self.region.2.min(self.region.3).max(1) as f64 * 0.5;
+        let (hue, _, _) = self.color_state();
+        let hue = (hue as f64 + direction as f64 * magnitude as f64 / half * STICK_COLOR_RATE)
+            .rem_euclid(1.0);
+        self.send(HELLO_ACTION_COLOR_HUE, hue, 0.0, true);
     }
 }
 
@@ -228,6 +274,12 @@ impl crate::formats::Format for HelloWorld {
         };
 
         if overlay == HELLO_OVERLAY_COLOR {
+            let triangle_marker =
+                if self.picker_captured && self.picker_focus == PickerControl::Triangle {
+                    self.triangle_cursor
+                } else {
+                    None
+                };
             self.picker.render(
                 gl,
                 framebuffer_height,
@@ -235,6 +287,8 @@ impl crate::formats::Format for HelloWorld {
                 hue,
                 saturation,
                 value,
+                color,
+                triangle_marker,
                 self.picker_focus,
                 self.picker_captured,
             );
@@ -267,7 +321,7 @@ impl crate::formats::Format for HelloWorld {
         let overlay = self.overlay();
         self.sync_overlay(overlay);
         if overlay == HELLO_OVERLAY_COLOR && pressed {
-            self.picker_captured = false;
+            self.clear_capture();
         }
         if button != 0 {
             return FormatInput::Ignored;
@@ -327,6 +381,9 @@ impl crate::formats::Format for HelloWorld {
         let overlay = self.overlay();
         self.sync_overlay(overlay);
         if overlay == HELLO_OVERLAY_COLOR {
+            if self.picker_captured {
+                self.clear_capture();
+            }
             let Some(picking) = self.mouse_picking else {
                 return FormatInput::Ignored;
             };
@@ -376,10 +433,8 @@ impl crate::formats::Format for HelloWorld {
             match command {
                 FormatCommand::Navigate { dx, dy } => {
                     let direction = if dx < 0 || dy < 0 { -1 } else { 1 };
-                    self.picker_focus = self.picker_focus.next(direction);
-                    if matches!(self.picker_focus, PickerControl::Back | PickerControl::Done) {
-                        self.picker_captured = false;
-                    }
+                    let focus = self.picker_focus.next(direction);
+                    self.focus_picker(focus, self.picker_captured);
                     FormatInput::Consumed
                 }
                 FormatCommand::Pointer {
@@ -401,7 +456,10 @@ impl crate::formats::Format for HelloWorld {
                                     PickerHit::Triangle => {
                                         self.focus_picker(PickerControl::Triangle, true)
                                     }
-                                    _ => self.picker_captured = true,
+                                    _ => {
+                                        let focus = self.picker_focus;
+                                        self.focus_picker(focus, true);
+                                    }
                                 },
                             }
                         }
@@ -426,32 +484,20 @@ impl crate::formats::Format for HelloWorld {
                     FormatInput::Consumed
                 }
                 FormatCommand::CursorMove { dx, dy } if self.picker_captured => {
-                    let (hue, saturation, value) = self.color_state();
-                    let half = self.region.2.min(self.region.3).max(1) as f64 * 0.5;
-                    match self.picker_focus {
-                        PickerControl::HueRing => {
-                            let hue =
-                                (hue as f64 + dx as f64 / half * STICK_COLOR_RATE).rem_euclid(1.0);
-                            self.send(HELLO_ACTION_COLOR_HUE, hue, 0.0, true);
-                        }
-                        PickerControl::Triangle => {
-                            let saturation = (saturation as f64
-                                + dx as f64 / half * STICK_COLOR_RATE)
-                                .clamp(0.0, 1.0);
-                            let value = (value as f64 - dy as f64 / half * STICK_COLOR_RATE)
-                                .clamp(0.0, 1.0);
-                            let saturation = saturation.min(value);
-                            self.send(HELLO_ACTION_COLOR_SV, saturation, value, true);
-                        }
-                        PickerControl::Back | PickerControl::Done => {
-                            self.picker_captured = false;
+                    if dx == 0 && dy == 0 {
+                        self.wheel.clear();
+                    } else {
+                        match self.picker_focus {
+                            PickerControl::HueRing => self.move_hue_wheel(dx, dy),
+                            PickerControl::Triangle => self.move_triangle_cursor(dx, dy),
+                            PickerControl::Back | PickerControl::Done => {}
                         }
                     }
                     FormatInput::Consumed
                 }
                 FormatCommand::CancelMenu => {
                     if self.picker_captured {
-                        self.picker_captured = false;
+                        self.clear_capture();
                     } else {
                         self.send_cancel();
                     }
@@ -462,7 +508,7 @@ impl crate::formats::Format for HelloWorld {
                     FormatInput::Consumed
                 }
                 FormatCommand::ReleaseCapture => {
-                    self.picker_captured = false;
+                    self.clear_capture();
                     FormatInput::Consumed
                 }
                 FormatCommand::CursorMove { .. } => FormatInput::Ignored,
@@ -512,10 +558,13 @@ impl crate::formats::Format for HelloWorld {
                 self.send(HELLO_ACTION_MODE_TOGGLE, 0.0, 0.0, true);
             }
             HELLO_MENU_LUX_COLOR => {
+                let opening = overlay != HELLO_OVERLAY_COLOR;
                 self.send(HELLO_ACTION_TOGGLE_LUX_COLOR, 0.0, 0.0, true);
                 self.picker_focus = PickerControl::HueRing;
-                self.picker_captured = false;
+                self.picker_captured = opening;
                 self.mouse_picking = None;
+                self.triangle_cursor = None;
+                self.wheel.clear();
             }
             HELLO_MENU_LUX_POS => {
                 if overlay == HELLO_OVERLAY_COLOR {
