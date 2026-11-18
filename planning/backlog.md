@@ -11,19 +11,12 @@ Conventions:
 
 ## Stories
 
-### sdl3-imgui
-Install SDL3 3.4.20 static to the external prefix and copy glad 2.0.8 and Dear ImGui 1.93.0 sources into `cpp/third_party/`. Add CMake static library targets for glad and ImGui and verify the stack with a temporary SDL3 window that renders one Dear ImGui frame over an OpenGL 3.3 clear color. The temporary window is a build artifact and is not committed.
-- **Depends on:** none.
-- **Minimal test:** a temporary window project under `build/` opens an SDL3 window, renders one Dear ImGui frame, and closes cleanly; `scripts/build.ps1` builds the committed glad and ImGui libraries without smoke-test code.
-- **Status:** in progress.
-- **Records:** SDL3, glad, and Dear ImGui in `docs/versions.md`.
-
 ### cpp-dds
-Generate C++ types from `DDS/` with the installed `idlc -l cxx` backend into `build/gen/cpp`; add the C++ `stations-dds` library with participant/node creation, typed readers/writers, contract loading and validation, deploy-relative `CYCLONEDDS_URI` setup, and CycloneDDS-CXX linking. Add a header-only TOML parser under `cpp/third_party/` for contracts and state.
+Generate C++ types from `DDS/` with the installed `idlc -l cxx` backend into `build/gen/cpp`; add the C++ `stations-dds` library with participant/node creation, typed readers/writers, contract loading and validation, deploy-relative `CYCLONEDDS_URI` setup, and CycloneDDS-CXX linking. Use toml++ 3.4.0 for contracts and add committed CTest tests for contract validation, generated type names, and a DDS round trip.
 - **Depends on:** none.
-- **Minimal test:** a C++ publisher and subscriber exchange `HelloWorldTopic`; an unregistered topic fails validation; generated types match the shared registry.
-- **Status:** todo.
-- **Records:** TOML parser in `docs/versions.md`.
+- **Minimal test:** a C++ publisher and subscriber exchange `HelloWorldTopic`; contract validation rejects an unregistered topic, type mismatch, and unknown QoS; generated type names match the shared registry.
+- **Status:** in progress.
+- **Records:** toml++ in `docs/versions.md`.
 
 ### cpp-support
 Add shared C++ support libraries for named-mutex single-instance guards, window placement state under `%LOCALAPPDATA%\to-stations`, and deploy-relative asset/config lookup. Use the same guard names and state paths as the Rust applications.
@@ -33,7 +26,7 @@ Add shared C++ support libraries for named-mutex single-instance guards, window 
 
 ### cpp-display-abi
 Implement the C++ display library DLL against ABI v4 with the default format. Cover version, create/destroy, identity, render, mouse button/motion/wheel, error reporting, and glad loaded through the ABI's GL loader.
-- **Depends on:** sdl3-imgui.
+- **Depends on:** none.
 - **Minimal test:** Rust `lil-d` loads the C++ `display_lib.dll`, passes ABI v4, and renders the C++ default format.
 - **Status:** todo.
 
@@ -46,7 +39,7 @@ Add the C++ display manager: format registry from `contracts/formats.toml`, defa
 
 ### cpp-lil-d
 Create the C++ `lil-d` using SDL3 and Dear ImGui: OpenGL 3.3 window, console and power toggle, display id, display-library loading, full mouse event forwarding, native-cursor hiding over the format, single-instance guard, window placement, and deploy under `build/deploy/cpp/bin` with the SDL3, HarfBuzz, and CycloneDDS runtime DLLs. Create `launch-cpp.ps1`, initially for C++ `lil-d`.
-- **Depends on:** sdl3-imgui; cpp-display-abi; cpp-display-manager; cpp-support.
+- **Depends on:** cpp-display-abi; cpp-display-manager; cpp-support.
 - **Minimal test:** C++ `lil-d` shows the default/chooser formats, forwards mouse input, hides the native cursor over the format, restores window state, and runs from the relocated deploy tree.
 - **Status:** todo.
 
@@ -88,7 +81,7 @@ Add the C++ Lux Pos overlay with the frozen globe, live lighting, spotlight can,
 
 ### cpp-paws
 Create the C++ `paws` using SDL3, Dear ImGui, and SDL gamepad input: the virtual Xbox controller, real controller selection, per-display persistence, R3 checkbox, Start/B/Back/A/D-pad/right-stick behavior, instance guard, window placement, and the same DDS commands as Rust `paws`. Add it to the C++ deploy and `launch-cpp.ps1`. Finish the pure C++ two-display configuration.
-- **Depends on:** cpp-lil-d; cpp-format-services; cpp-hello-service; cpp-hello-view-ctl; cpp-display-hello; cpp-lux-color; cpp-lux-pos; cpp-support; cpp-dds; sdl3-imgui.
+- **Depends on:** cpp-lil-d; cpp-format-services; cpp-hello-service; cpp-hello-view-ctl; cpp-display-hello; cpp-lux-color; cpp-lux-pos; cpp-support; cpp-dds.
 - **Minimal test:** `launch-cpp.ps1` with two displays and a temporary `LOCALAPPDATA` runs the pure C++ configuration; hello-world, menu, arcball, Lux Color, Lux Pos, C++ `paws`, persistence, and display isolation work; the Rust configuration still runs.
 - **Status:** todo.
 

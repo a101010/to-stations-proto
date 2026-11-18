@@ -1,227 +1,260 @@
-# Current story: sdl3-imgui
+# Current story: cpp-dds
 
 This file is the detailed, living plan for the one active story. It is rewritten for each story. The backlog in `backlog.md` holds all work and the per-story status.
 
 ## Story
 
-Install SDL3 3.4.20 static to the external prefix and copy glad 2.0.8 and Dear ImGui 1.93.0 sources into `cpp/third_party/`. Add CMake static library targets for glad and ImGui and verify the stack with a temporary SDL3 window that renders one Dear ImGui frame over an OpenGL 3.3 clear color. The temporary window is a build artifact and is not committed.
+Generate C++ types from `DDS/` with the installed `idlc -l cxx` backend into `build/gen/cpp`; add the C++ `stations-dds` library with participant/node creation, typed readers/writers, contract loading and validation, deploy-relative `CYCLONEDDS_URI` setup, and CycloneDDS-CXX linking. Use toml++ 3.4.0 for contracts and add committed CTest tests for contract validation, generated type names, and a DDS round trip.
 
 - **Depends on:** none.
-- **Minimal test:** a temporary window project under `build/` opens an SDL3 window, renders one Dear ImGui frame, and closes cleanly; `scripts/build.ps1` builds the committed glad and ImGui libraries without smoke-test code.
+- **Minimal test:** a C++ publisher and subscriber exchange `HelloWorldTopic`; contract validation rejects an unregistered topic, type mismatch, and unknown QoS; generated type names match the shared registry.
 
 ## Context
 
-- `cmake-skeleton` is complete. `cpp/` has the Visual Studio 18 2026 generator, C++20, `REPO_ROOT`, `EXT_PATH_PREFIX`, and the `build/deploy/cpp` install prefix.
-- The C++ project has no executable yet; `cpp-lil-d` adds the first real C++ application.
-- SDL3, glad, and Dear ImGui are not installed or present in the repository.
-- CMake 4.4.3 and Visual Studio Build Tools 2026 are installed.
-- The README already has a short C++ project section; the broad README rewrite remains `readme-cleanup`.
-- The C++ display apps and GUIs use SDL3 + glad + Dear ImGui. C++ `paws` will use SDL gamepad input later.
+- `sdl3-imgui` is complete: SDL3, glad, Dear ImGui, CMake targets, and C++ build integration exist.
+- `cpp/` currently builds third-party libraries only.
+- CycloneDDS 11.0.1 and CycloneDDS-CXX 11.0.1 are installed under the external prefix.
+- The Rust `stations-dds` library already defines the contract and typed-endpoint behavior to mirror.
+- The shared IDL files are `DDS/math.idl`, `DDS/format_manager.idl`, and `DDS/hello_world.idl`.
+- `contracts/topics.toml` and `contracts/services/*.toml` define the registry and service contracts.
+- No C++ services or display library components are part of this story.
 
 ## Decisions
 
-1. **Pin SDL3 3.4.20.** Install a static build under `C:\Libraries\sdl3`; source stays at `C:\Libraries\src\sdl3`.
-2. **Use static SDL3.** Avoid an SDL3 runtime DLL in the C++ deploy.
-3. **Copy glad 2.0.8 generated sources into the repository.** Generate a C loader for `gl:core=3.3` and commit the generated source and license.
-4. **Copy Dear ImGui 1.93.0 sources into the repository.** Include the core sources, SDL3 and OpenGL3 backends, and license; exclude the demo.
-5. **Commit library targets only.** Add static CMake targets `glad` and `imgui`; do not commit a window executable.
-6. **Use ImGui's embedded OpenGL3 loader for ImGui.** glad remains the loader for application and display-library GL calls.
-7. **Verify the window with a temporary project under `build/`.** Do not commit the window source or add smoke-test code to `scripts/build.ps1`.
-8. **No C++ deployment.** The C++ deploy and runtime DLLs arrive with `cpp-lil-d` and later stories.
-9. **No README smoke-test details.** Add only the SDL3 setup needed to build the C++ project.
-10. **No Rust behavior changes.** Rust build, tests, contracts, and deploy output remain unchanged.
+1. **Use the official `idlcxx_generate` CMake helper.** It wraps `idlc -l <cycloneddsidlcxx>` and produces generated `.hpp`/`.cpp` targets.
+2. **Generate all three IDL modules.** `hello_world.hpp` includes `math.hpp` and `format_manager.hpp`, so all three must be generated.
+3. **Use toml++ 3.4.0 as a single-header TOML parser.** Copy the header and license under `cpp/third_party/tomlplusplus/`.
+4. **Use exceptions for C++ errors.** Contract and DDS failures use clear exception messages; tests assert the failure categories.
+5. **Keep generated types separate from the wrapper.** `hello_world_types` carries generated sources/includes; `stations-dds` provides the contract-aware Node and endpoint templates.
+6. **Real tests are committed.** The C++ tests under `cpp/libs/stations-dds/tests/` are normal tests, not temporary smoke tests, and run through CTest.
+7. **No smoke-test generation in `build.ps1`.** `-Test` runs committed CTest tests only.
+8. **Set `CYCLONEDDS_URI` explicitly before participant creation.** The Node accepts the config path and sets the process environment from it.
+9. **Use a high test domain.** The round-trip test uses domain 42 to avoid the running fleet.
+10. **No deployment yet.** C++ runtime DLL deployment and launch scripts remain later stories.
 
 ## Scope
 
 **In scope**
 
-- Install SDL3 3.4.20 static to the external prefix.
-- Add `cpp/third_party/glad/` sources and license.
-- Add `cpp/third_party/imgui/` sources and license.
-- Add `cpp/third_party/CMakeLists.txt` with `glad` and `imgui` static targets.
-- Update `cpp/CMakeLists.txt` for OpenGL, SDL3, and `third_party`.
-- Update `scripts/build.ps1` to pass the SDL3 prefix.
-- Add SDL3 setup to `README.md`.
-- Record SDL3, glad, and Dear ImGui in `docs/versions.md`.
-- Update `planning/architecture.md` for static SDL3 and third-party sources.
-- Verify with a temporary SDL3/ImGui window under `build/`.
+- Add `cpp/third_party/tomlplusplus/` with toml++ 3.4.0 and its license.
+- Add a `tomlplusplus` interface target.
+- Add `cpp/libs/stations-dds/` with contract parsing, validation, Node, typed reader/writer templates, and QoS mapping.
+- Generate C++ IDL types into `build/gen/cpp`.
+- Add committed C++ tests and CTest registration.
+- Update `scripts/build.ps1` for external DDS paths and CTest.
+- Update `README.md`, `docs/versions.md`, and `planning/architecture.md`.
+- Update planning bookkeeping.
 
 **Out of scope**
 
-- A committed SDL3/ImGui executable or smoke target.
-- C++ display library, `lil-d`, services, `paws`, or tools.
-- C++ deployment or launch scripts.
-- CycloneDDS-CXX, IDL generation, TOML parsing, or image decoding.
-- Broad README cleanup.
+- C++ services, display library, `lil-d`, `paws`, or tools.
+- C++ deployment, runtime DLL copying, or launch scripts.
+- C++ `dds-echo` or `dds-contracts`.
+- Changes to IDL, contracts, or Rust code.
+- Temporary smoke projects or generated test programs in `build.ps1`.
 
-## SDL3 setup
+## C++ IDL generation
 
-Document and run:
+In `cpp/libs/stations-dds/CMakeLists.txt`:
 
-```powershell
-git clone --branch release-3.4.20 --depth 1 https://github.com/libsdl-org/SDL.git C:\Libraries\src\sdl3
-cmake -S C:\Libraries\src\sdl3 -B C:\Libraries\src\sdl3\build `
-  -G "Visual Studio 18 2026" -A x64 `
-  -DCMAKE_INSTALL_PREFIX=C:/Libraries/sdl3 `
-  -DSDL_SHARED=OFF -DSDL_STATIC=ON `
-  -DSDL_TEST_LIBRARY=OFF -DSDL_TESTS=OFF
-cmake --build C:\Libraries\src\sdl3\build --config Release --parallel
-cmake --install C:\Libraries\src\sdl3\build --config Release
+- `find_package(CycloneDDS REQUIRED)`
+- `find_package(CycloneDDS-CXX REQUIRED)`
+- `include("${CycloneDDS-CXX_DIR}/idlcxx/Generate.cmake")`
+
+Call:
+
+```cmake
+idlcxx_generate(
+    TARGET hello_world_types
+    FILES
+        ${REPO_ROOT}/DDS/math.idl
+        ${REPO_ROOT}/DDS/format_manager.idl
+        ${REPO_ROOT}/DDS/hello_world.idl
+    BASE_DIR ${REPO_ROOT}/DDS
+    OUTPUT_DIR ${REPO_ROOT}/build/gen/cpp
+    INCLUDES ${REPO_ROOT}/DDS
+    WARNINGS no-implicit-extensibility
+)
 ```
 
-The install contains the SDL3 headers, `SDL3-static.lib`, and the CMake package under `cmake/SDL3`.
+Generated artifacts:
 
-## Third-party sources
+- `build/gen/cpp/math.hpp/.cpp`
+- `build/gen/cpp/format_manager.hpp/.cpp`
+- `build/gen/cpp/hello_world.hpp/.cpp`
 
-### glad
+`hello_world_types` is the generated-type target. Future C++ apps link it alongside `stations-dds`.
 
-Generate a glad 2.0.8 C loader for OpenGL 3.3 core into `cpp/third_party/glad/`:
+## `stations-dds` library
 
-- `include/glad/gl.h`
-- `include/KHR/khrplatform.h`
-- `src/gl.c`
-- license/readme files
+Proposed layout:
 
-The committed CMake target `glad` is a static library with a public include directory.
+```text
+cpp/libs/stations-dds/
+  CMakeLists.txt
+  include/stations_dds/contract.hpp
+  include/stations_dds/dds.hpp
+  src/contract.cpp
+  src/dds.cpp
+  tests/main.cpp
+```
 
-### Dear ImGui
+### Contract API
 
-Copy the Dear ImGui 1.93.0 source into `cpp/third_party/imgui/`:
+Mirror the Rust contract model:
 
-- `imgui.cpp`, `imgui_draw.cpp`, `imgui_tables.cpp`, `imgui_widgets.cpp`
-- `imgui.h`, `imgui_internal.h`, `imconfig.h`
-- `imstb_rectpack.h`, `imstb_textedit.h`, `imstb_truetype.h`
-- `backends/imgui_impl_sdl3.cpp`, `backends/imgui_impl_sdl3.h`
-- `backends/imgui_impl_opengl3.cpp`, `backends/imgui_impl_opengl3.h`
-- `backends/imgui_impl_opengl3_loader.h`
-- `LICENSE.txt`
+- `TopicDef`
+- `TopicRegistry`
+- `ServiceContract`
+- `ServiceMeta`
+- `TopicRef`
+- `known_types()`
 
-The committed CMake target `imgui` is a static library with public include directories for the core and backend headers. It links `SDL3::SDL3-static` and `OpenGL::GL`; it does not link `glad`, because ImGui uses its embedded OpenGL3 loader.
+Behavior:
+
+- load registry and service contracts from TOML
+- validate unique topic names
+- validate known IDL types
+- validate known QoS names
+- reject unknown topic references
+- verify `service.name` matches the contract file stem
+- render a service contract for future `--topics` use
+
+Use toml++ privately in `contract.cpp`.
+
+### DDS API
+
+`Node` owns:
+
+- `dds::domain::DomainParticipant`
+- `dds::pub::Publisher`
+- `dds::sub::Subscriber`
+- validated `TopicRegistry`
+
+Constructor:
+
+- accepts domain id, registry, and explicit `cyclonedds-config.xml` path
+- validates the registry
+- sets `CYCLONEDDS_URI` to `file://` plus the absolute config path before creating the participant
+
+Endpoint templates:
+
+- `writer<T>(topic)` checks registration and `dds::topic::topic_type_name<T>::value()`
+- `reader<T>(topic)` performs the same checks
+- apply the contract QoS:
+  - `default`
+  - `reliable`
+  - `best_effort`
+  - `transient_local`
+- create the topic and typed endpoint
+
+Error messages distinguish:
+
+- unregistered topic
+- type mismatch
+- unknown QoS
+- contract parse/validation failure
 
 ## CMake
 
 `cpp/CMakeLists.txt`:
 
-- `find_package(OpenGL REQUIRED)`
-- `find_package(SDL3 CONFIG REQUIRED COMPONENTS SDL3-static)`
-- `add_subdirectory(third_party)`
+- `enable_testing()`
+- `add_subdirectory(libs/stations-dds)`
 
 `cpp/third_party/CMakeLists.txt`:
 
-- define the `glad` static target
-- define the `imgui` static target
-- link `SDL3::SDL3-static` and `OpenGL::GL`
-- keep the targets available for later C++ applications
+- add a `tomlplusplus` interface target with the toml++ include directory
 
-No executable is added.
+`cpp/libs/stations-dds/CMakeLists.txt`:
+
+- find CycloneDDS and CycloneDDS-CXX
+- include the IDLCXX generator helper
+- generate `hello_world_types`
+- build `stations-dds`
+- expose public wrapper includes
+- link `CycloneDDS-CXX::ddscxx` publicly
+- link `tomlplusplus` privately
+- build and register `stations-dds-tests`
 
 ## Build script
 
 `scripts/build.ps1`:
 
-- Add `C:/Libraries/sdl3` to the CMake `CMAKE_PREFIX_PATH`.
-- Fail with a clear message if the SDL3 CMake package is missing.
-- Keep the existing C++ configure/build commands.
-- Do not generate smoke files, run a window test, or add CTest smoke logic.
+- Add `C:\Libraries\cyclonedds\bin` and `C:\Libraries\cyclonedds-cxx\bin` to the process `PATH`.
+- Add `sdl3`, `cyclonedds`, and `cyclonedds-cxx` to `CMAKE_PREFIX_PATH`.
+- Fail early with clear messages if the SDL3, CycloneDDS, or CycloneDDS-CXX CMake packages are missing.
+- Under `-Test`, run committed CTest tests from `build/cpp`.
+- Do not generate temporary smoke projects or add smoke-test source.
 
-The normal build compiles `glad` and `imgui`. `-Test` continues to run the Rust tests.
+## Tests
+
+Commit `stations-dds-tests` covering:
+
+- valid registry parsing
+- duplicate topic rejection
+- unknown topic rejection
+- unknown IDL type rejection
+- unknown QoS rejection
+- service-name/file-stem mismatch
+- generated type names:
+  - `hello_world::HelloWorldTopic`
+  - `hello_world::HelloWorldViewTopic`
+  - `hello_world::HelloWorldInputTopic`
+  - `hello_world::HelloWorldCtlTopic`
+  - format-manager topic types
+- real DDS round trip on domain 42:
+  - create reader and writer for `HelloWorldTopic`
+  - wait for publication match
+  - write a greeting and attitude
+  - take and validate the sample
+  - use `DDS/cyclonedds-config.xml`
+
+The test gets the repository root through a test-only compile definition. The build script supplies the DDS DLL directories on `PATH` for CTest.
 
 ## Documentation
 
 `docs/versions.md`:
 
-- SDL3 3.4.20 at `C:\Libraries\sdl3` with source at `C:\Libraries\src\sdl3`.
-- glad 2.0.8 generated GL 3.3 core loader at `cpp/third_party/glad`.
-- Dear ImGui 1.93.0 at `cpp/third_party/imgui`.
+- toml++ `3.4.0` at `cpp/third_party/tomlplusplus`
 
 `README.md`:
 
-- Add a short SDL3 setup subsection with the install commands.
-- State that `scripts/build.ps1` finds SDL3 through `CMAKE_PREFIX_PATH`.
-- Do not document temporary smoke tests.
+- Note that the C++ build finds SDL3, CycloneDDS, and CycloneDDS-CXX through `CMAKE_PREFIX_PATH`.
+- Do not add smoke-test details.
 
 `planning/architecture.md`:
 
-- Note that SDL3 is installed static and that glad and Dear ImGui are copied into `cpp/third_party/` and built as C++ libraries.
-
-## Temporary window verification
-
-Create only under `build/`:
-
-- `build/sdl3-imgui-smoke/CMakeLists.txt`
-- `build/sdl3-imgui-smoke/main.cpp`
-
-The temporary CMake project adds the repository `cpp/` project as a subdirectory and builds an executable linking `imgui` and `glad`.
-
-The temporary app:
-
-- opens an SDL3 window
-- creates an OpenGL 3.3 core context
-- initializes glad
-- initializes Dear ImGui with the SDL3 and OpenGL3 backends
-- renders one clear color and one ImGui frame
-- closes cleanly and exits `0`
-
-Run:
-
-```powershell
-cmake -S build\sdl3-imgui-smoke -B build\sdl3-imgui-smoke-build `
-  -G "Visual Studio 18 2026" -A x64 `
-  -DREPO_ROOT=<repository-root> `
-  -DCMAKE_PREFIX_PATH=C:/Libraries/sdl3
-cmake --build build\sdl3-imgui-smoke-build --config Release --parallel
-.\build\sdl3-imgui-smoke-build\Release\sdl3-imgui-smoke.exe
-```
-
-Do not commit the temporary project and do not add it to `scripts/build.ps1`.
-
-## Tests
-
-Automated:
-
-- `scripts/build.ps1 -Test` configures `build/cpp`.
-- The committed `glad` and `imgui` static libraries compile and link.
-- Existing Rust tests and contract validation still pass.
-- No C++ executable or smoke source is generated by `scripts/build.ps1`.
-
-Manual:
-
-- Build and run the temporary SDL3/ImGui window under `build/`.
-- Verify it opens, renders one frame, and exits successfully.
-- Confirm no smoke source exists in `cpp/` or `scripts/build.ps1`.
-
-## Acceptance
-
-- SDL3 3.4.20 is installed statically and found by CMake.
-- glad and Dear ImGui sources, licenses, and CMake targets are committed under `cpp/third_party/`.
-- `scripts/build.ps1` builds the C++ libraries without smoke-test code.
-- A temporary window verifies SDL3 + OpenGL 3.3 + Dear ImGui.
-- No C++ executable, smoke source, or deployment is committed.
+- Note that the C++ `stations-dds` library mirrors the Rust contract-aware Node and generated-type workflow.
 
 ## Verification
 
-```powershell
-.\scripts\build.ps1 -Test
-.\scripts\build.ps1
-git diff --check
-```
-
-Run the temporary window smoke project separately, as above.
+1. `scripts/build.ps1 -Test`
+   - C++ IDL generation succeeds.
+   - `stations-dds` and generated types compile.
+   - CTest tests pass.
+   - Existing Rust tests pass.
+2. `scripts/build.ps1`
+   - Release build succeeds.
+3. Confirm generated files exist only under `build/gen/cpp`.
+4. Confirm no generated or smoke files are committed.
+5. `git diff --check`.
 
 ## Risks
 
-- **Static SDL3:** supported but less common than shared SDL3; avoids a runtime DLL.
-- **Third-party source size:** ImGui and glad add committed source; include their licenses.
-- **Loader coexistence:** ImGui uses its embedded OpenGL3 loader while application code uses glad; both can coexist.
-- **No committed window target:** the first real executable remains `cpp-lil-d`; this story proves the stack with a temporary build artifact.
-- **Prefix discovery:** CMake finds SDL3 only when `CMAKE_PREFIX_PATH` includes `C:/Libraries/sdl3`.
+- **IDL generation path:** all three modules must be listed so `hello_world.hpp` can include `math.hpp` and `format_manager.hpp`.
+- **PATH setup:** `idlc` and both CycloneDDS DLL directories must be available before CMake generation and CTest.
+- **QoS translation:** C++ policies must match the Rust contract names.
+- **Environment setup:** `CYCLONEDDS_URI` must be set before participant creation.
+- **Test isolation:** use domain 42 so the committed round-trip test does not collide with the fleet.
+- **No deployment:** tests use the external prefix through the process PATH; deployment remains a later story.
 
 ## Files touched
 
 - `cpp/CMakeLists.txt`
-- `cpp/third_party/CMakeLists.txt` (new)
-- `cpp/third_party/glad/` (new)
-- `cpp/third_party/imgui/` (new)
+- `cpp/third_party/CMakeLists.txt`
+- `cpp/third_party/tomlplusplus/` (new)
+- `cpp/libs/stations-dds/` (new)
 - `scripts/build.ps1`
 - `README.md`
 - `docs/versions.md`
@@ -232,7 +265,7 @@ Run the temporary window smoke project separately, as above.
 
 ## Bookkeeping
 
-- `cmake-skeleton` is completed at `2026-11-18 16:19:53`.
-- `sdl3-imgui` is `in progress` in `backlog.md`.
-- `sdl3-imgui` has no remaining story prerequisites.
-- Do not move `sdl3-imgui` to `completed_stories.md` until the user asks to plan the next story.
+- `sdl3-imgui` is completed at `2026-11-18 16:36:02`.
+- `cpp-dds` is `in progress` in `backlog.md`.
+- `cpp-dds` has no remaining story prerequisites.
+- Do not move `cpp-dds` to `completed_stories.md` until the user asks to plan the next story.

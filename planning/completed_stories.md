@@ -302,3 +302,9 @@ Create the `cpp/` CMake project and integrate configure/build into `scripts/buil
 - **Completed:** 2026-11-18 16:19:53.
 - **Depends on:** none.
 - **Minimal test:** `scripts/build.ps1 -Test` configures `build/cpp`; the existing Rust tests pass and no C++ smoke test is generated or committed.
+
+### sdl3-imgui
+Install SDL3 3.4.20 as a static external component and add glad 2.0.8 and Dear ImGui 1.93.0 sources under `cpp/third_party/`. Added `glad` and `imgui` CMake static library targets, SDL3 discovery through `CMAKE_PREFIX_PATH`, SDL3 setup documentation, and version records. The SDL3/OpenGL 3.3/ImGui window was verified with a temporary project under `build/`; no smoke source was committed.
+- **Completed:** 2026-11-18 16:36:02.
+- **Depends on:** none.
+- **Minimal test:** a temporary window project under `build/` opens an SDL3 window, renders one Dear ImGui frame, and closes cleanly; `scripts/build.ps1` builds the committed glad and ImGui libraries without smoke-test code.
