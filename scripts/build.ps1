@@ -105,6 +105,11 @@ $cppBuild = Join-Path $repoRoot 'build\cpp'
 $cppConfig = 'Release'
 $cppExtPath = $extPathPrefix -replace '\\', '/'
 $cppInstall = (Join-Path $repoRoot 'build\deploy\cpp') -replace '\\', '/'
+$cppPrefixPath = (Join-Path $extPathPrefix 'sdl3') -replace '\\', '/'
+$sdl3Config = Join-Path $extPathPrefix 'sdl3\cmake\SDL3Config.cmake'
+if (-not (Test-Path $sdl3Config)) {
+    throw "SDL3 CMake package not found at $sdl3Config"
+}
 
 $cmakeArgs = @(
     '-S', $cppSrc,
@@ -112,7 +117,8 @@ $cmakeArgs = @(
     '-G', 'Visual Studio 18 2026',
     '-A', 'x64',
     "-DEXT_PATH_PREFIX=$cppExtPath",
-    "-DCMAKE_INSTALL_PREFIX=$cppInstall"
+    "-DCMAKE_INSTALL_PREFIX=$cppInstall",
+    "-DCMAKE_PREFIX_PATH=$cppPrefixPath"
 )
 & cmake @cmakeArgs
 if ($LASTEXITCODE -ne 0) { throw "CMake configure failed ($LASTEXITCODE)" }

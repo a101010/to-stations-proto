@@ -69,7 +69,7 @@ cmake --build C:\Libraries\src\sdl3\build --config Release --parallel
 cmake --install C:\Libraries\src\sdl3\build --config Release
 ```
 
-The install contains the SDL3 headers, `SDL3-static.lib`, and the CMake package under `lib/cmake/SDL3`.
+The install contains the SDL3 headers, `SDL3-static.lib`, and the CMake package under `cmake/SDL3`.
 
 ## Third-party sources
 
@@ -79,7 +79,7 @@ Generate a glad 2.0.8 C loader for OpenGL 3.3 core into `cpp/third_party/glad/`:
 
 - `include/glad/gl.h`
 - `include/KHR/khrplatform.h`
-- `src/glad.c`
+- `src/gl.c`
 - license/readme files
 
 The committed CMake target `glad` is a static library with a public include directory.

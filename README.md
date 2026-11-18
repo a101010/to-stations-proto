@@ -47,6 +47,19 @@ cmd /c "call \"C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\A
 
 The authored C++ project lives in `cpp/`. `scripts/build.ps1` configures it into `build/cpp` with the Visual Studio 18 2026 generator and builds the Release configuration.
 
+### SDL3
+
+SDL3 `3.4.20` is built from source as a static library and installed to `C:\Libraries\sdl3`; the source is kept at `C:\Libraries\src\sdl3`.
+
+```
+git clone --branch release-3.4.20 --depth 1 https://github.com/libsdl-org/SDL.git C:\Libraries\src\sdl3
+cmake -S C:\Libraries\src\sdl3 -B C:\Libraries\src\sdl3\build -G "Visual Studio 18 2026" -A x64 -DCMAKE_INSTALL_PREFIX=C:/Libraries/sdl3 -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST_LIBRARY=OFF -DSDL_TESTS=OFF
+cmake --build C:\Libraries\src\sdl3\build --config Release --parallel
+cmake --install C:\Libraries\src\sdl3\build --config Release
+```
+
+`scripts/build.ps1` finds SDL3 through `CMAKE_PREFIX_PATH`. No `PATH` change is required.
+
 ### Rust
 
 Rust is installed with rustup using the `stable-x86_64-pc-windows-msvc` toolchain.
