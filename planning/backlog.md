@@ -11,22 +11,16 @@ Conventions:
 
 ## Stories
 
-### cmake-skeleton
-Create the `cpp/` CMake project and integrate configure/build into `scripts/build.ps1`. Use the Visual Studio 18 2026 generator, C++20, `EXT_PATH_PREFIX`, the install prefix `build/deploy/cpp`, and the repository root resolved without `..`. The project has no committed executable yet; `sdl3-imgui` adds the first real target. No C++ deployment.
-- **Depends on:** none.
-- **Minimal test:** `scripts/build.ps1 -Test` configures `build/cpp`; the existing Rust tests still pass and no C++ smoke test is generated or committed.
-- **Status:** in progress.
-
 ### sdl3-imgui
-Install SDL3 to the external prefix and add glad and Dear ImGui sources under `cpp/third_party/`. Build a C++ target that opens an SDL3 window on OpenGL 3.3 and renders one Dear ImGui frame over a clear color.
-- **Depends on:** cmake-skeleton.
-- **Minimal test:** the target opens an SDL3 window, renders one Dear ImGui frame, and closes cleanly.
-- **Status:** todo.
+Install SDL3 3.4.20 static to the external prefix and copy glad 2.0.8 and Dear ImGui 1.93.0 sources into `cpp/third_party/`. Add CMake static library targets for glad and ImGui and verify the stack with a temporary SDL3 window that renders one Dear ImGui frame over an OpenGL 3.3 clear color. The temporary window is a build artifact and is not committed.
+- **Depends on:** none.
+- **Minimal test:** a temporary window project under `build/` opens an SDL3 window, renders one Dear ImGui frame, and closes cleanly; `scripts/build.ps1` builds the committed glad and ImGui libraries without smoke-test code.
+- **Status:** in progress.
 - **Records:** SDL3, glad, and Dear ImGui in `docs/versions.md`.
 
 ### cpp-dds
 Generate C++ types from `DDS/` with the installed `idlc -l cxx` backend into `build/gen/cpp`; add the C++ `stations-dds` library with participant/node creation, typed readers/writers, contract loading and validation, deploy-relative `CYCLONEDDS_URI` setup, and CycloneDDS-CXX linking. Add a header-only TOML parser under `cpp/third_party/` for contracts and state.
-- **Depends on:** cmake-skeleton.
+- **Depends on:** none.
 - **Minimal test:** a C++ publisher and subscriber exchange `HelloWorldTopic`; an unregistered topic fails validation; generated types match the shared registry.
 - **Status:** todo.
 - **Records:** TOML parser in `docs/versions.md`.
