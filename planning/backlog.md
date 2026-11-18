@@ -12,9 +12,9 @@ Conventions:
 ## Stories
 
 ### cmake-skeleton
-Create the `cpp/` CMake project with one runnable `cmake-smoke` target and integrate configure/build/CTest into `scripts/build.ps1`. Use the Visual Studio 18 2026 generator, C++20, `EXT_PATH_PREFIX`, the install prefix `build/deploy/cpp`, and the repository root resolved without `..`. No C++ deployment yet.
+Create the `cpp/` CMake project and integrate configure/build into `scripts/build.ps1`. Use the Visual Studio 18 2026 generator, C++20, `EXT_PATH_PREFIX`, the install prefix `build/deploy/cpp`, and the repository root resolved without `..`. The project has no committed executable yet; `sdl3-imgui` adds the first real target. No C++ deployment.
 - **Depends on:** none.
-- **Minimal test:** `scripts/build.ps1 -Test` configures `build/cpp`, builds, and runs `cmake-smoke`; the executable also exits successfully when run directly.
+- **Minimal test:** `scripts/build.ps1 -Test` configures `build/cpp`; the existing Rust tests still pass and no C++ smoke test is generated or committed.
 - **Status:** in progress.
 
 ### sdl3-imgui
@@ -96,6 +96,12 @@ Add the C++ Lux Pos overlay with the frozen globe, live lighting, spotlight can,
 Create the C++ `paws` using SDL3, Dear ImGui, and SDL gamepad input: the virtual Xbox controller, real controller selection, per-display persistence, R3 checkbox, Start/B/Back/A/D-pad/right-stick behavior, instance guard, window placement, and the same DDS commands as Rust `paws`. Add it to the C++ deploy and `launch-cpp.ps1`. Finish the pure C++ two-display configuration.
 - **Depends on:** cpp-lil-d; cpp-format-services; cpp-hello-service; cpp-hello-view-ctl; cpp-display-hello; cpp-lux-color; cpp-lux-pos; cpp-support; cpp-dds; sdl3-imgui.
 - **Minimal test:** `launch-cpp.ps1` with two displays and a temporary `LOCALAPPDATA` runs the pure C++ configuration; hello-world, menu, arcball, Lux Color, Lux Pos, C++ `paws`, persistence, and display isolation work; the Rust configuration still runs.
+- **Status:** todo.
+
+### readme-cleanup
+Rewrite `README.md` to focus on setup, build, run, and tool usage. Remove temporary smoke-test details, implementation history, and duplicated architecture/version notes; keep exact external dependency install commands, build/test commands, launch and cleanup commands, and short pointers to `planning/architecture.md` and `docs/versions.md`.
+- **Depends on:** none.
+- **Minimal test:** follow the README from setup through build, launch, and cleanup without needing another source; no temporary smoke-test artifacts are documented.
 - **Status:** todo.
 
 ### paws-two

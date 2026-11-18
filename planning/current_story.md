@@ -4,10 +4,10 @@ This file is the detailed, living plan for the one active story. It is rewritten
 
 ## Story
 
-Create the `cpp/` CMake project with one runnable `cmake-smoke` target and integrate configure/build/CTest into `scripts/build.ps1`. Use the Visual Studio 18 2026 generator, C++20, `EXT_PATH_PREFIX`, the install prefix `build/deploy/cpp`, and the repository root resolved without `..`. No C++ deployment yet.
+Create the `cpp/` CMake project and integrate configure/build into `scripts/build.ps1`. Use the Visual Studio 18 2026 generator, C++20, `EXT_PATH_PREFIX`, the install prefix `build/deploy/cpp`, and the repository root resolved without `..`. The project has no executable yet; `sdl3-imgui` adds the first real target. No C++ deployment.
 
 - **Depends on:** none.
-- **Minimal test:** `scripts/build.ps1 -Test` configures `build/cpp`, builds, and runs `cmake-smoke`; the executable also exits successfully when run directly.
+- **Minimal test:** `scripts/build.ps1 -Test` configures `build/cpp`; the existing Rust tests still pass and no C++ smoke test is generated or committed.
 
 ## Context
 
@@ -17,17 +17,18 @@ Create the `cpp/` CMake project with one runnable `cmake-smoke` target and integ
 - CMake 4.4.3 is installed and the `Visual Studio 18 2026` generator is available.
 - MSVC and CMake are already recorded in `docs/versions.md`.
 - The C++ runtime sequence starts with this story; SDL3, DDS, and the C++ display library are later stories.
+- The broader README rewrite is tracked separately as `readme-cleanup`.
 
 ## Decisions
 
-1. **One CMake target proves the skeleton.** `cmake-smoke` is a console executable, not a deployed application.
-2. **Use the Visual Studio 18 2026 generator.** Build with `-A x64`; do not require a developer shell.
-3. **Use C++20.** Set the standard on the target and keep the project otherwise minimal.
-4. **Use CTest for the smoke test.** The target is registered as a test so later C++ stories can add tests without changing the runner.
+1. **The `cpp/` project commits no executable.** It establishes project settings for later C++ targets.
+2. **The first real C++ target comes in `sdl3-imgui`.**
+3. **Use the Visual Studio 18 2026 generator.** Build with `-A x64`; do not require a developer shell.
+4. **Use C++20.** Set the standard project-wide and keep the project otherwise minimal.
 5. **Keep `REPO_ROOT` explicit.** The top-level CMake file resolves the repository root from its own location and never uses `..` path strings.
 6. **Establish `EXT_PATH_PREFIX` now.** Default it to `C:/Libraries` and let `scripts/build.ps1` pass the current prefix, even though this story has no external dependency.
 7. **Set the install prefix without deploying.** Configure `CMAKE_INSTALL_PREFIX` as `build/deploy/cpp`, but add no install rules and copy nothing into `build/deploy` in this story.
-8. **Run the C++ build in all builds.** `scripts/build.ps1` configures and builds C++ for both normal and `-Test` runs; only `-Test` runs CTest.
+8. **No smoke tests in `scripts/build.ps1`.** The C++ step only configures and builds the authored project.
 9. **No new external components.** SDL3, glad, Dear ImGui, TOML, and image decoding are later stories.
 10. **No Rust behavior changes.** The existing Rust build, tests, contract validation, and deploy output remain unchanged.
 
@@ -36,11 +37,9 @@ Create the `cpp/` CMake project with one runnable `cmake-smoke` target and integ
 **In scope**
 
 - Create `cpp/CMakeLists.txt`.
-- Create `cpp/tools/cmake-smoke/CMakeLists.txt`.
-- Create `cpp/tools/cmake-smoke/main.cpp`.
 - Remove `cpp/.gitkeep`.
-- Extend `scripts/build.ps1` with CMake configure, build, and CTest.
-- Update `README.md` for the C++ project and build entry point.
+- Extend `scripts/build.ps1` with CMake configure/build.
+- Update `README.md` only to remove temporary smoke-target details; the broad README rewrite is `readme-cleanup`.
 - Update the story status and this plan.
 
 **Out of scope**
@@ -49,7 +48,7 @@ Create the `cpp/` CMake project with one runnable `cmake-smoke` target and integ
 - IDL generation, CycloneDDS-CXX, DDS, contracts, or the display ABI.
 - C++ deployment, runtime DLLs, or C++ launch scripts.
 - C++ services, displays, `paws`, or tools.
-- C++ test framework beyond CTest and the smoke executable.
+- C++ smoke tests.
 
 ## CMake project
 
@@ -60,23 +59,11 @@ Create the `cpp/` CMake project with one runnable `cmake-smoke` target and integ
 - Resolve the repository root with:
   `get_filename_component(REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}" DIRECTORY)`
 - Define `EXT_PATH_PREFIX` as a cache path with default `C:/Libraries`.
-- Enable C++20.
+- Set C++20 and disable compiler extensions.
 - Add MSVC warnings `/W4` and `/permissive-`.
-- `enable_testing()`
-- `add_subdirectory(tools/cmake-smoke)`
+- `enable_testing()` and `add_subdirectory()` are deferred to the first real target.
 
-`cpp/tools/cmake-smoke/CMakeLists.txt`:
-
-- `add_executable(cmake-smoke main.cpp)`
-- `target_compile_features(cmake-smoke PRIVATE cxx_std_20)`
-- `add_test(NAME cmake-smoke COMMAND cmake-smoke)`
-
-`cpp/tools/cmake-smoke/main.cpp`:
-
-- Print a short success line.
-- Return `0`.
-
-The top-level project has no install rule. The configured install prefix is reserved for later C++ deploy stories.
+The top-level project has no install rule and no executable. The configured install prefix is reserved for later C++ deploy stories.
 
 ## Build script
 
@@ -86,90 +73,69 @@ In `scripts/build.ps1`, after the Rust build and contract validation and before 
 $cppSrc = Join-Path $repoRoot 'cpp'
 $cppBuild = Join-Path $repoRoot 'build\cpp'
 $cppConfig = 'Release'
+$cppExtPath = $extPathPrefix -replace '\\', '/'
+$cppInstall = (Join-Path $repoRoot 'build\deploy\cpp') -replace '\\', '/'
 
-& cmake -S $cppSrc -B $cppBuild `
-    -G 'Visual Studio 18 2026' -A x64 `
-    "-DEXT_PATH_PREFIX=$($extPathPrefix -replace '\\','/')" `
-    "-DCMAKE_INSTALL_PREFIX=$((Join-Path $repoRoot 'build\deploy\cpp') -replace '\\','/')"
+$cmakeArgs = @(
+    '-S', $cppSrc,
+    '-B', $cppBuild,
+    '-G', 'Visual Studio 18 2026',
+    '-A', 'x64',
+    "-DEXT_PATH_PREFIX=$cppExtPath",
+    "-DCMAKE_INSTALL_PREFIX=$cppInstall"
+)
+& cmake @cmakeArgs
 if ($LASTEXITCODE -ne 0) { throw "CMake configure failed ($LASTEXITCODE)" }
 
 & cmake --build $cppBuild --config $cppConfig --parallel
 if ($LASTEXITCODE -ne 0) { throw "CMake build failed ($LASTEXITCODE)" }
 ```
 
-When `-Test` is set, run CTest:
-
-```powershell
-Push-Location $cppBuild
-try {
-    & ctest -C $cppConfig --output-on-failure
-    if ($LASTEXITCODE -ne 0) { throw "CTest failed ($LASTEXITCODE)" }
-}
-finally {
-    Pop-Location
-}
-```
-
-Use `Push-Location` rather than `ctest --test-dir` so the script remains compatible with CMake 3.16.
-
-The C++ build runs in both modes. Normal builds do not run CTest and do not install or deploy C++ artifacts.
+The C++ step runs in both normal and `-Test` builds. It has no smoke target, no generated source, and no CTest invocation. `build/cpp` builds no target until `sdl3-imgui` adds one.
 
 ## README
 
-Update the C++ build documentation to state:
-
-- The CMake project lives at `cpp/`.
-- `scripts/build.ps1` configures `build/cpp` and builds the C++ project.
-- `scripts/build.ps1 -Test` also runs CTest.
-- `cmake-smoke` is the current C++ build smoke target.
-
-The existing manual CMake generator instructions remain.
+Remove the temporary smoke-target details from the C++ section. The broad README rewrite is tracked separately as `readme-cleanup`; this story only keeps the README from documenting a smoke target.
 
 ## Tests
 
 Automated:
 
 - CMake configures the `cpp/` project into `build/cpp`.
-- `cmake-smoke` compiles and links.
-- CTest runs `cmake-smoke` successfully.
-- The existing Rust tests and contract validation still pass.
+- `scripts/build.ps1 -Test` completes the existing Rust tests and contract validation.
+- No C++ smoke project or smoke source is created.
 
 Manual:
 
-- Run `build\cpp\Release\cmake-smoke.exe` directly from an unrelated working directory.
 - Re-run `scripts/build.ps1 -Test` to confirm repeatability.
-- Confirm `build/deploy` contains no C++ smoke artifact.
+- Confirm `build/cpp-smoke` and `build/cpp-smoke-build` do not exist.
+- Confirm `build/deploy` contains no C++ artifact.
 
 ## Acceptance
 
-- One authored C++ target configures, builds, and runs.
-- `scripts/build.ps1` is the single build entry point for Rust and the C++ skeleton.
+- The `cpp/` CMake project configures with the intended settings.
+- `scripts/build.ps1` configures/builds the C++ project without smoke tests.
 - The existing Rust build and deploy output are unchanged.
-- No external C++ dependency, deployment, or runtime behavior is introduced.
+- No external C++ dependency, deployment, runtime behavior, or smoke test is introduced.
 
 ## Verification
 
 ```powershell
 .\scripts\build.ps1 -Test
 .\scripts\build.ps1
-.\build\cpp\Release\cmake-smoke.exe
+git diff --check
 ```
-
-Run the executable from an unrelated working directory and check that it exits with `0`. Run `git diff --check`.
 
 ## Risks
 
 - **Generator name:** the Visual Studio 18 2026 generator is required; if it is missing, use `cmake -E capabilities` to report the available generators.
-- **Build-time growth:** the skeleton is small; consider a skip flag only when later C++ stories make Rust-only iteration expensive.
-- **CTest compatibility:** keep the invocation compatible with CMake 3.16.
+- **No target:** `build/cpp` builds no target until `sdl3-imgui`; this is intentional.
+- **No smoke coverage:** toolchain coverage comes from configuring and building the real C++ project in later stories.
 - **Path handling:** pass absolute PowerShell paths and forward-slash CMake cache paths.
-- **Deploy isolation:** do not let the smoke target leak into `build/deploy`.
 
 ## Files touched
 
 - `cpp/CMakeLists.txt` (new)
-- `cpp/tools/cmake-smoke/CMakeLists.txt` (new)
-- `cpp/tools/cmake-smoke/main.cpp` (new)
 - `cpp/.gitkeep` (removed)
 - `scripts/build.ps1`
 - `README.md`
@@ -182,4 +148,5 @@ Run the executable from an unrelated working directory and check that it exits w
 
 - `cmake-skeleton` is `in progress` in `backlog.md`.
 - `cmake-skeleton` has no remaining story prerequisites.
+- `readme-cleanup` is a separate backlog story, not part of this story.
 - Do not move `cmake-skeleton` to `completed_stories.md` until the user asks to plan the next story.

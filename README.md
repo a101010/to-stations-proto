@@ -43,6 +43,10 @@ To invoke `cl` directly, import the MSVC environment first (adjust the path to y
 cmd /c "call \"C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Auxiliary\Build\vcvars64.bat\" && cl ..."
 ```
 
+### C++ project
+
+The authored C++ project lives in `cpp/`. `scripts/build.ps1` configures it into `build/cpp` with the Visual Studio 18 2026 generator and builds the Release configuration.
+
 ### Rust
 
 Rust is installed with rustup using the `stable-x86_64-pc-windows-msvc` toolchain.

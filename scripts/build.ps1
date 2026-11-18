@@ -100,6 +100,26 @@ foreach ($src in @('rust\ui\lil-d\src', 'rust\ui\paws\src', 'rust\tool\equirect-
 if ($LASTEXITCODE -ne 0) { throw "dds-contracts failed ($LASTEXITCODE)" }
 Write-Host "Validated contracts and wrote build\topics.md"
 
+$cppSrc = Join-Path $repoRoot 'cpp'
+$cppBuild = Join-Path $repoRoot 'build\cpp'
+$cppConfig = 'Release'
+$cppExtPath = $extPathPrefix -replace '\\', '/'
+$cppInstall = (Join-Path $repoRoot 'build\deploy\cpp') -replace '\\', '/'
+
+$cmakeArgs = @(
+    '-S', $cppSrc,
+    '-B', $cppBuild,
+    '-G', 'Visual Studio 18 2026',
+    '-A', 'x64',
+    "-DEXT_PATH_PREFIX=$cppExtPath",
+    "-DCMAKE_INSTALL_PREFIX=$cppInstall"
+)
+& cmake @cmakeArgs
+if ($LASTEXITCODE -ne 0) { throw "CMake configure failed ($LASTEXITCODE)" }
+
+& cmake --build $cppBuild --config $cppConfig --parallel
+if ($LASTEXITCODE -ne 0) { throw "CMake build failed ($LASTEXITCODE)" }
+
 # Assemble the deployable layout. Only build/deploy is durable; everything else
 # under build/ is temporary. Each story that adds an executable or library
 # extends this step. The release build is deployed so the display is a GUI
