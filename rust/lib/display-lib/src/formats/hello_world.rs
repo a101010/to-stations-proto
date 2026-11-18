@@ -10,16 +10,20 @@ use glow::HasContext as _;
 use format_list::FORMAT_POINTER_RIGHT;
 use format_list::{
     HELLO_ACTION_COLOR_CANCEL, HELLO_ACTION_COLOR_COMMIT, HELLO_ACTION_COLOR_HUE,
-    HELLO_ACTION_COLOR_SV, HELLO_ACTION_DRAG, HELLO_ACTION_GRAB, HELLO_ACTION_MODE_TOGGLE,
+    HELLO_ACTION_COLOR_SV, HELLO_ACTION_DRAG, HELLO_ACTION_GRAB, HELLO_ACTION_LIGHT,
+    HELLO_ACTION_LIGHT_CANCEL, HELLO_ACTION_LIGHT_COMMIT, HELLO_ACTION_MODE_TOGGLE,
     HELLO_ACTION_RELEASE, HELLO_ACTION_ROTATE, HELLO_ACTION_TOGGLE_ARCBALL,
     HELLO_ACTION_TOGGLE_LUX_COLOR, HELLO_ACTION_TOGGLE_LUX_POS, HELLO_MENU_LUX_COLOR,
     HELLO_MENU_LUX_POS, HELLO_MENU_MODE, HELLO_MODE_INSPECT, HELLO_OVERLAY_COLOR,
     HELLO_OVERLAY_NONE, HELLO_OVERLAY_POS,
 };
 
-use crate::color_picker::{ColorPicker, PickerControl, PickerHit, PickerLayout, WheelLatch};
+use crate::color_picker::{
+    draw_button, ColorPicker, PickerControl, PickerHit, PickerLayout, WheelLatch,
+};
 use crate::earth::Earth;
 use crate::formats::{FormatCommand, FormatInput, MenuItem};
+use crate::light_pos::{front_light, LightFocus, LightHit, LightLayout, Spotlight};
 use crate::text::{TextRenderer, FONT_FILE};
 use crate::view::{HelloWorldInput, View, ViewState};
 use crate::DisplayError;
@@ -43,12 +47,16 @@ const STICK_FRACTION: f64 = 0.5;
 const STICK_COLOR_RATE: f64 = 0.5;
 /// Fraction of the supplied right-stick delta used for triangle x-y movement.
 const TRIANGLE_STICK_STEP: f32 = 0.5;
+/// Fraction of the globe radius the right stick moves the light each second
+/// at full deflection, assuming paws' 30 Hz cursor-move cadence.
+const LIGHT_STICK_RATE: f32 = 0.25;
 
 /// The hello-world format.
 pub(crate) struct HelloWorld {
     earth: Earth,
     text: TextRenderer,
     picker: ColorPicker,
+    spotlight: Spotlight,
     /// The latest view sample, shared with the display library's DDS poller.
     state: ViewState,
     input: Option<HelloWorldInput>,
@@ -60,6 +68,9 @@ pub(crate) struct HelloWorld {
     mouse_picking: Option<PickerHit>,
     triangle_cursor: Option<(f32, f32)>,
     wheel: WheelLatch,
+    light_focus: LightFocus,
+    light_dragging: bool,
+    light_cursor: Option<(f32, f32)>,
     last_overlay: i32,
 }
 
@@ -74,10 +85,12 @@ impl HelloWorld {
         let earth = Earth::new(gl, assets_root)?;
         let text = TextRenderer::new(gl, &assets_root.join(FONT_FILE))?;
         let picker = ColorPicker::new(gl, assets_root)?;
+        let spotlight = Spotlight::new(gl)?;
         Ok(Self {
             earth,
             text,
             picker,
+            spotlight,
             state,
             input,
             dragging: false,
@@ -88,6 +101,9 @@ impl HelloWorld {
             mouse_picking: None,
             triangle_cursor: None,
             wheel: WheelLatch::default(),
+            light_focus: LightFocus::Back,
+            light_dragging: false,
+            light_cursor: None,
             last_overlay: HELLO_OVERLAY_NONE,
         })
     }
@@ -130,6 +146,16 @@ impl HelloWorld {
             self.mouse_picking = None;
             self.triangle_cursor = None;
             self.wheel.clear();
+            self.light_focus = LightFocus::Back;
+            self.light_dragging = false;
+            self.dragging = false;
+            self.light_cursor = if overlay == HELLO_OVERLAY_POS {
+                let [x, y, _] = self.light_state();
+                let (x, y, _) = front_light(x, y);
+                Some((x, y))
+            } else {
+                None
+            };
             self.last_overlay = overlay;
         }
     }
@@ -149,6 +175,39 @@ impl HelloWorld {
     fn send_cancel(&mut self) {
         self.send(HELLO_ACTION_COLOR_CANCEL, 0.0, 0.0, true);
         self.clear_capture();
+    }
+
+    fn send_light(&self, x: f32, y: f32, z: f32) {
+        if let Some(input) = &self.input {
+            input.send(HELLO_ACTION_LIGHT, x as f64, y as f64, z as f64, true);
+        }
+    }
+
+    fn send_light_commit(&mut self) {
+        self.send(HELLO_ACTION_LIGHT_COMMIT, 0.0, 0.0, true);
+        self.light_dragging = false;
+    }
+
+    fn send_light_cancel(&mut self) {
+        self.send(HELLO_ACTION_LIGHT_CANCEL, 0.0, 0.0, true);
+        self.light_dragging = false;
+    }
+
+    fn light_state(&self) -> [f32; 3] {
+        self.state
+            .borrow()
+            .as_ref()
+            .map(|view| view.light)
+            .unwrap_or([0.6, 0.8, 0.7])
+    }
+
+    fn move_light(&mut self, dx: i32, dy: i32) {
+        let [x, y, _] = self.light_state();
+        let (x, y) = self.light_cursor.unwrap_or((x, y));
+        let (dx, dy) = light_stick_delta(dx, dy, self.region);
+        let (x, y, z) = front_light(x + dx, y + dy);
+        self.light_cursor = Some((x, y));
+        self.send_light(x, y, z);
     }
 
     fn focus_picker(&mut self, focus: PickerControl, capture: bool) {
@@ -295,6 +354,49 @@ impl crate::formats::Format for HelloWorld {
             return;
         }
 
+        if overlay == HELLO_OVERLAY_POS {
+            let layout = LightLayout::new(self.region);
+            if let Some(attitude) = attitude {
+                let globe_y = framebuffer_height - layout.globe.y - layout.globe.h;
+                unsafe {
+                    gl.viewport(layout.globe.x, globe_y, layout.globe.w, layout.globe.h);
+                }
+                self.earth
+                    .render(gl, layout.globe.w, layout.globe.h, attitude, light, color);
+            }
+            let marker = layout.marker(light[0], light[1]);
+            self.spotlight.render(
+                gl,
+                framebuffer_height,
+                self.region,
+                marker,
+                layout.can_angle(marker),
+                layout.spotlight_size(),
+                color,
+            );
+            draw_button(
+                &mut self.text,
+                gl,
+                framebuffer_height,
+                self.region,
+                layout.back,
+                "Back",
+                self.light_focus == LightFocus::Back,
+                layout.font_size,
+            );
+            draw_button(
+                &mut self.text,
+                gl,
+                framebuffer_height,
+                self.region,
+                layout.done,
+                "Done",
+                self.light_focus == LightFocus::Done,
+                layout.font_size,
+            );
+            return;
+        }
+
         if let Some(attitude) = attitude {
             self.earth.render(gl, width, height, attitude, light, color);
         }
@@ -325,6 +427,33 @@ impl crate::formats::Format for HelloWorld {
         }
         if button != 0 {
             return FormatInput::Ignored;
+        }
+        if overlay == HELLO_OVERLAY_POS {
+            let layout = LightLayout::new(region);
+            if pressed {
+                match layout.hit(x, y) {
+                    LightHit::Back => {
+                        self.light_focus = LightFocus::Back;
+                        self.send_light_cancel();
+                    }
+                    LightHit::Done => {
+                        self.light_focus = LightFocus::Done;
+                        self.send_light_commit();
+                    }
+                    LightHit::None => {
+                        if layout.globe.contains(x, y) {
+                            self.light_dragging = true;
+                            let (lx, ly) = layout.pointer_xy(x as f32, y as f32);
+                            let (lx, ly, lz) = front_light(lx, ly);
+                            self.light_cursor = Some((lx, ly));
+                            self.send_light(lx, ly, lz);
+                        }
+                    }
+                }
+            } else {
+                self.light_dragging = false;
+            }
+            return FormatInput::Consumed;
         }
         if overlay == HELLO_OVERLAY_COLOR {
             if pressed {
@@ -380,6 +509,17 @@ impl crate::formats::Format for HelloWorld {
     fn mouse_motion(&mut self, region: (i32, i32, i32, i32), x: i32, y: i32) -> FormatInput {
         let overlay = self.overlay();
         self.sync_overlay(overlay);
+        if overlay == HELLO_OVERLAY_POS {
+            if !self.light_dragging {
+                return FormatInput::Ignored;
+            }
+            let layout = LightLayout::new(region);
+            let (lx, ly) = layout.pointer_xy(x as f32, y as f32);
+            let (lx, ly, lz) = front_light(lx, ly);
+            self.light_cursor = Some((lx, ly));
+            self.send_light(lx, ly, lz);
+            return FormatInput::Consumed;
+        }
         if overlay == HELLO_OVERLAY_COLOR {
             if self.picker_captured {
                 self.clear_capture();
@@ -514,6 +654,48 @@ impl crate::formats::Format for HelloWorld {
                 FormatCommand::CursorMove { .. } => FormatInput::Ignored,
                 FormatCommand::ToggleMenu => FormatInput::Ignored,
             }
+        } else if overlay == HELLO_OVERLAY_POS {
+            match command {
+                FormatCommand::Navigate { dx, dy } => {
+                    let direction = if dx < 0 || dy < 0 { -1 } else { 1 };
+                    self.light_focus = self.light_focus.next(direction);
+                    FormatInput::Consumed
+                }
+                FormatCommand::Pointer {
+                    button,
+                    pressed: true,
+                } if button == FORMAT_POINTER_RIGHT => {
+                    let layout = LightLayout::new(self.region);
+                    let hit = cursor
+                        .map(|(x, y)| layout.hit(x, y))
+                        .unwrap_or(LightHit::None);
+                    match hit {
+                        LightHit::Back => self.send_light_cancel(),
+                        LightHit::Done => self.send_light_commit(),
+                        LightHit::None => match self.light_focus {
+                            LightFocus::Back => self.send_light_cancel(),
+                            LightFocus::Done => self.send_light_commit(),
+                        },
+                    }
+                    FormatInput::Consumed
+                }
+                FormatCommand::Pointer { .. } => FormatInput::Consumed,
+                FormatCommand::ToggleArcball => FormatInput::Consumed,
+                FormatCommand::CursorMove { dx, dy } if dx != 0 || dy != 0 => {
+                    self.move_light(dx, dy);
+                    FormatInput::Consumed
+                }
+                FormatCommand::CancelMenu | FormatCommand::OverlayCancel => {
+                    self.send_light_cancel();
+                    FormatInput::Consumed
+                }
+                FormatCommand::ReleaseCapture => {
+                    self.light_dragging = false;
+                    FormatInput::Consumed
+                }
+                FormatCommand::CursorMove { .. } => FormatInput::Consumed,
+                FormatCommand::ToggleMenu => FormatInput::Ignored,
+            }
         } else {
             match command {
                 FormatCommand::ToggleArcball => {
@@ -554,10 +736,15 @@ impl crate::formats::Format for HelloWorld {
             HELLO_MENU_MODE => {
                 if overlay == HELLO_OVERLAY_COLOR {
                     self.send_cancel();
+                } else if overlay == HELLO_OVERLAY_POS {
+                    self.send_light_cancel();
                 }
                 self.send(HELLO_ACTION_MODE_TOGGLE, 0.0, 0.0, true);
             }
             HELLO_MENU_LUX_COLOR => {
+                if overlay == HELLO_OVERLAY_POS {
+                    self.send_light_cancel();
+                }
                 let opening = overlay != HELLO_OVERLAY_COLOR;
                 self.send(HELLO_ACTION_TOGGLE_LUX_COLOR, 0.0, 0.0, true);
                 self.picker_focus = PickerControl::HueRing;
@@ -573,6 +760,7 @@ impl crate::formats::Format for HelloWorld {
                 self.send(HELLO_ACTION_TOGGLE_LUX_POS, 0.0, 0.0, true);
                 self.picker_captured = false;
                 self.mouse_picking = None;
+                self.light_dragging = false;
             }
             _ => return FormatInput::Ignored,
         }
@@ -608,6 +796,13 @@ fn hello_menu_items(mode: i32, overlay: i32) -> Vec<MenuItem> {
             },
         },
     ]
+}
+
+/// The right stick's light movement for one cursor-move event.
+fn light_stick_delta(dx: i32, dy: i32, region: (i32, i32, i32, i32)) -> (f32, f32) {
+    let half = region.2.min(region.3).max(1) as f32 * 0.5;
+    let scale = LIGHT_STICK_RATE / half;
+    (dx as f32 * scale, -(dy as f32) * scale)
 }
 
 /// Whether a normalized point is inside the globe's drag area.
@@ -660,6 +855,14 @@ mod tests {
         let advance =
             |text: &str| -> f32 { font.shape(text).iter().map(|glyph| glyph.x_advance).sum() };
         assert!(advance(MAX_TEXT) >= advance("NoConn 00:00:00"));
+    }
+
+    #[test]
+    fn light_stick_steps_are_small_at_full_deflection() {
+        let (dx, dy) = light_stick_delta(20, -20, (0, 0, 720, 720));
+        assert!(dx > 0.0 && dy > 0.0);
+        assert!(dx < 0.02 && dy < 0.02, "{dx} {dy}");
+        assert_eq!(light_stick_delta(0, 0, (0, 0, 720, 720)), (0.0, 0.0));
     }
 
     #[test]

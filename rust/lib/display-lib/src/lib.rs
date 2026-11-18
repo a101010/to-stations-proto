@@ -15,6 +15,7 @@ mod format_menu;
 mod format_source;
 mod formats;
 mod icon;
+mod light_pos;
 mod shader;
 mod text;
 mod ui;

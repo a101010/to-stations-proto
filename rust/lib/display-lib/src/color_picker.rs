@@ -284,6 +284,24 @@ impl PickerLayout {
     }
 }
 
+/// The shared Back/Done row used by Lux Color and Lux Pos.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ButtonRow {
+    pub(crate) back: Rect,
+    pub(crate) done: Rect,
+    pub(crate) font_size: f32,
+}
+
+/// The shared Back/Done geometry for a format region.
+pub(crate) fn button_row(region: (i32, i32, i32, i32)) -> ButtonRow {
+    let layout = PickerLayout::new(region);
+    ButtonRow {
+        back: layout.back,
+        done: layout.done,
+        font_size: (18.0 * layout.scale).max(10.0),
+    }
+}
+
 /// A renderable Lux Color picker.
 pub(crate) struct ColorPicker {
     program: glow::Program,
@@ -575,7 +593,7 @@ fn draw_marker(gl: &glow::Context, framebuffer_height: i32, x: f32, y: f32, capt
     ui::clear_rect(gl, framebuffer_height, light, MARKER_LIGHT);
 }
 
-fn draw_button(
+pub(crate) fn draw_button(
     text: &mut TextRenderer,
     gl: &glow::Context,
     framebuffer_height: i32,

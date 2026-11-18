@@ -72,6 +72,12 @@ pub const HELLO_ACTION_COLOR_SV: i32 = 9;
 pub const HELLO_ACTION_COLOR_COMMIT: i32 = 10;
 /// `HelloWorldInputTopic.action`: cancel and restore the color overlay.
 pub const HELLO_ACTION_COLOR_CANCEL: i32 = 11;
+/// `HelloWorldInputTopic.action`: set the light overlay's front-hemisphere direction.
+pub const HELLO_ACTION_LIGHT: i32 = 12;
+/// `HelloWorldInputTopic.action`: commit the light overlay.
+pub const HELLO_ACTION_LIGHT_COMMIT: i32 = 13;
+/// `HelloWorldInputTopic.action`: cancel and restore the light overlay.
+pub const HELLO_ACTION_LIGHT_CANCEL: i32 = 14;
 
 /// The hello-world menu item that toggles Auto/Inspect.
 pub const HELLO_MENU_MODE: &str = "mode";

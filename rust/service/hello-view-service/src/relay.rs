@@ -10,7 +10,8 @@ use std::time::{Duration, Instant};
 
 use format_list::{
     HELLO_ACTION_COLOR_CANCEL, HELLO_ACTION_COLOR_COMMIT, HELLO_ACTION_COLOR_HUE,
-    HELLO_ACTION_COLOR_SV, HELLO_ACTION_DRAG, HELLO_ACTION_GRAB, HELLO_ACTION_MODE_TOGGLE,
+    HELLO_ACTION_COLOR_SV, HELLO_ACTION_DRAG, HELLO_ACTION_GRAB, HELLO_ACTION_LIGHT,
+    HELLO_ACTION_LIGHT_CANCEL, HELLO_ACTION_LIGHT_COMMIT, HELLO_ACTION_MODE_TOGGLE,
     HELLO_ACTION_RELEASE, HELLO_ACTION_ROTATE, HELLO_ACTION_TOGGLE_ARCBALL,
     HELLO_ACTION_TOGGLE_LUX_COLOR, HELLO_ACTION_TOGGLE_LUX_POS, HELLO_OVERLAY_COLOR,
     HELLO_OVERLAY_NONE, HELLO_OVERLAY_POS,
@@ -60,6 +61,8 @@ pub(crate) struct ViewRelay {
     saturation: f64,
     value: f64,
     pre_color: Option<ColorSnapshot>,
+    pre_light: Option<Vector3>,
+    frozen_attitude: Option<Quaternion>,
     overlay: i32,
     drag: Option<Drag>,
     last_tick: Instant,
@@ -90,6 +93,8 @@ impl ViewRelay {
             saturation: 0.0,
             value: 1.0,
             pre_color: None,
+            pre_light: None,
+            frozen_attitude: None,
             overlay: HELLO_OVERLAY_NONE,
             drag: None,
             last_tick: started,
@@ -119,11 +124,22 @@ impl ViewRelay {
             HELLO_ACTION_COLOR_CANCEL if self.overlay == HELLO_OVERLAY_COLOR => {
                 self.cancel_color();
             }
+            HELLO_ACTION_LIGHT if self.overlay == HELLO_OVERLAY_POS => {
+                self.set_light(sample.x, sample.y, sample.z);
+            }
+            HELLO_ACTION_LIGHT_COMMIT if self.overlay == HELLO_OVERLAY_POS => {
+                self.commit_pos();
+            }
+            HELLO_ACTION_LIGHT_CANCEL if self.overlay == HELLO_OVERLAY_POS => {
+                self.cancel_pos();
+            }
             HELLO_ACTION_TOGGLE_LUX_COLOR => self.toggle_color(),
             HELLO_ACTION_TOGGLE_LUX_POS => self.toggle_pos(),
             HELLO_ACTION_MODE_TOGGLE => {
                 if self.overlay == HELLO_OVERLAY_COLOR {
                     self.cancel_color();
+                } else if self.overlay == HELLO_OVERLAY_POS {
+                    self.cancel_pos();
                 }
                 if self.mode == HELLO_MODE_AUTO {
                     self.enter_inspect();
@@ -134,7 +150,7 @@ impl ViewRelay {
                     self.drag = None;
                 }
             }
-            HELLO_ACTION_GRAB if self.overlay != HELLO_OVERLAY_COLOR => {
+            HELLO_ACTION_GRAB if self.overlay == HELLO_OVERLAY_NONE => {
                 self.enter_inspect();
                 self.drag = Some(Drag {
                     previous: trackball(sample.x, sample.y),
@@ -142,13 +158,13 @@ impl ViewRelay {
                 });
                 self.velocity = [0.0; 3];
             }
-            HELLO_ACTION_DRAG if self.overlay != HELLO_OVERLAY_COLOR => {
+            HELLO_ACTION_DRAG if self.overlay == HELLO_OVERLAY_NONE => {
                 self.drag_to(trackball(sample.x, sample.y), now)
             }
-            HELLO_ACTION_RELEASE if self.overlay != HELLO_OVERLAY_COLOR => {
+            HELLO_ACTION_RELEASE if self.overlay == HELLO_OVERLAY_NONE => {
                 self.drag = None;
             }
-            HELLO_ACTION_TOGGLE_ARCBALL if self.overlay != HELLO_OVERLAY_COLOR => {
+            HELLO_ACTION_TOGGLE_ARCBALL if self.overlay == HELLO_OVERLAY_NONE => {
                 self.arcball = !self.arcball;
                 if self.arcball {
                     self.enter_inspect();
@@ -156,7 +172,7 @@ impl ViewRelay {
                 self.velocity = [0.0; 3];
                 self.drag = None;
             }
-            HELLO_ACTION_ROTATE if self.arcball && self.overlay != HELLO_OVERLAY_COLOR => {
+            HELLO_ACTION_ROTATE if self.arcball && self.overlay == HELLO_OVERLAY_NONE => {
                 self.mode = HELLO_MODE_INSPECT;
                 let yaw = axis_angle([0.0, 1.0, 0.0], sample.x * STICK_RADIANS);
                 let pitch = axis_angle([1.0, 0.0, 0.0], sample.y * STICK_RADIANS);
@@ -174,7 +190,11 @@ impl ViewRelay {
     /// arrives, it is relayed as valid until two seconds pass; after that the
     /// last attitude is retained and the greeting reports the elapsed time.
     pub(crate) fn view(&mut self, now: Instant) -> Option<HelloWorldViewTopic> {
-        self.advance_inertia(now);
+        if self.overlay == HELLO_OVERLAY_NONE {
+            self.advance_inertia(now);
+        } else {
+            self.last_tick = now;
+        }
 
         let reference = self.last_received.unwrap_or(self.started);
         let elapsed = now.saturating_duration_since(reference);
@@ -186,13 +206,12 @@ impl ViewRelay {
             None => (no_conn(elapsed), false),
         };
 
-        let attitude = if self.mode == HELLO_MODE_AUTO {
-            self.latest
-                .as_ref()
-                .map(|sample| sample.attitude.clone())
-                .unwrap_or_else(identity)
+        let attitude = if self.overlay == HELLO_OVERLAY_POS {
+            self.frozen_attitude
+                .clone()
+                .unwrap_or_else(|| self.effective_attitude())
         } else {
-            self.local.clone()
+            self.effective_attitude()
         };
 
         Some(HelloWorldViewTopic {
@@ -222,6 +241,8 @@ impl ViewRelay {
             saturation: self.saturation,
             value: self.value,
         });
+        self.drag = None;
+        self.velocity = [0.0; 3];
         self.overlay = HELLO_OVERLAY_COLOR;
     }
 
@@ -246,20 +267,79 @@ impl ViewRelay {
         if self.overlay == HELLO_OVERLAY_COLOR {
             self.cancel_color();
         } else {
-            self.overlay = HELLO_OVERLAY_NONE;
+            if self.overlay == HELLO_OVERLAY_POS {
+                self.cancel_pos();
+            }
             self.open_color();
         }
     }
 
     fn toggle_pos(&mut self) {
         if self.overlay == HELLO_OVERLAY_POS {
-            self.overlay = HELLO_OVERLAY_NONE;
+            self.cancel_pos();
         } else {
             if self.overlay == HELLO_OVERLAY_COLOR {
                 self.cancel_color();
             }
-            self.overlay = HELLO_OVERLAY_POS;
+            self.open_pos();
         }
+    }
+
+    fn effective_attitude(&self) -> Quaternion {
+        if self.mode == HELLO_MODE_AUTO {
+            self.latest
+                .as_ref()
+                .map(|sample| sample.attitude.clone())
+                .unwrap_or_else(identity)
+        } else {
+            self.local.clone()
+        }
+    }
+
+    fn open_pos(&mut self) {
+        if self.overlay == HELLO_OVERLAY_POS {
+            return;
+        }
+        self.pre_light = Some(self.light.clone());
+        self.frozen_attitude = Some(self.effective_attitude());
+        self.drag = None;
+        self.velocity = [0.0; 3];
+        self.overlay = HELLO_OVERLAY_POS;
+    }
+
+    fn cancel_pos(&mut self) {
+        if let Some(light) = self.pre_light.take() {
+            self.light = light;
+        }
+        self.frozen_attitude = None;
+        self.overlay = HELLO_OVERLAY_NONE;
+    }
+
+    fn commit_pos(&mut self) {
+        self.pre_light = None;
+        self.frozen_attitude = None;
+        self.overlay = HELLO_OVERLAY_NONE;
+    }
+
+    fn set_light(&mut self, x: f64, y: f64, z: f64) {
+        let mut light = Vector3 {
+            x,
+            y,
+            z: z.max(0.0),
+        };
+        let length = (light.x * light.x + light.y * light.y + light.z * light.z).sqrt();
+        if length > 0.0 {
+            light.x /= length;
+            light.y /= length;
+            light.z /= length;
+        } else {
+            light = Vector3 {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            };
+        }
+        self.light = light;
     }
 
     fn set_hsv(&mut self, hue: f64, saturation: f64, value: f64) {
@@ -490,6 +570,17 @@ mod tests {
         }
     }
 
+    fn control3(display_id: u32, action: i32, x: f64, y: f64, z: f64) -> HelloWorldCtlTopic {
+        HelloWorldCtlTopic {
+            display_id,
+            action,
+            x,
+            y,
+            z,
+            pressed: true,
+        }
+    }
+
     #[test]
     fn no_view_before_the_startup_timeout() {
         let base = Instant::now();
@@ -711,6 +802,86 @@ mod tests {
             relay.view(base + Duration::from_millis(9)).unwrap().overlay,
             HELLO_OVERLAY_NONE
         );
+    }
+
+    #[test]
+    fn light_overlay_freezes_attitude_and_updates_the_light() {
+        let base = Instant::now();
+        let mut relay = ViewRelay::new(base, 0);
+        relay.update(sample("Hello", 0.5), base);
+        relay.control(
+            &control(0, HELLO_ACTION_TOGGLE_LUX_POS, 0.0, 0.0),
+            base + Duration::from_millis(1),
+        );
+        let opened = relay.view(base + Duration::from_millis(2)).unwrap();
+        assert_eq!(opened.overlay, HELLO_OVERLAY_POS);
+        assert_eq!(opened.attitude.w, 0.5);
+
+        relay.update(sample("Hello", 0.9), base + Duration::from_millis(3));
+        let frozen = relay.view(base + Duration::from_millis(4)).unwrap();
+        assert_eq!(frozen.attitude.w, 0.5);
+
+        relay.control(
+            &control3(0, HELLO_ACTION_LIGHT, 0.0, 0.0, -1.0),
+            base + Duration::from_millis(5),
+        );
+        let moved = relay.view(base + Duration::from_millis(6)).unwrap();
+        assert!((moved.light.z - 1.0).abs() < 1e-9);
+
+        relay.control(
+            &control(0, HELLO_ACTION_GRAB, 0.0, 0.0),
+            base + Duration::from_millis(7),
+        );
+        relay.control(
+            &control(0, HELLO_ACTION_TOGGLE_ARCBALL, 0.0, 0.0),
+            base + Duration::from_millis(8),
+        );
+        assert_eq!(
+            relay.view(base + Duration::from_millis(9)).unwrap().mode,
+            HELLO_MODE_AUTO
+        );
+
+        relay.control(
+            &control(0, HELLO_ACTION_LIGHT_CANCEL, 0.0, 0.0),
+            base + Duration::from_millis(10),
+        );
+        let canceled = relay.view(base + Duration::from_millis(11)).unwrap();
+        assert_eq!(canceled.overlay, HELLO_OVERLAY_NONE);
+        assert_eq!(canceled.light.x, 0.6);
+        assert_eq!(canceled.light.y, 0.8);
+        assert_eq!(canceled.light.z, 0.7);
+        assert_eq!(canceled.attitude.w, 0.9);
+    }
+
+    #[test]
+    fn light_commit_keeps_the_light_and_light_is_ignored_outside_pos() {
+        let base = Instant::now();
+        let mut relay = ViewRelay::new(base, 0);
+        relay.update(sample("Hello", 0.5), base);
+        relay.control(
+            &control3(0, HELLO_ACTION_LIGHT, 1.0, 0.0, 0.0),
+            base + Duration::from_millis(1),
+        );
+        assert_eq!(
+            relay.view(base + Duration::from_millis(2)).unwrap().light.x,
+            0.6
+        );
+
+        relay.control(
+            &control(0, HELLO_ACTION_TOGGLE_LUX_POS, 0.0, 0.0),
+            base + Duration::from_millis(3),
+        );
+        relay.control(
+            &control3(0, HELLO_ACTION_LIGHT, 1.0, 0.0, 0.0),
+            base + Duration::from_millis(4),
+        );
+        relay.control(
+            &control(0, HELLO_ACTION_LIGHT_COMMIT, 0.0, 0.0),
+            base + Duration::from_millis(5),
+        );
+        let committed = relay.view(base + Duration::from_millis(6)).unwrap();
+        assert_eq!(committed.overlay, HELLO_OVERLAY_NONE);
+        assert!((committed.light.x - 1.0).abs() < 1e-9);
     }
 
     #[test]

@@ -282,6 +282,15 @@ pub(crate) fn quat_to_mat3(q: [f32; 4]) -> [f32; 9] {
     ]
 }
 
+/// The projected screen radius of the globe silhouette for a square region.
+pub(crate) fn silhouette_radius(width: i32, height: i32) -> f32 {
+    let half = FOV_Y / 2.0;
+    let distance = 1.0 / (GLOBE_FRACTION * half.sin());
+    let angular = (1.0 / distance).asin();
+    let ndc = angular.tan() / half.tan();
+    width.min(height) as f32 * 0.5 * ndc
+}
+
 /// Perspective projection times a `(0, 0, -d)` view translation, column-major.
 /// The camera looks down `-Z` at a unit sphere at the origin; `d` is chosen so
 /// the globe fills `GLOBE_FRACTION` of the half-fov.
@@ -457,6 +466,12 @@ mod tests {
             v[1] + q[3] * t[1] + c[1],
             v[2] + q[3] * t[2] + c[2],
         ]
+    }
+
+    #[test]
+    fn silhouette_radius_is_inside_the_region() {
+        let radius = silhouette_radius(720, 720);
+        assert!(radius > 300.0 && radius < 360.0, "{radius}");
     }
 
     #[test]
