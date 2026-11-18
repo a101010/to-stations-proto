@@ -11,17 +11,11 @@ Conventions:
 
 ## Stories
 
-### hello-ctl-service
-Create the per-display hello_world controller and view foundation: a per-display `hello-ctl-service`, a per-display `hello-view-service`, ABI v4 mouse motion/wheel input with pointer tracking, a top-band horizontal format menu with four fixed slots (`Formats`, `Inspect`/`Auto`, `Lux Color`/`World`, `Lux Pos`/`World`), Auto/Inspect mode with arcball rotation and inertia, per-display light color and position, Lux placeholder label cycling, a visible paws right-stick `R3` toggle, and Start/B menu toggle/cancel commands. The Lux items are selectable but open no overlays yet. Hello-view state is not persisted.
-- **Depends on:** none.
-- **Minimal test:** open the menu and verify four left-aligned, equally spaced items with centered labels; cycle the Lux labels; use Start to toggle the menu and B to cancel it; left-drag the globe to enter Inspect and rotate it; drag off the globe without releasing and verify it starts spinning; right-click does nothing; release quickly to impart inertia; toggle Auto/Inspect from the menu and from the paws `R3` toggle; verify one crosshair follows the mouse, the native arrow is hidden over the format, and a second display is unaffected.
-- **Status:** in progress.
-
 ### hello-lux-color
-Activate the existing `Lux Color` menu item as the color-picker overlay: a hue ring around a saturation/brightness triangle, mouse and controller picking, and the menu item becomes `World` while open. The paws right-stick toggle changes the ring/triangle control only when the cursor is over the ring or triangle. Back/B cancel and restore the previous color; Done commits; World cancels. No persistence.
-- **Depends on:** hello-ctl-service.
-- **Minimal test:** open `Lux Color`, pick a color, and press Done; the light color changes. Reopen, change the color, and press Back or B; the previous color returns.
-- **Status:** todo.
+Activate the existing `Lux Color` menu item as an opaque black color-picker overlay with a hue ring around a saturation/value triangle, Back immediately left of Done, and the menu item reading `World` while open. Add HSV view state and mouse/controller picking. D-pad focus order is `HueRing -> Triangle -> Back -> Done`; cursor+A picks controls/buttons; A on focused Back/Done activates; the right stick rate-adjusts the focused ring/triangle while the cursor is captured. B releases capture first, then cancels when not captured; Start releases capture and opens the menu; R3 keeps arcball outside the overlay and switches ring/triangle focus inside it when the cursor is over the ring or triangle. Back/B/World cancel and restore the previous color; Done commits; selecting another menu item cancels the overlay first. No persistence.
+- **Depends on:** none.
+- **Minimal test:** open `Lux Color`, pick a color, and press Done; the light color changes. Reopen, change the color, and press Back or B; the previous color returns. Verify D-pad focus, cursor capture/release, and R3 focus switching.
+- **Status:** in progress.
 
 ### hello-lux-pos
 Activate the existing `Lux Pos` menu item as the light-position overlay: show the globe at its last attitude with a live preview of the moved light, controlled with mouse/controller arcball. The menu item becomes `World` while open. The paws right-stick toggle works anywhere in this overlay. Back/B cancel and restore the previous light position; Done commits; World cancels. No persistence.

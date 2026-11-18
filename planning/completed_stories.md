@@ -277,3 +277,9 @@ Add DDS connectivity from `paws` to the format manager. Extended `FormatManagerI
 - **Depends on:** none.
 - **Minimal test:** launch paws with a display id; move the cursor to the three-dot button, open the menu and `Formats` with A, verify D-pad wraps the chooser selection with the first format selected by default, A selects the highlighted format, and `dds-echo` shows the input/command-control samples.
 - **Note:** verified with a temporary `LOCALAPPDATA`; the real runtime state was untouched.
+
+### hello-ctl-service
+Create the per-display hello_world controller and view foundation: per-display `hello-ctl-service` and `hello-view-service`, ABI v4 mouse motion/wheel input with pointer tracking, a top-band horizontal format menu with four fixed slots (`Formats`, `Inspect`/`Auto`, `Lux Color`/`World`, `Lux Pos`/`World`), Auto/Inspect mode with arcball rotation and inertia, per-display light color and position, Lux placeholder label cycling, a visible Paws right-stick `R3` toggle, Start/B menu toggle/cancel commands, and left-drag release-on-leaving-globe. The Lux items are selectable placeholders until their overlay stories. Local right-click is a no-op and pointer input is mouse-only. Hello-view state is not persisted.
+- **Completed:** 2026-11-17 14:44:11.
+- **Depends on:** none.
+- **Minimal test:** open the menu and verify four left-aligned, equally spaced items with centered labels; use Start to toggle the menu and B to cancel it; left-drag the globe to enter Inspect and rotate it, and drag off the globe to start spinning; right-click does nothing; toggle Auto/Inspect from the menu and from the Paws `R3` toggle; verify one crosshair follows the mouse, the native arrow is hidden over the format, and a second display is unaffected.
