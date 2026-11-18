@@ -289,3 +289,10 @@ Activate the `Lux Color` menu item as an opaque black color-picker overlay with 
 - **Completed:** 2026-11-18 10:58:52.
 - **Depends on:** none.
 - **Minimal test:** open `Lux Color`, pick a color, and press Done; the light color changes. Reopen, change the color, and press Back or B; the previous color returns. Verify the preview, initial wheel capture, retained D-pad capture, wheel latch, triangle x-y movement, R3 focus, and mouse-motion capture release.
+
+### hello-lux-pos
+Activate the `Lux Pos` menu item as a black light-position overlay with the globe frozen at the opening attitude, live lighting, and an iconic spotlight-can marker. Added front-hemisphere light actions and snapshots in the view service, the Rust `light_pos` module, shared Back/Done layout, mouse and controller light movement, crosshair retention, overlay transitions, and rate-based right-stick normalization. Back/B/World cancel and restore; Done commits; R3 is a no-op; no persistence.
+- **Completed:** 2026-11-18 13:15:10.
+- **Depends on:** none.
+- **Minimal test:** open `Lux Pos`, move the light, and press Done; the lighting changes. Reopen, move it again, and press Back or B; the previous light position returns. Verify the frozen globe, spotlight marker, Back focus, crosshair, controller speed, and that R3 does nothing.
+- **Note:** verified with a temporary `LOCALAPPDATA` on one and two displays; the real runtime state was untouched.

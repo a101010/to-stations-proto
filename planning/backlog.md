@@ -11,14 +11,92 @@ Conventions:
 
 ## Stories
 
-### hello-lux-pos
-Activate the existing `Lux Pos` menu item as the light-position overlay: freeze the globe at the attitude shown when the overlay opens, show live lighting, and draw an iconic spotlight-can marker constrained to the user-facing hemisphere. Use the same Back/Done positions as Lux Color, Back left of Done, default focus Back, D-pad focus, and A activation. Mouse left-drag and controller right-stick trackball movement move the light; light control is always active, R3 is a no-op, and the virtual crosshair remains visible. The menu item reads `World` while open. Back/B/World cancel and restore the previous light; Done commits; selecting another menu item cancels Lux Pos first. No persistence.
+### cmake-skeleton
+Create the `cpp/` CMake project with one runnable `cmake-smoke` target and integrate configure/build/CTest into `scripts/build.ps1`. Use the Visual Studio 18 2026 generator, C++20, `EXT_PATH_PREFIX`, the install prefix `build/deploy/cpp`, and the repository root resolved without `..`. No C++ deployment yet.
 - **Depends on:** none.
-- **Minimal test:** open `Lux Pos`, move the light, and press Done; the lighting changes. Reopen, move it again, and press Back or B; the previous light position returns. Verify the frozen globe, spotlight marker, Back focus, and that R3 does nothing.
-- **Status:** in progress.
+- **Minimal test:** `scripts/build.ps1 -Test` configures `build/cpp`, builds, and runs `cmake-smoke`; the executable also exits successfully when run directly.
+- **Status:** todo.
 
-### TODO
-Need to shift to C++ here. Bring it up to date with hello-lux-pos. Replace this with C++ stories to do so.
+### sdl3-imgui
+Install SDL3 to the external prefix and add glad and Dear ImGui sources under `cpp/third_party/`. Build a C++ target that opens an SDL3 window on OpenGL 3.3 and renders one Dear ImGui frame over a clear color.
+- **Depends on:** cmake-skeleton.
+- **Minimal test:** the target opens an SDL3 window, renders one Dear ImGui frame, and closes cleanly.
+- **Status:** todo.
+- **Records:** SDL3, glad, and Dear ImGui in `docs/versions.md`.
+
+### cpp-dds
+Generate C++ types from `DDS/` with the installed `idlc -l cxx` backend into `build/gen/cpp`; add the C++ `stations-dds` library with participant/node creation, typed readers/writers, contract loading and validation, deploy-relative `CYCLONEDDS_URI` setup, and CycloneDDS-CXX linking. Add a header-only TOML parser under `cpp/third_party/` for contracts and state.
+- **Depends on:** cmake-skeleton.
+- **Minimal test:** a C++ publisher and subscriber exchange `HelloWorldTopic`; an unregistered topic fails validation; generated types match the shared registry.
+- **Status:** todo.
+- **Records:** TOML parser in `docs/versions.md`.
+
+### cpp-support
+Add shared C++ support libraries for named-mutex single-instance guards, window placement state under `%LOCALAPPDATA%\to-stations`, and deploy-relative asset/config lookup. Use the same guard names and state paths as the Rust applications.
+- **Depends on:** cpp-dds.
+- **Minimal test:** duplicate guard detection, window-state round-trip, and path resolution from a relocated deploy tree.
+- **Status:** todo.
+
+### cpp-display-abi
+Implement the C++ display library DLL against ABI v4 with the default format. Cover version, create/destroy, identity, render, mouse button/motion/wheel, error reporting, and glad loaded through the ABI's GL loader.
+- **Depends on:** sdl3-imgui.
+- **Minimal test:** Rust `lil-d` loads the C++ `display_lib.dll`, passes ABI v4, and renders the C++ default format.
+- **Status:** todo.
+
+### cpp-display-manager
+Add the C++ display manager: format registry from `contracts/formats.toml`, default and format-chooser formats, PNG/JPG icon loading, top-band menu, virtual cursor, input routing, display identity, and the format-manager DDS input/control/view/command endpoints.
+- **Depends on:** cpp-display-abi; cpp-dds; cpp-support.
+- **Minimal test:** Rust `lil-d` with the C++ display DLL and Rust format services switches formats through the menu and chooser; DDS identity filtering works.
+- **Status:** todo.
+- **Records:** icon decoder in `docs/versions.md`.
+
+### cpp-lil-d
+Create the C++ `lil-d` using SDL3 and Dear ImGui: OpenGL 3.3 window, console and power toggle, display id, display-library loading, full mouse event forwarding, native-cursor hiding over the format, single-instance guard, window placement, and deploy under `build/deploy/cpp/bin` with the SDL3, HarfBuzz, and CycloneDDS runtime DLLs. Create `launch-cpp.ps1`, initially for C++ `lil-d`.
+- **Depends on:** sdl3-imgui; cpp-display-abi; cpp-display-manager; cpp-support.
+- **Minimal test:** C++ `lil-d` shows the default/chooser formats, forwards mouse input, hides the native cursor over the format, restores window state, and runs from the relocated deploy tree.
+- **Status:** todo.
+
+### cpp-format-services
+Create C++ `format-ctl-service` and `format-view-service` with per-display assignments, persistence, command relay, contracts, instance guards, and deploy-relative config. Add both executables to the C++ deploy and `launch-cpp.ps1`.
+- **Depends on:** cpp-dds; cpp-lil-d; cpp-support.
+- **Minimal test:** C++ `lil-d` with C++ format services switches and persists per-window formats; two display ids remain independent.
+- **Status:** todo.
+
+### cpp-hello-service
+Create C++ `hello-service`: sequential greeting list, attitude model, and 10 Hz `HelloWorldTopic`. Add it to the C++ deploy and `launch-cpp.ps1`.
+- **Depends on:** cpp-dds; cpp-support.
+- **Minimal test:** Rust `dds-echo` shows C++ `HelloWorldTopic` samples with changing greetings and attitude.
+- **Status:** todo.
+
+### cpp-hello-view-ctl
+Create C++ per-display `hello-view-service` and `hello-ctl-service`: Auto/Inspect, local attitude and inertia, light, color/HSV, overlay snapshots, frozen Lux Pos attitude, Lux Color/Lux Pos actions, guards, and view relay. Add both to the C++ deploy and `launch-cpp.ps1`.
+- **Depends on:** cpp-dds; cpp-support.
+- **Minimal test:** with C++ hello service and a display, mode/arcball/light/color actions and two-display isolation match the Rust behavior.
+- **Status:** todo.
+
+### cpp-display-hello
+Add the C++ hello-world format to the display library: HarfBuzz GPU text, Earth cube map, greeting, Auto/Inspect, arcball and inertia, light/color rendering, menu labels, and chooser integration.
+- **Depends on:** cpp-lil-d; cpp-display-manager; cpp-format-services; cpp-hello-service; cpp-hello-view-ctl; cpp-support.
+- **Minimal test:** C++ `lil-d` with C++ services shows the live greeting and Earth, rotates with mouse and controller commands, and switches Auto/Inspect.
+- **Status:** todo.
+
+### cpp-lux-color
+Add the C++ Lux Color overlay with the hue ring, saturation/value triangle, preview, shared Back/Done row, focus and capture, mouse and controller picking, wheel latch, and view actions.
+- **Depends on:** cpp-display-hello; cpp-hello-view-ctl.
+- **Minimal test:** the Rust Lux Color acceptance test passes with C++ `lil-d` and C++ services.
+- **Status:** todo.
+
+### cpp-lux-pos
+Add the C++ Lux Pos overlay with the frozen globe, live lighting, spotlight can, front-hemisphere mapping, Back/Done, rate-based right-stick control, R3 no-op, crosshair retention, and overlay transitions.
+- **Depends on:** cpp-lux-color; cpp-display-hello; cpp-hello-view-ctl.
+- **Minimal test:** the Rust Lux Pos acceptance test passes with C++ `lil-d` and C++ services.
+- **Status:** todo.
+
+### cpp-paws
+Create the C++ `paws` using SDL3, Dear ImGui, and SDL gamepad input: the virtual Xbox controller, real controller selection, per-display persistence, R3 checkbox, Start/B/Back/A/D-pad/right-stick behavior, instance guard, window placement, and the same DDS commands as Rust `paws`. Add it to the C++ deploy and `launch-cpp.ps1`. Finish the pure C++ two-display configuration.
+- **Depends on:** cpp-lil-d; cpp-format-services; cpp-hello-service; cpp-hello-view-ctl; cpp-display-hello; cpp-lux-color; cpp-lux-pos; cpp-support; cpp-dds; sdl3-imgui.
+- **Minimal test:** `launch-cpp.ps1` with two displays and a temporary `LOCALAPPDATA` runs the pure C++ configuration; hello-world, menu, arcball, Lux Color, Lux Pos, C++ `paws`, persistence, and display isolation work; the Rust configuration still runs.
+- **Status:** todo.
 
 ### paws-two
 Create a game-controller window application (`paws-two`): a Slint window with a Saitek X-52 virtual controller. DDS and real-controller connectivity are out of scope.
@@ -56,19 +134,6 @@ Create the launcher application (`tentacles`): a Slint window that can start and
 - **Minimal test:** the launcher starts and stops a configuration; services can be launched with or without console windows.
 - **Status:** todo.
 
-### sdl3-imgui
-Install SDL3 to the external prefix and add glad and Dear ImGui sources under `cpp/third_party/`.
-- **Depends on:** none.
-- **Minimal test:** a window that renders one Dear ImGui frame over a clear color.
-- **Status:** todo.
-- **Records:** SDL3, glad, and Dear ImGui in `docs/versions.md`.
-
-### cmake-skeleton
-Create the `cpp/` CMake project with one compiling target.
-- **Depends on:** none.
-- **Minimal test:** configure and build one runnable target.
-- **Status:** todo.
-
 ### dds-override-layer
 A communication layer in the DDS stack (`stations-dds`) through which a controller can override individual fields of the messages a service is about to publish. A writer consults the active override set (keyed by topic and, when applicable, key) before serializing, so the real message flow is preserved and only the chosen fields change. The mechanism (a DDS control topic consumed by each service, an in-process hook in `stations-dds`, or shared state) is not yet decided.
 - **Depends on:** none.
@@ -89,8 +154,8 @@ Extend the `dds-echo` Send form to edit and send sequence-bearing topics, includ
 
 ## Proto-stories
 Here are some backlog items not yet broken into stories.
-* C++ mirror of the Rust libraries, tools, and apps and the `c++` configuration.
-* Hybrid configuration and `launch-hybrid.ps1`; `launch-cpp.ps1`.
+* C++ mirror of the developer tools (`dds-echo`, `dds-contracts`).
+* Hybrid configuration and `launch-hybrid.ps1`.
 * Remaining top-level module IDL (control, joystick, display) and the full topic registry (input, control, joystick, format window/mapping).
 * more formats
   * A top-down map view
@@ -100,4 +165,3 @@ Here are some backlog items not yet broken into stories.
   * Turret targeting view?
 * A vehicle platform concept (multi-turret tank-like? helicopter? ship? spaceship?)
 * An 'out-the-window' view for big-d, and maybe even lil-d
-
