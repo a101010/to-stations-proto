@@ -11,17 +11,11 @@ Conventions:
 
 ## Stories
 
-### hello-lux-color
-Activate the existing `Lux Color` menu item as an opaque black color-picker overlay with a hue ring around a saturation/value triangle, Back immediately left of Done, and the menu item reading `World` while open. Add HSV view state and mouse/controller picking. D-pad focus order is `HueRing -> Triangle -> Back -> Done`; cursor+A picks controls/buttons; A on focused Back/Done activates; the right stick rate-adjusts the focused ring/triangle while the cursor is captured. B releases capture first, then cancels when not captured; Start releases capture and opens the menu; R3 keeps arcball outside the overlay and switches ring/triangle focus inside it when the cursor is over the ring or triangle. Back/B/World cancel and restore the previous color; Done commits; selecting another menu item cancels the overlay first. No persistence.
-- **Depends on:** none.
-- **Minimal test:** open `Lux Color`, pick a color, and press Done; the light color changes. Reopen, change the color, and press Back or B; the previous color returns. Verify D-pad focus, cursor capture/release, and R3 focus switching.
-- **Status:** in progress.
-
 ### hello-lux-pos
-Activate the existing `Lux Pos` menu item as the light-position overlay: show the globe at its last attitude with a live preview of the moved light, controlled with mouse/controller arcball. The menu item becomes `World` while open. The paws right-stick toggle works anywhere in this overlay. Back/B cancel and restore the previous light position; Done commits; World cancels. No persistence.
-- **Depends on:** hello-lux-color.
-- **Minimal test:** open `Lux Pos`, move the light, and press Done; the lighting changes. Reopen, move it again, and press Back or B; the previous light position returns.
-- **Status:** todo.
+Activate the existing `Lux Pos` menu item as the light-position overlay: freeze the globe at the attitude shown when the overlay opens, show live lighting, and draw an iconic spotlight-can marker constrained to the user-facing hemisphere. Use the same Back/Done positions as Lux Color, Back left of Done, default focus Back, D-pad focus, and A activation. Mouse left-drag and controller right-stick trackball movement move the light; light control is always active, R3 is a no-op, and the virtual crosshair remains visible. The menu item reads `World` while open. Back/B/World cancel and restore the previous light; Done commits; selecting another menu item cancels Lux Pos first. No persistence.
+- **Depends on:** none.
+- **Minimal test:** open `Lux Pos`, move the light, and press Done; the lighting changes. Reopen, move it again, and press Back or B; the previous light position returns. Verify the frozen globe, spotlight marker, Back focus, and that R3 does nothing.
+- **Status:** in progress.
 
 ### TODO
 Need to shift to C++ here. Bring it up to date with hello-lux-pos. Replace this with C++ stories to do so.

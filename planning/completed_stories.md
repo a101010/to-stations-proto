@@ -283,3 +283,9 @@ Create the per-display hello_world controller and view foundation: per-display `
 - **Completed:** 2026-11-17 14:44:11.
 - **Depends on:** none.
 - **Minimal test:** open the menu and verify four left-aligned, equally spaced items with centered labels; use Start to toggle the menu and B to cancel it; left-drag the globe to enter Inspect and rotate it, and drag off the globe to start spinning; right-click does nothing; toggle Auto/Inspect from the menu and from the Paws `R3` toggle; verify one crosshair follows the mouse, the native arrow is hidden over the format, and a second display is unaffected.
+
+### hello-lux-color
+Activate the `Lux Color` menu item as an opaque black color-picker overlay with a hue ring, saturation/value triangle, output-color preview, and Back/Done using shared positions. Added HSV view state, mouse/controller picking, initial wheel capture, mouse-motion capture release, retained D-pad capture, latched wheel direction with Paws stick-rest signaling, screen x-y triangle movement, and R3 ring/triangle focus switching. Back/B/World cancel and restore; Done commits; selecting another menu item cancels the overlay first. No persistence.
+- **Completed:** 2026-11-18 10:58:52.
+- **Depends on:** none.
+- **Minimal test:** open `Lux Color`, pick a color, and press Done; the light color changes. Reopen, change the color, and press Back or B; the previous color returns. Verify the preview, initial wheel capture, retained D-pad capture, wheel latch, triangle x-y movement, R3 focus, and mouse-motion capture release.
