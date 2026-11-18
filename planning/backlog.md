@@ -15,7 +15,7 @@ Conventions:
 Create the `cpp/` CMake project with one runnable `cmake-smoke` target and integrate configure/build/CTest into `scripts/build.ps1`. Use the Visual Studio 18 2026 generator, C++20, `EXT_PATH_PREFIX`, the install prefix `build/deploy/cpp`, and the repository root resolved without `..`. No C++ deployment yet.
 - **Depends on:** none.
 - **Minimal test:** `scripts/build.ps1 -Test` configures `build/cpp`, builds, and runs `cmake-smoke`; the executable also exits successfully when run directly.
-- **Status:** todo.
+- **Status:** in progress.
 
 ### sdl3-imgui
 Install SDL3 to the external prefix and add glad and Dear ImGui sources under `cpp/third_party/`. Build a C++ target that opens an SDL3 window on OpenGL 3.3 and renders one Dear ImGui frame over a clear color.
