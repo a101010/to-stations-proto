@@ -21,6 +21,13 @@
 - IDs, topic names, and file paths are specified in `planning/backlog.md` and `planning/architecture.md`; use them rather than inventing your own.
 - When planning a new story, do not list already-completed stories as prerequisites; list only the not-yet-done stories it depends on.
 
+### Epics and detailed plans
+
+- An epic is a high-level umbrella story in `backlog.md` for a goal that spans multiple stories. A story may remain high-level until it is refined; placeholder umbrella stories are allowed, whether added by the user or at the user's instruction.
+- A detailed plan for an epic is its decomposition: the set of actionable stories needed to achieve it, added to `backlog.md` using the story conventions above and the IDs, topic names, and paths from `backlog.md` and `architecture.md`, ordered by dependency and priority. The user may choose whether the epic entry remains as the umbrella or is replaced by its stories.
+- A detailed plan for a single story lives in `current_story.md` and is written when the user asks to plan that story.
+- Epic decomposition does not create or rewrite `current_story.md`, mark any story `in progress`, or begin implementation. Add the stories and stop; the user will separately ask for the detailed plan for the next story.
+
 ## Build and deploy artifacts
 
 - Final build products under `build/deploy` must be self-contained and relocatable. They must not embed or require repository paths (`REPO_ROOT`, absolute compile-time paths, or paths outside the install tree).
