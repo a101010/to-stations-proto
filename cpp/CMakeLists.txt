@@ -16,4 +16,6 @@ if(MSVC)
     add_compile_options(/W4 /permissive-)
 endif()
 
+enable_testing()
 add_subdirectory(third_party)
+add_subdirectory(libs/stations-dds)

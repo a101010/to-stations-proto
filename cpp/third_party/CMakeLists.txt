@@ -16,3 +16,5 @@ target_include_directories(imgui PUBLIC
 )
 target_compile_features(imgui PUBLIC cxx_std_20)
 target_link_libraries(imgui PUBLIC SDL3::SDL3-static OpenGL::GL)
+add_library(tomlplusplus INTERFACE)
+target_include_directories(tomlplusplus INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/tomlplusplus)

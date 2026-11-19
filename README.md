@@ -45,7 +45,7 @@ cmd /c "call \"C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\A
 
 ### C++ project
 
-The authored C++ project lives in `cpp/`. `scripts/build.ps1` configures it into `build/cpp` with the Visual Studio 18 2026 generator and builds the Release configuration.
+The authored C++ project lives in `cpp/`. `scripts/build.ps1` configures it into `build/cpp` with the Visual Studio 18 2026 generator, builds the Release configuration, and runs the C++ tests when `-Test` is passed. SDL3, CycloneDDS, and CycloneDDS-CXX are found through `CMAKE_PREFIX_PATH`.
 
 ### SDL3
 

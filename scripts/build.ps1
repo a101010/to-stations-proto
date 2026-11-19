@@ -22,9 +22,9 @@ $extPathPrefix = if ($env:EXT_PATH_PREFIX) { $env:EXT_PATH_PREFIX } else { 'C:\L
 # HarfBuzz runtime for build and test without changing the user PATH.
 $env:EXT_PATH_PREFIX = $extPathPrefix
 $harfbuzzBin = Join-Path $extPathPrefix 'harfbuzz\bin'
-if (Test-Path $harfbuzzBin) {
-    $env:PATH = "$harfbuzzBin;$env:PATH"
-}
+$cycloneddsBin = Join-Path $extPathPrefix 'cyclonedds\bin'
+$cycloneddsCxxBin = Join-Path $extPathPrefix 'cyclonedds-cxx\bin'
+$env:PATH = "$cycloneddsBin;$cycloneddsCxxBin;$harfbuzzBin;$env:PATH"
 
 # The fork's cyclonedds-idlc is Rust codegen (it wraps cyclonedds-build). The C
 # idlc.exe emits C/C++, not Rust.
@@ -105,10 +105,22 @@ $cppBuild = Join-Path $repoRoot 'build\cpp'
 $cppConfig = 'Release'
 $cppExtPath = $extPathPrefix -replace '\\', '/'
 $cppInstall = (Join-Path $repoRoot 'build\deploy\cpp') -replace '\\', '/'
-$cppPrefixPath = (Join-Path $extPathPrefix 'sdl3') -replace '\\', '/'
-$sdl3Config = Join-Path $extPathPrefix 'sdl3\cmake\SDL3Config.cmake'
-if (-not (Test-Path $sdl3Config)) {
-    throw "SDL3 CMake package not found at $sdl3Config"
+$cppPrefixPaths = @(
+    (Join-Path $extPathPrefix 'sdl3'),
+    (Join-Path $extPathPrefix 'cyclonedds'),
+    (Join-Path $extPathPrefix 'cyclonedds-cxx')
+) | ForEach-Object { $_ -replace '\\', '/' }
+$cppPrefixPath = $cppPrefixPaths -join ';'
+
+$requiredPackages = @(
+    (Join-Path $extPathPrefix 'sdl3\cmake\SDL3Config.cmake'),
+    (Join-Path $extPathPrefix 'cyclonedds\lib\cmake\CycloneDDS\CycloneDDSConfig.cmake'),
+    (Join-Path $extPathPrefix 'cyclonedds-cxx\lib\cmake\CycloneDDS-CXX\CycloneDDS-CXXConfig.cmake')
+)
+foreach ($config in $requiredPackages) {
+    if (-not (Test-Path $config)) {
+        throw "CMake package not found at $config"
+    }
 }
 
 $cmakeArgs = @(
@@ -125,6 +137,17 @@ if ($LASTEXITCODE -ne 0) { throw "CMake configure failed ($LASTEXITCODE)" }
 
 & cmake --build $cppBuild --config $cppConfig --parallel
 if ($LASTEXITCODE -ne 0) { throw "CMake build failed ($LASTEXITCODE)" }
+
+if ($Test) {
+    Push-Location $cppBuild
+    try {
+        & ctest -C $cppConfig --output-on-failure
+        if ($LASTEXITCODE -ne 0) { throw "CTest failed ($LASTEXITCODE)" }
+    }
+    finally {
+        Pop-Location
+    }
+}
 
 # Assemble the deployable layout. Only build/deploy is durable; everything else
 # under build/ is temporary. Each story that adds an executable or library

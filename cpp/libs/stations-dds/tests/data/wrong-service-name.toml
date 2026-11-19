@@ -1,0 +1,5 @@
+[service]
+name = "not-the-file-stem"
+
+[[publish]]
+topic = "HelloWorldTopic"
