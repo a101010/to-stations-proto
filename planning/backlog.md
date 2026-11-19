@@ -11,18 +11,11 @@ Conventions:
 
 ## Stories
 
-### cpp-dds
-Generate C++ types from `DDS/` with the installed `idlc -l cxx` backend into `build/gen/cpp`; add the C++ `stations-dds` library with participant/node creation, typed readers/writers, contract loading and validation, deploy-relative `CYCLONEDDS_URI` setup, and CycloneDDS-CXX linking. Use toml++ 3.4.0 for contracts and add committed CTest tests for contract validation, generated type names, and a DDS round trip.
-- **Depends on:** none.
-- **Minimal test:** a C++ publisher and subscriber exchange `HelloWorldTopic`; contract validation rejects an unregistered topic, type mismatch, and unknown QoS; generated type names match the shared registry.
-- **Status:** in progress.
-- **Records:** toml++ in `docs/versions.md`.
-
 ### cpp-support
-Add shared C++ support libraries for named-mutex single-instance guards, window placement state under `%LOCALAPPDATA%\to-stations`, and deploy-relative asset/config lookup. Use the same guard names and state paths as the Rust applications.
-- **Depends on:** cpp-dds.
-- **Minimal test:** duplicate guard detection, window-state round-trip, and path resolution from a relocated deploy tree.
-- **Status:** todo.
+Add a shared C++ support library for named-mutex single-instance guards, window placement state under `%LOCALAPPDATA%\to-stations`, and deploy-relative asset/config lookup. Use the same guard names, state paths, and placement behavior as the Rust applications.
+- **Depends on:** none.
+- **Minimal test:** duplicate guard detection, window-state round-trip, placement/cascade tests, and path resolution from a relocated deploy tree.
+- **Status:** in progress.
 
 ### cpp-display-abi
 Implement the C++ display library DLL against ABI v4 with the default format. Cover version, create/destroy, identity, render, mouse button/motion/wheel, error reporting, and glad loaded through the ABI's GL loader.
@@ -32,7 +25,7 @@ Implement the C++ display library DLL against ABI v4 with the default format. Co
 
 ### cpp-display-manager
 Add the C++ display manager: format registry from `contracts/formats.toml`, default and format-chooser formats, PNG/JPG icon loading, top-band menu, virtual cursor, input routing, display identity, and the format-manager DDS input/control/view/command endpoints.
-- **Depends on:** cpp-display-abi; cpp-dds; cpp-support.
+- **Depends on:** cpp-display-abi; cpp-support.
 - **Minimal test:** Rust `lil-d` with the C++ display DLL and Rust format services switches formats through the menu and chooser; DDS identity filtering works.
 - **Status:** todo.
 - **Records:** icon decoder in `docs/versions.md`.
@@ -45,19 +38,19 @@ Create the C++ `lil-d` using SDL3 and Dear ImGui: OpenGL 3.3 window, console and
 
 ### cpp-format-services
 Create C++ `format-ctl-service` and `format-view-service` with per-display assignments, persistence, command relay, contracts, instance guards, and deploy-relative config. Add both executables to the C++ deploy and `launch-cpp.ps1`.
-- **Depends on:** cpp-dds; cpp-lil-d; cpp-support.
+- **Depends on:** cpp-lil-d; cpp-support.
 - **Minimal test:** C++ `lil-d` with C++ format services switches and persists per-window formats; two display ids remain independent.
 - **Status:** todo.
 
 ### cpp-hello-service
 Create C++ `hello-service`: sequential greeting list, attitude model, and 10 Hz `HelloWorldTopic`. Add it to the C++ deploy and `launch-cpp.ps1`.
-- **Depends on:** cpp-dds; cpp-support.
+- **Depends on:** cpp-support.
 - **Minimal test:** Rust `dds-echo` shows C++ `HelloWorldTopic` samples with changing greetings and attitude.
 - **Status:** todo.
 
 ### cpp-hello-view-ctl
 Create C++ per-display `hello-view-service` and `hello-ctl-service`: Auto/Inspect, local attitude and inertia, light, color/HSV, overlay snapshots, frozen Lux Pos attitude, Lux Color/Lux Pos actions, guards, and view relay. Add both to the C++ deploy and `launch-cpp.ps1`.
-- **Depends on:** cpp-dds; cpp-support.
+- **Depends on:** cpp-support.
 - **Minimal test:** with C++ hello service and a display, mode/arcball/light/color actions and two-display isolation match the Rust behavior.
 - **Status:** todo.
 
@@ -81,7 +74,7 @@ Add the C++ Lux Pos overlay with the frozen globe, live lighting, spotlight can,
 
 ### cpp-paws
 Create the C++ `paws` using SDL3, Dear ImGui, and SDL gamepad input: the virtual Xbox controller, real controller selection, per-display persistence, R3 checkbox, Start/B/Back/A/D-pad/right-stick behavior, instance guard, window placement, and the same DDS commands as Rust `paws`. Add it to the C++ deploy and `launch-cpp.ps1`. Finish the pure C++ two-display configuration.
-- **Depends on:** cpp-lil-d; cpp-format-services; cpp-hello-service; cpp-hello-view-ctl; cpp-display-hello; cpp-lux-color; cpp-lux-pos; cpp-support; cpp-dds.
+- **Depends on:** cpp-lil-d; cpp-format-services; cpp-hello-service; cpp-hello-view-ctl; cpp-display-hello; cpp-lux-color; cpp-lux-pos; cpp-support.
 - **Minimal test:** `launch-cpp.ps1` with two displays and a temporary `LOCALAPPDATA` runs the pure C++ configuration; hello-world, menu, arcball, Lux Color, Lux Pos, C++ `paws`, persistence, and display isolation work; the Rust configuration still runs.
 - **Status:** todo.
 

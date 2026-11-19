@@ -308,3 +308,9 @@ Install SDL3 3.4.20 as a static external component and add glad 2.0.8 and Dear I
 - **Completed:** 2026-11-18 16:36:02.
 - **Depends on:** none.
 - **Minimal test:** a temporary window project under `build/` opens an SDL3 window, renders one Dear ImGui frame, and closes cleanly; `scripts/build.ps1` builds the committed glad and ImGui libraries without smoke-test code.
+
+### cpp-dds
+Generate C++ IDL types into `build/gen/cpp` and add the C++ `stations-dds` library with contract loading/validation, `CYCLONEDDS_URI` setup, typed DDS readers/writers, and QoS mapping. Added toml++ 3.4.0, CTest coverage for contract failures, generated type names, and a live `HelloWorldTopic` round trip, plus build-script DDS paths and CTest execution.
+- **Completed:** 2026-11-19 08:47:50.
+- **Depends on:** none.
+- **Minimal test:** a C++ publisher and subscriber exchange `HelloWorldTopic`; contract validation rejects an unregistered topic, type mismatch, and unknown QoS; generated type names match the shared registry.
