@@ -314,3 +314,9 @@ Generate C++ IDL types into `build/gen/cpp` and add the C++ `stations-dds` libra
 - **Completed:** 2026-11-19 08:47:50.
 - **Depends on:** none.
 - **Minimal test:** a C++ publisher and subscriber exchange `HelloWorldTopic`; contract validation rejects an unregistered topic, type mismatch, and unknown QoS; generated type names match the shared registry.
+
+### cpp-support
+Add a reusable C++ support library with named-mutex single-instance guards, window placement persistence and cascade placement, and deploy-relative path resolution. Added CTest coverage for guard collision/release, state round-trip and overwrite, placement fallbacks, cascade layout, and relocated deploy-root resolution. Tests use temporary directories and never touch real runtime state.
+- **Completed:** 2026-11-19 10:50:50.
+- **Depends on:** none.
+- **Minimal test:** duplicate guard detection, window-state round-trip, placement/cascade tests, and path resolution from a relocated deploy tree.
