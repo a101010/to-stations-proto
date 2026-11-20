@@ -156,8 +156,9 @@ if ($Test) {
 if (-not $Test) {
     $deployRoot = Join-Path $repoRoot 'build\deploy'
     $deployBin = Join-Path $deployRoot 'bin'
+    $deployCppBin = Join-Path $deployRoot 'cpp\bin'
     $deployConfig = Join-Path $deployRoot 'config'
-    New-Item -ItemType Directory -Force -Path $deployBin, $deployConfig | Out-Null
+    New-Item -ItemType Directory -Force -Path $deployBin, $deployCppBin, $deployConfig | Out-Null
     Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\lil-d.exe') -Destination $deployBin -Force
     Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\paws.exe') -Destination $deployBin -Force
     Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\display_lib.dll') -Destination $deployBin -Force
@@ -167,6 +168,10 @@ if (-not $Test) {
     Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\hello-ctl-service.exe') -Destination $deployBin -Force
     Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\format-ctl-service.exe') -Destination $deployBin -Force
     Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\format-view-service.exe') -Destination $deployBin -Force
+
+    # The C++ display loads its C++ display library from next to its executable.
+    Copy-Item -Path (Join-Path $repoRoot 'build\cpp\Release\lil-d.exe') -Destination $deployCppBin -Force
+    Copy-Item -Path (Join-Path $repoRoot 'build\cpp\Release\display_lib.dll') -Destination $deployCppBin -Force
 
     # The display library loads its font and (later) the earth cube map from
     # <deploy>/assets, and links the HarfBuzz runtime from next to the exe.
@@ -180,5 +185,5 @@ if (-not $Test) {
     Copy-Item -Path (Join-Path $repoRoot 'contracts\topics.toml') -Destination $deployConfig -Force
     Copy-Item -Path (Join-Path $repoRoot 'contracts\formats.toml') -Destination $deployConfig -Force
     Copy-Item -Path (Join-Path $repoRoot 'contracts\services') -Destination $deployConfig -Recurse -Force
-    Write-Host "Deployed lil-d.exe, paws.exe, hello-service.exe, hello-view-service.exe, hello-ctl-service.exe, format-ctl-service.exe, format-view-service.exe, dds-echo.exe, display_lib.dll, assets, the HarfBuzz runtime, and the DDS config + contracts"
+    Write-Host "Deployed Rust lil-d.exe and services, C++ lil-d.exe + display_lib.dll, Rust display_lib.dll, assets, the HarfBuzz runtime, and the DDS config + contracts"
 }
