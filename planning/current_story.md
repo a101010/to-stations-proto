@@ -23,7 +23,7 @@ Implement the C++ display library DLL against ABI v4 with the default format. Co
 1. **Implement only the default format.** Format manager, chooser, menu, crosshair, hello-world, and overlays are later stories.
 2. **Use glad from `cpp/third_party/glad`.** The application’s ABI loader supplies GL function addresses.
 3. **Use a short-lived thread-local adapter for `gladLoadGL`.** The ABI loader takes `(name, userdata)`; glad expects a one-argument loader.
-4. **Export the ABI functions explicitly.** Use `extern "C" __declspec(dllexport)`.
+4. **Export the ABI functions with a `.def` file.** Keep the C-linkage definitions matching `include/display_lib.h` without MSVC linkage conflicts.
 5. **Build into `build/cpp`.** Do not deploy the DLL yet.
 6. **Keep default-format geometry testable without GL.** Put vertex generation in a small internal module with a committed CTest test.
 7. **Verify the real ABI path with Rust `lil-d`.** Load the C++ DLL with a temporary `LOCALAPPDATA`.
@@ -57,6 +57,7 @@ cpp/libs/display-lib/
   src/default_format.hpp
   src/default_format.cpp
   src/display_lib.cpp
+  src/display_lib.def
   tests/default_format_tests.cpp
 ```
 
@@ -91,7 +92,7 @@ Unit test:
 
 ## ABI implementation
 
-`display_lib.cpp` defines the opaque `display_lib` state:
+`display_lib.cpp` defines an internal `Display` state behind the opaque `display_lib` handle:
 
 - `uint32_t display_id`
 - `GLuint program`
@@ -100,7 +101,7 @@ Unit test:
 - `GLsizei vertex_count`
 - last pointer position and button bits, stored but unused by the default format
 
-Exports:
+The `.def` file exports:
 
 - `display_lib_abi_version` returns `4`
 - `display_lib_create`
@@ -160,6 +161,7 @@ Mouse events:
 add_library(display_lib SHARED
     src/default_format.cpp
     src/display_lib.cpp
+    src/display_lib.def
 )
 set_target_properties(display_lib PROPERTIES OUTPUT_NAME display_lib)
 target_include_directories(display_lib PRIVATE

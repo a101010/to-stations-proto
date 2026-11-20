@@ -1,0 +1,11 @@
+LIBRARY display_lib
+EXPORTS
+    display_lib_abi_version
+    display_lib_create
+    display_lib_set_identity
+    display_lib_render
+    display_lib_mouse_button
+    display_lib_mouse_motion
+    display_lib_mouse_wheel
+    display_lib_destroy
+    display_lib_last_error
