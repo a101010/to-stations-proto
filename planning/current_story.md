@@ -1,242 +1,240 @@
-# Current story: cpp-display-abi
+# Current story: cpp-lil-d
 
 This file is the detailed, living plan for the one active story. It is rewritten for each story. The backlog in `backlog.md` holds all work and the per-story status.
 
 ## Story
 
-Implement the C++ display library DLL against ABI v4 with the default format. Cover version, create/destroy, identity, render, mouse button/motion/wheel, error reporting, and glad loaded through the ABI's GL loader. Add a CTest unit test for default-format geometry; verify the DLL with Rust `lil-d`.
+Create the C++ `lil-d` using SDL3 and Dear ImGui: OpenGL 3.3 window, console and power toggle, display id, display-library loading, full mouse event forwarding, native-cursor hiding over the format, single-instance guard, window placement, and deploy under `build/deploy/cpp/bin` with the C++ default-format display library. Create `launch-cpp.ps1`, which starts C++ `lil-d` with the existing Rust services and `paws` as temporary stand-ins.
 
 - **Depends on:** none.
-- **Minimal test:** Rust `lil-d` loads the C++ `display_lib.dll`, passes ABI v4, and renders the C++ default format.
+- **Minimal test:** C++ `lil-d` shows the C++ default format, forwards mouse input, hides the native cursor over the format, restores window state, and runs from the relocated deploy tree; `launch-cpp.ps1` starts C++ `lil-d` plus the Rust stand-ins.
 
 ## Context
 
-- `cpp-support` is complete. The C++ project has CMake, SDL3, glad, Dear ImGui, toml++, generated IDL types, DDS support, and support libraries.
-- `include/display_lib.h` defines ABI v4.
-- The Rust display library is the behavioral reference for the default format, handle lifetime, identity, and last-error behavior.
-- The Rust `lil-d` app already loads a display library dynamically and checks ABI v4.
-- The C++ display library does not need DDS, assets, fonts, icons, or the format manager in this story.
-- No C++ display application or deployment is part of this story.
+- `cpp-display-abi` is complete at `2026-11-20 13:12:13`.
+- The C++ display library implements ABI v4 and the default amber/green format.
+- C++ `support` provides single-instance guards, window placement, and deploy-relative paths.
+- SDL3, Dear ImGui, and glad are present.
+- The Rust configuration already has working services and `paws` that can act as temporary stand-ins.
+- Format manager, menu, chooser, hello-world, and overlays are not part of this story.
+- The C++ launch script is the C++ configuration bootstrap with Rust stand-ins; it is not the hybrid configuration.
 
 ## Decisions
 
-1. **Implement only the default format.** Format manager, chooser, menu, crosshair, hello-world, and overlays are later stories.
-2. **Use glad from `cpp/third_party/glad`.** The application’s ABI loader supplies GL function addresses.
-3. **Use a short-lived thread-local adapter for `gladLoadGL`.** The ABI loader takes `(name, userdata)`; glad expects a one-argument loader.
-4. **Export the ABI functions with a `.def` file.** Keep the C-linkage definitions matching `include/display_lib.h` without MSVC linkage conflicts.
-5. **Build into `build/cpp`.** Do not deploy the DLL yet.
-6. **Keep default-format geometry testable without GL.** Put vertex generation in a small internal module with a committed CTest test.
-7. **Verify the real ABI path with Rust `lil-d`.** Load the C++ DLL with a temporary `LOCALAPPDATA`.
-8. **No production C++ app changes.** No C++ `lil-d`, services, deployment, or launch scripts.
-9. **No build-script smoke code.** `build.ps1` builds the DLL and CTest test normally.
+1. **Only the C++ default format is required.** No menu, chooser, hello-world, DDS, or format switching yet.
+2. **Load the display library dynamically.** The app uses `LoadLibraryW` and `GetProcAddress`; it does not link the DLL.
+3. **Use SDL3 + Dear ImGui + glad.** The app owns the window, console, GL context, and event loop.
+4. **Use the C++ support library.** Reuse the guard, placement, and deploy-relative path helpers.
+5. **Persist placement under `lil-d\<display-id>.toml`**, matching Rust.
+6. **Use `lil-d-display-<id>` as the guard name**, matching Rust.
+7. **Hide the native cursor over the format region.** Use a transparent SDL cursor over the format and the normal cursor over the console.
+8. **Create `launch-cpp.ps1` now.** It starts C++ `lil-d` and the existing Rust services and `paws` as temporary stand-ins.
+9. **No C++ services in this story.**
+10. **No real `%LOCALAPPDATA%` in smoke tests.** Use a temporary directory.
 
 ## Scope
 
 **In scope**
 
-- Add `cpp/libs/display-lib/`.
-- Implement ABI v4 and the default format.
-- Add an internal default-format vertex module and CTest test.
-- Update `cpp/CMakeLists.txt`.
-- Update planning bookkeeping.
-- Run the Rust `lil-d` integration check with the C++ DLL.
+- Add `cpp/apps/displays/lil-d/`.
+- SDL3 window and Dear ImGui console.
+- Dynamic C++ display-library ABI loader.
+- Default-format rendering through the C++ display library.
+- Mouse button/motion/wheel forwarding.
+- Native-cursor hiding over the format region.
+- Single-instance guard and window placement.
+- C++ app deploy to `build/deploy/cpp/bin`.
+- `launch-cpp.ps1` using Rust stand-ins.
+- CTest tests for pure layout and mouse mapping.
 
 **Out of scope**
 
-- Format manager, chooser, menu, crosshair, input behavior, or DDS.
-- Fonts, Earth, icons, Lux Color, Lux Pos, or hello-world.
-- C++ display application.
-- Deployment or runtime DLL copying.
+- Format manager, menu, chooser, icon decoder, hello-world, Earth, Lux Color, or Lux Pos.
+- C++ services or C++ `paws`.
+- `launch-hybrid.ps1`.
 - README restructuring.
+- Runtime DLL deployment beyond what the default-format app needs.
 
 ## Files
 
 ```text
-cpp/libs/display-lib/
+cpp/apps/displays/lil-d/
   CMakeLists.txt
-  src/default_format.hpp
-  src/default_format.cpp
-  src/display_lib.cpp
-  src/display_lib.def
-  tests/default_format_tests.cpp
+  src/main.cpp
+  src/app.hpp/.cpp
+  src/console.hpp/.cpp
+  src/display_loader.hpp/.cpp
+  src/layout.hpp/.cpp
+  src/mouse.hpp/.cpp
+  src/window_state.hpp/.cpp
+  tests/main.cpp
 ```
 
-Changes also include:
+Other changes:
 
 - `cpp/CMakeLists.txt`
+- `scripts/build.ps1`
+- `scripts/launch-cpp.ps1` (new)
+- `planning/architecture.md`
 - `planning/backlog.md`
 - `planning/completed_stories.md`
 - `planning/current_story.md`
 
-## Default format
+No `docs/versions.md` change is needed.
 
-Mirror the Rust default format:
+## App behavior
 
-- background: amber `[0.90, 0.62, 0.10, 1.0]`
-- X: green `[0.05, 0.45, 0.15, 1.0]`
-- two bars from corner to corner
-- bar half-thickness `0.05`
-- 12 vertices, six floats per vertex
+### Window and layout
 
-`default_format.hpp/.cpp`:
+- Initial logical window size: 720x720.
+- Console strip: 64 logical pixels high at scale 1.0.
+- Format region: the largest centered square above the console.
+- Serialize the display-library render rectangle and mouse positions in physical pixels.
+- Use ImGui logical coordinates for the console.
+- Window title: `lil-d - <display-id>`.
 
-- expose `std::vector<float> default_vertices()`
-- expose the background and X color constants
-- keep vertex generation independent of OpenGL
+### Display loader
 
-Unit test:
+- Resolve a relative `--display-lib` from the executable directory.
+- Default to `display_lib.dll` next to the executable.
+- Load the DLL and resolve every ABI v4 function.
+- Check `display_lib_abi_version() == 4`.
+- Pass SDL’s GL proc-address loader to `display_lib_create`.
+- Report `display_lib_last_error()` on failure.
+- Destroy the handle before unloading the DLL.
 
-- 12 vertices / 72 floats
-- coordinates stay within the expected NDC overshoot
-- visible geometry spans both diagonals
+### Console
 
-## ABI implementation
+Use Dear ImGui for the bottom strip:
 
-`display_lib.cpp` defines an internal `Display` state behind the opaque `display_lib` handle:
+- `display <id>`
+- separator
+- `Power: on` / `Power: off` button
+- disabling ImGui `.ini` files
 
-- `uint32_t display_id`
-- `GLuint program`
-- `GLuint vao`
-- `GLuint vbo`
-- `GLsizei vertex_count`
-- last pointer position and button bits, stored but unused by the default format
+When power is off:
 
-The `.def` file exports:
+- skip display-library rendering
+- keep the console and window state active
+- update the button label when toggled back on
 
-- `display_lib_abi_version` returns `4`
-- `display_lib_create`
-- `display_lib_set_identity`
-- `display_lib_render`
-- `display_lib_mouse_button`
-- `display_lib_mouse_motion`
-- `display_lib_mouse_wheel`
-- `display_lib_destroy`
-- `display_lib_last_error`
+### Input
 
-Creation:
+Forward all buttons if the format is on:
 
-- reject a null loader
-- set up a thread-local two-argument loader adapter
-- call `gladLoadGL`
-- clear the adapter after loading
-- compile and link the default-format shader
-- create the VAO/VBO and upload vertices
-- return `nullptr` and set `last_error` on failure
+- left = 0
+- right = 1
+- middle = 2
+- back = 3
+- forward = 4
+- other = 5
 
-Error storage:
+Forward absolute mouse motion and wheel input in physical pixels. Do not gate forwarding on ImGui consumption; the display library hit-tests its own region. ImGui still receives events for the console.
 
-- thread-local `std::string`
-- `display_lib_last_error` returns its `c_str()`
-- valid until the next call
+### Cursor
 
-Render:
+- Over the format region: transparent SDL cursor.
+- Over the console or outside the format: normal arrow.
+- Re-evaluate on motion, resize, and power toggle.
 
-- null and non-positive-region checks
-- flip top-left `y` with `framebuffer_height`
-- scissor-clear the amber background
-- set the region viewport
-- disable depth test
-- enable alpha blending
-- draw the green X
-- reset blending
+### Guard and placement
 
-Destroy:
+- Acquire `support::SingleInstance::acquire("lil-d-display-<id>")`.
+- On duplicate, show an SDL error message box and exit with failure.
+- Convert SDL displays into `support::MonitorInfo`.
+- Restore or cascade placement through `support`.
+- Save on move, resize, focus loss, and close, using the support save throttle.
+- Application name `lil-d` and key/display id.
 
-- null-safe
-- delete the program, VAO, and VBO
-- delete the display state
-- assumes the GL context is current, per the ABI
-
-Mouse events:
-
-- null-safe
-- update the stored pointer/button state
-- no default-format visual behavior
-
-## CMake
-
-`cpp/libs/display-lib/CMakeLists.txt`:
-
-```cmake
-add_library(display_lib SHARED
-    src/default_format.cpp
-    src/display_lib.cpp
-    src/display_lib.def
-)
-set_target_properties(display_lib PROPERTIES OUTPUT_NAME display_lib)
-target_include_directories(display_lib PRIVATE
-    ${REPO_ROOT}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
-target_compile_features(display_lib PRIVATE cxx_std_20)
-target_link_libraries(display_lib PRIVATE glad)
-```
-
-Add:
-
-```cmake
-add_executable(display-lib-tests
-    tests/default_format_tests.cpp
-    src/default_format.cpp
-)
-target_include_directories(display-lib-tests PRIVATE src)
-target_compile_features(display-lib-tests PRIVATE cxx_std_20)
-add_test(NAME display-lib-tests COMMAND display-lib-tests)
-```
+## Build and deploy
 
 `cpp/CMakeLists.txt`:
 
-- `add_subdirectory(libs/display-lib)`
+- `add_subdirectory(apps/displays/lil-d)`
 
-`scripts/build.ps1` needs no changes. It builds the DLL and runs CTest.
+`cpp/apps/displays/lil-d/CMakeLists.txt`:
 
-Expected output:
+- `WIN32` executable
+- C++20
+- link `support`, `imgui`, `glad`, and SDL3 through the existing targets
+- include `SDL3/SDL_main.h` in the main translation unit
 
-```text
-build\cpp\Release\display_lib.dll
-```
+`scripts/build.ps1`:
 
-Do not place it in `build/deploy`.
+- deploy `build/cpp/Release/lil-d.exe` to `build/deploy/cpp/bin/lil-d.exe`
+- deploy `build/cpp/Release/display_lib.dll` to `build/deploy/cpp/bin/display_lib.dll`
+- keep Rust artifacts in `build/deploy/bin`
+- do not copy C++ artifacts into the Rust bin
 
-## Integration test
+No additional runtime DLLs are needed for the C++ default-format display library.
 
-Use the existing Rust `lil-d`:
+## launch-cpp.ps1
 
-1. Build with `scripts/build.ps1`.
-2. Launch `build\deploy\bin\lil-d.exe` with:
-   - `--display-id 0`
-   - `--display-lib <absolute path to build\cpp\Release\display_lib.dll>`
-   - a temporary `LOCALAPPDATA`
-3. Confirm `lil-d` accepts ABI v4.
-4. Capture the window and verify the amber background and green X.
-5. Close `lil-d` and remove only the temporary `LOCALAPPDATA` directory.
+The script:
 
-No services are required because this C++ DLL implements only the default format.
+- calls `cleanup.ps1`
+- requires C++ `lil-d` and its display library
+- sets `CYCLONEDDS_URI` to the deploy config for the Rust stand-ins
+- starts Rust:
+  - `hello-service`
+  - per-display `hello-ctl-service`
+  - per-display `hello-view-service`
+  - per-display `format-ctl-service`
+  - per-display `format-view-service`
+  - per-display `paws`
+- starts C++ `lil-d` from `build/deploy/cpp/bin`
+- raises the C++ `lil-d` windows and Rust `paws` windows
+- supports `-DisplayId` like `launch-rust.ps1`
+
+This is the C++ configuration bootstrap with Rust stand-ins, not the hybrid configuration.
+
+## Tests
+
+Committed CTest tests:
+
+- layout geometry for a 720x720 window with a 64-pixel logical console
+- centered square format region
+- mouse button mapping to ABI values
+- inside-format hit test for cursor hiding
+- state-path/placement integration through the support library
+
+Manual:
+
+1. Run `scripts/build.ps1 -Test`.
+2. Run `scripts/build.ps1`.
+3. Launch C++ `lil-d` with a temporary `LOCALAPPDATA`.
+4. Verify:
+   - window opens with title `lil-d - <id>`
+   - console shows display id and power button
+   - format region shows the C++ amber/green default format
+   - power toggle hides/shows the format
+   - native cursor is hidden over the format
+   - window position/size restore
+   - duplicate display id is rejected
+5. Run `launch-cpp.ps1` with one display and verify C++ `lil-d` plus Rust stand-ins start.
+6. Clean up only the temporary directory.
 
 ## Verification
 
-1. `scripts/build.ps1 -Test`
-   - C++ default-format test passes.
-   - Existing C++ and Rust tests still pass.
-2. `scripts/build.ps1`
-   - Release build produces `build/cpp/Release/display_lib.dll`.
-3. Rust `lil-d` loads the C++ DLL successfully.
-4. Visual check of the amber/green default format.
-5. Confirm no real `%LOCALAPPDATA%\to-stations` state is touched.
-6. `git diff --check`.
+```powershell
+.\scripts\build.ps1 -Test
+.\scripts\build.ps1
+.\scripts\launch-cpp.ps1 -DisplayId 0
+.\scripts\cleanup.ps1
+```
 
 ## Risks
 
-- **GL loader adapter:** `gladLoadGL` expects a one-argument loader; keep the ABI userdata adapter short-lived and thread-local.
-- **Symbol exports:** every ABI symbol must be exported with C linkage.
-- **Context assumptions:** creation/render/destroy require a current GL context, as the ABI states.
-- **Shader failures:** report compile/link logs through `display_lib_last_error`.
-- **No GL in CTest:** test only vertex generation in CTest; use Rust `lil-d` for the real GL integration.
-- **Output collision:** the C++ DLL stays under `build/cpp`; the Rust deployment’s `display_lib.dll` remains untouched.
+- **Physical vs logical coordinates:** keep display-library coordinates in physical pixels and ImGui coordinates logical.
+- **Cursor hiding:** use a transparent cursor rather than globally hiding the cursor so the console keeps an arrow.
+- **Window placement:** convert SDL display/window coordinates consistently into the support geometry types.
+- **Display library path:** resolve relative paths from the executable directory, not the process working directory.
+- **Launch script scope:** keep Rust stand-ins explicit; do not turn this into the hybrid launch.
+- **No real runtime state:** always use a temporary `LOCALAPPDATA` for smoke tests.
 
 ## Bookkeeping
 
-- `cpp-support` is completed at `2026-11-19 10:50:50`.
-- `cpp-display-abi` is `in progress` in `backlog.md`.
-- `cpp-display-abi` has no remaining story prerequisites.
-- Do not move `cpp-display-abi` to `completed_stories.md` until the user asks to plan the next story.
+- `cpp-display-abi` is completed at `2026-11-20 13:12:13`.
+- `cpp-lil-d` is `in progress` in `backlog.md`.
+- `cpp-lil-d` has no remaining story prerequisites.
+- Do not move `cpp-lil-d` to `completed_stories.md` until the user asks to plan the next story.

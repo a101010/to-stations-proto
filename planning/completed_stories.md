@@ -320,3 +320,9 @@ Add a reusable C++ support library with named-mutex single-instance guards, wind
 - **Completed:** 2026-11-19 10:50:50.
 - **Depends on:** none.
 - **Minimal test:** duplicate guard detection, window-state round-trip, placement/cascade tests, and path resolution from a relocated deploy tree.
+
+### cpp-display-abi
+Implement the C++ display library DLL against ABI v4 with the default format. Added the C++ `display_lib.dll`, glad loader adapter, amber/green default format, ABI exports through a `.def` file, error reporting, identity/input entry points, and a committed CTest geometry test. Verified with Rust `lil-d` loading the C++ DLL.
+- **Completed:** 2026-11-20 13:12:13.
+- **Depends on:** none.
+- **Minimal test:** Rust `lil-d` loads the C++ `display_lib.dll`, passes ABI v4, and renders the C++ default format.
