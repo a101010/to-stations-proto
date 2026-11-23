@@ -9,6 +9,7 @@ name = "format-ctl-service"
 path = "src/main.rs"
 
 [dependencies]
+deploy-paths = { workspace = true }
 stations-dds = { workspace = true }
 format-list = { workspace = true }
 app-state = { workspace = true }

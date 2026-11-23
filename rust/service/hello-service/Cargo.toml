@@ -9,6 +9,7 @@ name = "hello-service"
 path = "src/main.rs"
 
 [dependencies]
+deploy-paths = { workspace = true }
 stations-dds = { workspace = true }
 clap = { workspace = true }
 single-instance = { workspace = true }

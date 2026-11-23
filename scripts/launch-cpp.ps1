@@ -7,7 +7,7 @@ Starts the C++ lil-d display from build/deploy/cpp/bin, using the Rust services
 and paws as stand-ins until the C++ replacements are implemented. The
 hello_world model service, one hello_world view/controller service pair and one
 format-manager service pair per display, and one paws virtual-controller window
-per display id come from build/deploy/bin.
+per display id come from build/deploy/rust/bin.
 
 Every display has a unique numeric display id. The same id is given to its
 hello view/controller services, format controller, format view service, lil-d,
@@ -38,18 +38,18 @@ if ($DisplayId.Count -eq 0) {
 & (Join-Path $PSScriptRoot 'cleanup.ps1')
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$bin = Join-Path $repoRoot 'build\deploy\bin'
+$rustBin = Join-Path $repoRoot 'build/deploy/rust/bin'
 $cppBin = Join-Path $repoRoot 'build\deploy\cpp\bin'
 $config = Join-Path $repoRoot 'build\deploy\config\cyclonedds-config.xml'
 
-$model = Join-Path $bin 'hello-service.exe'
-$helloCtl = Join-Path $bin 'hello-ctl-service.exe'
-$helloView = Join-Path $bin 'hello-view-service.exe'
-$formatCtl = Join-Path $bin 'format-ctl-service.exe'
-$formatView = Join-Path $bin 'format-view-service.exe'
+$model = Join-Path $rustBin 'hello-service.exe'
+$helloCtl = Join-Path $rustBin 'hello-ctl-service.exe'
+$helloView = Join-Path $rustBin 'hello-view-service.exe'
+$formatCtl = Join-Path $rustBin 'format-ctl-service.exe'
+$formatView = Join-Path $rustBin 'format-view-service.exe'
 $display = Join-Path $cppBin 'lil-d.exe'
 $displayLib = Join-Path $cppBin 'display_lib.dll'
-$paws = Join-Path $bin 'paws.exe'
+$paws = Join-Path $rustBin 'paws.exe'
 if (-not (Test-Path $model) -or -not (Test-Path $helloCtl) -or -not (Test-Path $helloView) -or -not (Test-Path $formatCtl) -or -not (Test-Path $formatView) -or -not (Test-Path $display) -or -not (Test-Path $displayLib) -or -not (Test-Path $paws) -or -not (Test-Path $config)) {
     throw "Not built: run scripts\build.ps1 first."
 }

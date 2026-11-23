@@ -159,26 +159,14 @@ impl Display {
     }
 }
 
-/// The deploy root's assets directory: `<exe_dir>/../assets` (the exe lives in
-/// `build/deploy/bin`, the assets in `build/deploy/assets`).
 fn assets_root() -> std::path::PathBuf {
-    std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(std::path::Path::to_path_buf))
-        .and_then(|bin| bin.parent().map(|deploy| deploy.join("assets")))
-        .unwrap_or_else(|| std::path::PathBuf::from("assets"))
+    deploy_paths::assets_dir().unwrap_or_else(|| std::path::PathBuf::from("assets"))
 }
 
-/// The contracts directory: the deploy root's `config/`, else the current
-/// working directory's `contracts/` for a development build.
 fn config_root() -> std::path::PathBuf {
-    let deployed = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(std::path::Path::to_path_buf))
-        .and_then(|bin| bin.parent().map(|deploy| deploy.join("config")));
-    if let Some(dir) = &deployed {
+    if let Some(dir) = deploy_paths::config_dir() {
         if dir.join("topics.toml").is_file() {
-            return dir.clone();
+            return dir;
         }
     }
     std::env::current_dir()

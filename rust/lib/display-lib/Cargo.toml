@@ -10,6 +10,7 @@ path = "src/lib.rs"
 crate-type = ["cdylib"]
 
 [dependencies]
+deploy-paths = { workspace = true }
 glow = { workspace = true }
 harfbuzz = { workspace = true }
 image = { workspace = true }

@@ -6,6 +6,7 @@ publish = false
 build = "build.rs"
 
 [dependencies]
+deploy-paths = { workspace = true }
 slint = { version = "1.18", features = ["unstable-winit-030"] }
 clap = { workspace = true }
 socket2 = { workspace = true }

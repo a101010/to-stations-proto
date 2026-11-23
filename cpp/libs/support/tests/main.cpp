@@ -249,10 +249,13 @@ void check_placements() {
 
 void check_paths() {
     const std::filesystem::path root = temporary_directory("paths");
-    const std::filesystem::path executable = root / "deploy" / "cpp" / "bin" / "tool.exe";
+    const std::filesystem::path deploy = root / "deploy";
     check(
-        support::deploy_root_for(executable) == root / "deploy",
-        "deploy root");
+        support::deploy_root_for(deploy / "rust" / "bin" / "tool.exe") == deploy,
+        "rust deploy root");
+    check(
+        support::deploy_root_for(deploy / "cpp" / "bin" / "tool.exe") == deploy,
+        "cpp deploy root");
     check(!support::module_path().empty(), "module path");
     std::filesystem::remove_all(root);
 }

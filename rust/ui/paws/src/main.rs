@@ -37,7 +37,7 @@ struct Args {
     #[arg(long, default_value_t = 0)]
     domain: u32,
 
-    /// Contracts directory (default: `<exe_dir>/../config`, else `./contracts`).
+    /// Contracts directory (default: `the deploy root's config`, else `./contracts`).
     #[arg(long)]
     config: Option<PathBuf>,
 }

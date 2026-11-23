@@ -89,9 +89,9 @@ Cargo reads `.cargo/config.toml` at the repository root, which sets the target d
 
 The small display app (`lil-d`) renders its format region through a display library that it loads at runtime as a DLL (`display_lib.dll`), not by linking. The ABI is the shared header `include/display_lib.h`; a display app in either language can load a display library in either language (the hybrid deployment).
 
-`scripts/build.ps1` builds `display_lib.dll` and deploys it next to `lil-d.exe` in `build/deploy/bin`. `lil-d` takes `--display-lib <path>` to choose the DLL (default `display_lib.dll`, resolved next to the exe). Because `lil-d` does not link the library, `cargo run -p lil-d` alone does not build the DLL; run `scripts/build.ps1` (or `cargo build` for the whole workspace) first.
+`scripts/build.ps1` builds `display_lib.dll` and deploys it next to `lil-d.exe` in `build/deploy/rust/bin`. `lil-d` takes `--display-lib <path>` to choose the DLL (default `display_lib.dll`, resolved next to the exe). Because `lil-d` does not link the library, `cargo run -p lil-d` alone does not build the DLL; run `scripts/build.ps1` (or `cargo build` for the whole workspace) first.
 
-`build.ps1` also copies `assets/` to `build/deploy/assets` and the HarfBuzz runtime (`harfbuzz.dll`, `harfbuzz-gpu.dll`) next to the display library. The library loads its font from `<deploy>/assets` (resolved from the executable path, so the exe must live in `build/deploy/bin`); run it through the launch script rather than `cargo run`.
+`build.ps1` assembles `build/deploy/rust/bin` and `build/deploy/cpp/bin` from the shared `build/deploy/assets` and `build/deploy/config`. It also copies the HarfBuzz runtime (`harfbuzz.dll`, `harfbuzz-gpu.dll`) next to each display library. The library loads its font from `<deploy>/assets` (resolved from the executable path, so the exe must live in `build/deploy/rust/bin`); run it through the launch script rather than `cargo run`.
 
 ### Cyclone DDS (C)
 
@@ -106,7 +106,7 @@ cmake --install C:\Libraries\src\cyclonedds\build --config Release
 
 The install contains `bin\ddsc.dll`, `bin\idlc.exe`, `lib\ddsc.lib`, `include\ddsc`, and the CMake package at `lib\cmake\CycloneDDS`.
 
-The install prefix (`EXT_PATH_PREFIX`, default `C:\Libraries`) is used by `scripts/build.ps1`, which supplies the runtime: it uses a process-scoped `PATH` during the build and copies `ddsc.dll` into `build/deploy/bin`. No system or user `PATH` change is required.
+The install prefix (`EXT_PATH_PREFIX`, default `C:\Libraries`) is used by `scripts/build.ps1`, which supplies the runtime: it uses a process-scoped `PATH` during the build and copies the required runtime DLLs next to each configuration's binaries (`build/deploy/rust/bin` for Rust, `build/deploy/cpp/bin` for C++). No system or user `PATH` change is required.
 
 ### Cyclone DDS (C++)
 

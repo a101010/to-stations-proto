@@ -227,15 +227,8 @@ impl DiscoveryLog {
     }
 }
 
-/// The deploy root derived from the executable location: `<exe_dir>/..`.
-fn deploy_root() -> Option<PathBuf> {
-    let exe = std::env::current_exe().ok()?;
-    let bin = exe.parent()?;
-    bin.parent().map(Path::to_path_buf)
-}
-
 fn default_log_path() -> Option<PathBuf> {
-    deploy_root()
+    deploy_paths::deploy_root()
         .or_else(|| {
             std::env::current_exe()
                 .ok()
@@ -254,8 +247,8 @@ fn resolve_config(explicit: Option<&Path>, log: &DiscoveryLog) -> Option<PathBuf
             path.display()
         ));
     }
-    if let Some(deploy) = deploy_root() {
-        let path = deploy.join("config").join("cyclonedds-config.xml");
+    if let Some(config) = deploy_paths::config_dir() {
+        let path = config.join("cyclonedds-config.xml");
         if path.is_file() {
             return Some(path);
         }
@@ -276,8 +269,8 @@ fn resolve_registry(explicit: Option<&Path>, log: &DiscoveryLog) -> Option<PathB
         }
         log.log(format!("explicit registry not found: {}", path.display()));
     }
-    if let Some(deploy) = deploy_root() {
-        let path = deploy.join("config").join("topics.toml");
+    if let Some(config) = deploy_paths::config_dir() {
+        let path = config.join("topics.toml");
         if path.is_file() {
             return Some(path);
         }

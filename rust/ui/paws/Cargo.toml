@@ -10,6 +10,7 @@ name = "paws"
 path = "src/main.rs"
 
 [dependencies]
+deploy-paths = { workspace = true }
 app-state = { workspace = true }
 clap = { workspace = true }
 format-list = { workspace = true }

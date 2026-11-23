@@ -9,6 +9,7 @@ name = "hello-view-service"
 path = "src/main.rs"
 
 [dependencies]
+deploy-paths = { workspace = true }
 stations-dds = { workspace = true }
 format-list = { workspace = true }
 clap = { workspace = true }

@@ -28,7 +28,7 @@ struct Args {
     #[arg(long, default_value_t = 10)]
     rate_ms: u64,
 
-    /// Contracts directory (default: `<exe_dir>/../config`, else `./contracts`).
+    /// Contracts directory (default: `the deploy root's config`, else `./contracts`).
     #[arg(long)]
     config: Option<PathBuf>,
 
@@ -113,19 +113,15 @@ fn run(args: &Args) -> Result<(), String> {
     }
 }
 
-/// The contracts directory: an explicit `--config`, else `<exe_dir>/../config`,
+/// The contracts directory: an explicit `--config`, else `the deploy root's config`,
 /// else `./contracts` for a development build.
 fn contracts_dir(explicit: Option<&Path>) -> PathBuf {
     if let Some(path) = explicit {
         return path.to_path_buf();
     }
-    let deployed = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(Path::to_path_buf))
-        .and_then(|bin| bin.parent().map(|deploy| deploy.join("config")));
-    if let Some(dir) = &deployed {
+    if let Some(dir) = deploy_paths::config_dir() {
         if dir.join("topics.toml").is_file() {
-            return dir.clone();
+            return dir;
         }
     }
     std::env::current_dir()

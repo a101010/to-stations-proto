@@ -37,7 +37,7 @@ if ($DisplayId.Count -eq 0) {
 & (Join-Path $PSScriptRoot 'cleanup.ps1')
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$bin = Join-Path $repoRoot 'build\deploy\bin'
+$bin = Join-Path $repoRoot 'build/deploy/rust/bin'
 $config = Join-Path $repoRoot 'build\deploy\config\cyclonedds-config.xml'
 
 $model = Join-Path $bin 'hello-service.exe'

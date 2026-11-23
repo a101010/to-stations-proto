@@ -1067,6 +1067,7 @@ version = "0.0.0"
 dependencies = [
  "clap",
  "cyclonedds-rust-sys",
+ "deploy-paths",
  "if-addrs",
  "single-instance",
  "slint",
@@ -1076,6 +1077,10 @@ dependencies = [
  "window-position",
  "windows-sys 0.59.0",
 ]
+
+[[package]]
+name = "deploy-paths"
+version = "0.0.0"
 
 [[package]]
 name = "derive_more"
@@ -1120,6 +1125,7 @@ dependencies = [
 name = "display-lib"
 version = "0.0.0"
 dependencies = [
+ "deploy-paths",
  "format-list",
  "glow 0.17.0",
  "harfbuzz",
@@ -1611,6 +1617,7 @@ version = "0.0.0"
 dependencies = [
  "app-state",
  "clap",
+ "deploy-paths",
  "format-list",
  "single-instance",
  "stations-dds",
@@ -1630,6 +1637,7 @@ version = "0.0.0"
 dependencies = [
  "app-state",
  "clap",
+ "deploy-paths",
  "format-list",
  "single-instance",
  "stations-dds",
@@ -2062,6 +2070,7 @@ name = "hello-ctl-service"
 version = "0.0.0"
 dependencies = [
  "clap",
+ "deploy-paths",
  "format-list",
  "single-instance",
  "stations-dds",
@@ -2072,6 +2081,7 @@ name = "hello-service"
 version = "0.0.0"
 dependencies = [
  "clap",
+ "deploy-paths",
  "single-instance",
  "stations-dds",
 ]
@@ -2081,6 +2091,7 @@ name = "hello-view-service"
 version = "0.0.0"
 dependencies = [
  "clap",
+ "deploy-paths",
  "format-list",
  "single-instance",
  "stations-dds",
@@ -3760,6 +3771,7 @@ version = "0.0.0"
 dependencies = [
  "app-state",
  "clap",
+ "deploy-paths",
  "format-list",
  "gilrs",
  "serde",

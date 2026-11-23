@@ -1,0 +1,9 @@
+[package]
+name = "deploy-paths"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "deploy_paths"
+path = "src/lib.rs"

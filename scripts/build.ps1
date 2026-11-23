@@ -154,20 +154,24 @@ if ($Test) {
 # extends this step. The release build is deployed so the display is a GUI
 # application with no console window (see lil-d's windows_subsystem attribute).
 if (-not $Test) {
-    $deployRoot = Join-Path $repoRoot 'build\deploy'
-    $deployBin = Join-Path $deployRoot 'bin'
-    $deployCppBin = Join-Path $deployRoot 'cpp\bin'
+    $deployRoot = Join-Path $repoRoot 'build/deploy'
+    $deployRustBin = Join-Path $deployRoot 'rust/bin'
+    $deployCppBin = Join-Path $deployRoot 'cpp/bin'
     $deployConfig = Join-Path $deployRoot 'config'
-    New-Item -ItemType Directory -Force -Path $deployBin, $deployCppBin, $deployConfig | Out-Null
-    Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\lil-d.exe') -Destination $deployBin -Force
-    Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\paws.exe') -Destination $deployBin -Force
-    Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\display_lib.dll') -Destination $deployBin -Force
-    Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\dds-echo.exe') -Destination $deployBin -Force
-    Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\hello-service.exe') -Destination $deployBin -Force
-    Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\hello-view-service.exe') -Destination $deployBin -Force
-    Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\hello-ctl-service.exe') -Destination $deployBin -Force
-    Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\format-ctl-service.exe') -Destination $deployBin -Force
-    Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\format-view-service.exe') -Destination $deployBin -Force
+    $legacyDeployBin = Join-Path $deployRoot 'bin'
+    if (Test-Path $legacyDeployBin) {
+        Remove-Item -LiteralPath $legacyDeployBin -Recurse -Force
+    }
+    New-Item -ItemType Directory -Force -Path $deployRustBin, $deployCppBin, $deployConfig | Out-Null
+    Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\lil-d.exe') -Destination $deployRustBin -Force
+    Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\paws.exe') -Destination $deployRustBin -Force
+    Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\display_lib.dll') -Destination $deployRustBin -Force
+    Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\dds-echo.exe') -Destination $deployRustBin -Force
+    Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\hello-service.exe') -Destination $deployRustBin -Force
+    Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\hello-view-service.exe') -Destination $deployRustBin -Force
+    Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\hello-ctl-service.exe') -Destination $deployRustBin -Force
+    Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\format-ctl-service.exe') -Destination $deployRustBin -Force
+    Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\format-view-service.exe') -Destination $deployRustBin -Force
 
     # The C++ display loads its C++ display library and runtime DLLs from next to its executable.
     Copy-Item -Path (Join-Path $repoRoot 'build\cpp\Release\lil-d.exe') -Destination $deployCppBin -Force
@@ -180,8 +184,8 @@ if (-not $Test) {
     # The display library loads its font and (later) the earth cube map from
     # <deploy>/assets, and links the HarfBuzz runtime from next to the exe.
     Copy-Item -Path (Join-Path $repoRoot 'assets') -Destination $deployRoot -Recurse -Force
-    Copy-Item -Path (Join-Path $extPathPrefix 'harfbuzz\bin\harfbuzz.dll') -Destination $deployBin -Force
-    Copy-Item -Path (Join-Path $extPathPrefix 'harfbuzz\bin\harfbuzz-gpu.dll') -Destination $deployBin -Force
+    Copy-Item -Path (Join-Path $extPathPrefix 'harfbuzz\bin\harfbuzz.dll') -Destination $deployRustBin -Force
+    Copy-Item -Path (Join-Path $extPathPrefix 'harfbuzz\bin\harfbuzz-gpu.dll') -Destination $deployRustBin -Force
 
     # The shared DDS configuration for the StationsDDS loopback adapter, and the
     # contracts the services and the display library read from <deploy>/config.
@@ -189,5 +193,5 @@ if (-not $Test) {
     Copy-Item -Path (Join-Path $repoRoot 'contracts\topics.toml') -Destination $deployConfig -Force
     Copy-Item -Path (Join-Path $repoRoot 'contracts\formats.toml') -Destination $deployConfig -Force
     Copy-Item -Path (Join-Path $repoRoot 'contracts\services') -Destination $deployConfig -Recurse -Force
-    Write-Host "Deployed Rust lil-d.exe and services, C++ lil-d.exe + display_lib.dll + C++ runtime DLLs, Rust display_lib.dll, assets, the HarfBuzz runtime, and the DDS config + contracts"
+    Write-Host "Deployed Rust artifacts to build/deploy/rust/bin and C++ artifacts to build/deploy/cpp/bin, with assets, runtime DLLs, and the DDS config + contracts"
 }
