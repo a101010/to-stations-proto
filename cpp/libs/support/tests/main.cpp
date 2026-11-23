@@ -208,6 +208,21 @@ void check_placements() {
 
     {
         const std::vector<support::MonitorInfo> monitors{
+            monitor("A", 0, 0, 1920, 1080),
+            monitor("B", 1920, 0, 2560, 1440)};
+        const auto value = saved("Acer VG270K", 2560, 1440, 100, 50);
+        const auto resolved = support::restore_or_cascade(
+            value,
+            std::span<const support::MonitorInfo>(monitors),
+            &monitors[0],
+            window,
+            window,
+            0);
+        check(resolved.position == support::Point{2020, 50}, "friendly-name geometry fallback");
+    }
+
+    {
+        const std::vector<support::MonitorInfo> monitors{
             monitor("A", 0, 0, 1920, 1080)};
         const auto value = saved("Missing", 1920, 1080, 100, 50);
         const auto resolved = support::restore_or_cascade(

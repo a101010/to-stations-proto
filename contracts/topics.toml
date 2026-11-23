@@ -40,7 +40,7 @@ key = []
 [[topics]]
 name = "FormatManagerViewTopic"
 type = "format_manager::FormatManagerViewTopic"
-qos = "transient_local"
+qos = "best_effort"
 key = []
 
 [[topics]]

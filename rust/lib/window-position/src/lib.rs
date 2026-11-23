@@ -208,6 +208,28 @@ fn choose_position(
                 }
             }
         }
+        if saved.monitor_width.is_some() && saved.monitor_height.is_some() {
+            let mut match_monitor = None;
+            let mut match_position = None;
+            let mut matches = 0;
+            for monitor in monitors {
+                if !resolution_matches(saved, monitor) {
+                    continue;
+                }
+                let position = offset(monitor, saved.x, saved.y);
+                if !visible_enough(monitor, position, window_size) {
+                    continue;
+                }
+                match_monitor = Some(monitor);
+                match_position = Some(position);
+                matches += 1;
+            }
+            if matches == 1 {
+                if let (Some(monitor), Some(position)) = (match_monitor, match_position) {
+                    return resolved(monitor, position, inner_size);
+                }
+            }
+        }
         if let Some(primary) = primary {
             let position = offset(primary, saved.x, saved.y);
             if visible_enough(primary, position, window_size) {
@@ -513,6 +535,27 @@ mod tests {
             )
             .position,
             PhysicalPosition::new(100, 50)
+        );
+    }
+
+    #[test]
+    fn friendly_name_uses_unique_resolution_fallback() {
+        let monitors = vec![
+            monitor("A", 0, 0, 1920, 1080),
+            monitor("B", 1920, 0, 2560, 1440),
+        ];
+        let saved = saved("Acer VG270K", Some(2560), Some(1440), 100, 50);
+        assert_eq!(
+            choose_position(
+                Some(&saved),
+                &monitors,
+                Some(&monitors[0]),
+                WINDOW,
+                WINDOW,
+                0
+            )
+            .position,
+            PhysicalPosition::new(2020, 50)
         );
     }
 

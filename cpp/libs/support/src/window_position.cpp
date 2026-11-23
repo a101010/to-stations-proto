@@ -124,6 +124,26 @@ ResolvedPosition choose_position(
                 }
             }
         }
+        if (saved->monitor_width && saved->monitor_height) {
+            const MonitorInfo* match = nullptr;
+            Point match_position;
+            size_t matches = 0;
+            for (const MonitorInfo& monitor : monitors) {
+                if (!resolution_matches(*saved, monitor)) {
+                    continue;
+                }
+                const Point position = offset(monitor, saved->x, saved->y);
+                if (!visible_enough(monitor, position, window_size)) {
+                    continue;
+                }
+                match = &monitor;
+                match_position = position;
+                ++matches;
+            }
+            if (matches == 1) {
+                return resolved(*match, match_position, inner_size);
+            }
+        }
         if (primary != nullptr) {
             const Point position = offset(*primary, saved->x, saved->y);
             if (visible_enough(*primary, position, window_size)) {

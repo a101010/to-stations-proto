@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::time::Duration;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use clap::Parser;
 use format_list::{FormatList, SavedAssignment, SavedAssignments};
@@ -33,6 +33,10 @@ struct Args {
     /// Numeric display id this service forwards assignments for.
     #[arg(long)]
     display_id: Option<u32>,
+
+    /// Periodic republish interval, in milliseconds.
+    #[arg(long, default_value_t = 250)]
+    rate_ms: u64,
 
     /// Print this service's contract and exit.
     #[arg(long)]
@@ -76,7 +80,7 @@ fn run(args: &Args) -> Result<(), String> {
     };
 
     let state_path = app_state::state_path("format-view-service", &display_id.to_string());
-    let saved = state_path
+    let mut saved = state_path
         .as_deref()
         .and_then(|path| app_state::load::<SavedAssignments>(path))
         .unwrap_or_else(SavedAssignments::hello_world)
@@ -90,25 +94,44 @@ fn run(args: &Args) -> Result<(), String> {
         .writer::<FormatManagerViewTopic>("FormatManagerViewTopic")
         .map_err(|e| e.to_string())?;
 
-    writer
-        .write(&view_topic(display_id, &saved)?)
-        .map_err(|e| e.to_string())?;
+    let period = Duration::from_millis(args.rate_ms.max(1));
+    let mut last_publish = Instant::now();
+    let mut revision = 0u64;
+    let mut publish = |saved: &SavedAssignments, revision: &mut u64| -> Result<(), String> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        *revision = (*revision).max(now).saturating_add(1);
+        writer
+            .write(&view_topic(display_id, saved, *revision)?)
+            .map_err(|e| e.to_string())
+    };
+
+    publish(&saved, &mut revision)?;
 
     loop {
+        let now = Instant::now();
         let samples = reader.take().map_err(|e| e.to_string())?;
+        let mut changed = false;
         for sample in samples {
             if sample.display_id != display_id {
                 continue;
             }
-            let saved = saved_from_control(&sample).validated(&formats);
-            if let Some(path) = &state_path {
-                if let Err(error) = app_state::save(path, &saved) {
-                    eprintln!("format-view-service: state save failed: {error}");
+            let next = saved_from_control(&sample).validated(&formats);
+            if next != saved {
+                saved = next;
+                changed = true;
+                if let Some(path) = &state_path {
+                    if let Err(error) = app_state::save(path, &saved) {
+                        eprintln!("format-view-service: state save failed: {error}");
+                    }
                 }
             }
-            writer
-                .write(&view_topic(display_id, &saved)?)
-                .map_err(|e| e.to_string())?;
+        }
+        if changed || now.duration_since(last_publish) >= period {
+            publish(&saved, &mut revision)?;
+            last_publish = now;
         }
         std::thread::sleep(POLL);
     }
@@ -131,6 +154,7 @@ fn saved_from_control(sample: &FormatManagerCtlTopic) -> SavedAssignments {
 fn view_topic(
     display_id: u32,
     saved: &SavedAssignments,
+    revision: u64,
 ) -> Result<FormatManagerViewTopic, String> {
     let windows = saved
         .windows
@@ -143,6 +167,7 @@ fn view_topic(
     Ok(FormatManagerViewTopic {
         display_id,
         windows: DdsSequence::from_vec(windows).map_err(|e| e.to_string())?,
+        revision,
     })
 }
 
@@ -193,7 +218,7 @@ name = "default"
     #[test]
     fn matching_control_becomes_a_view_with_identity() {
         let saved = saved_from_control(&control(0, "default")).validated(&formats());
-        let view = view_topic(0, &saved).unwrap();
+        let view = view_topic(0, &saved, 1).unwrap();
         assert_eq!(view.display_id, 0);
         assert_eq!(view.windows.as_slice()[0].format, "default");
     }
@@ -201,7 +226,7 @@ name = "default"
     #[test]
     fn unknown_formats_fall_back_to_hello_world() {
         let saved = saved_from_control(&control(0, "missing")).validated(&formats());
-        let view = view_topic(0, &saved).unwrap();
+        let view = view_topic(0, &saved, 1).unwrap();
         assert_eq!(view.windows.as_slice()[0].format, "hello-world");
     }
 
@@ -209,7 +234,7 @@ name = "default"
     fn implicit_chooser_assignment_is_preserved() {
         let saved = saved_from_control(&control(0, format_list::FORMAT_CHOOSER))
             .validated(&formats());
-        let view = view_topic(0, &saved).unwrap();
+        let view = view_topic(0, &saved, 1).unwrap();
         assert_eq!(view.windows.as_slice()[0].format, format_list::FORMAT_CHOOSER);
     }
 }

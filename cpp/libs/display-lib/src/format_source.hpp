@@ -24,6 +24,7 @@ private:
     dds::sub::DataReader<format_manager::FormatManagerViewTopic> reader_;
     std::optional<dds::sub::DataReader<format_manager::FormatManagerCommandCtlTopic>> command_reader_;
     dds::pub::DataWriter<format_manager::FormatManagerInputTopic> writer_;
+    std::uint64_t last_revision_ = 0;
 };
 
 std::optional<FormatCommand> to_command(const format_manager::FormatManagerCommandCtlTopic& sample);

@@ -28,6 +28,7 @@ add_executable(lil-d-tests
     src/window_state.cpp
 )
 target_include_directories(lil-d-tests PRIVATE src)
+target_compile_definitions(lil-d-tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_compile_features(lil-d-tests PRIVATE cxx_std_20)
 target_link_libraries(lil-d-tests PRIVATE support SDL3::SDL3-static)
 add_test(NAME lil-d-tests COMMAND lil-d-tests)

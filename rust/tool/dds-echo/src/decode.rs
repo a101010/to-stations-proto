@@ -254,6 +254,7 @@ mod tests {
         let view = FormatManagerViewTopic {
             display_id: 1,
             windows: DdsSequence::from_vec(windows).unwrap(),
+            revision: 7,
         };
         let dump =
             decode("format_manager::FormatManagerViewTopic", &framed(&view)).expect("decoded view");

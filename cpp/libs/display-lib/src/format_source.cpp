@@ -14,7 +14,10 @@ std::optional<format_manager::FormatManagerViewTopic> latest_view(
     uint32_t display_id) {
     std::optional<format_manager::FormatManagerViewTopic> latest;
     for (auto it = samples.begin(); it != samples.end(); ++it) {
-        if (it->info().valid() && it->data().display_id() == display_id) {
+        if (!it->info().valid() || it->data().display_id() != display_id) {
+            continue;
+        }
+        if (!latest || it->data().revision() > latest->revision()) {
             latest = it->data();
         }
     }
@@ -46,7 +49,9 @@ void FormatSource::poll(FormatManager& manager, std::optional<uint32_t> display_
     } catch (const std::exception&) {
         views = {};
     }
-    if (const auto sample = latest_view(views, *display_id)) {
+    if (const auto sample = latest_view(views, *display_id);
+        sample && sample->revision() > last_revision_) {
+        last_revision_ = sample->revision();
         std::vector<std::pair<int, std::string>> assignments;
         assignments.reserve(sample->windows().size());
         for (const format_manager::FormatWindowAssignment& assignment : sample->windows()) {

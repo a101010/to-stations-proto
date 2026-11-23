@@ -11,6 +11,8 @@ use format_list::{
 };
 use stations_dds::cyclonedds::{DataReader, DataWriter};
 use stations_dds::dds::Node;
+use std::cell::Cell;
+
 use stations_dds::format_manager::{
     FormatManagerCommandCtlTopic, FormatManagerInputTopic, FormatManagerViewTopic,
 };
@@ -22,6 +24,7 @@ pub(crate) struct FormatSource {
     reader: DataReader<FormatManagerViewTopic>,
     command_reader: Option<DataReader<FormatManagerCommandCtlTopic>>,
     writer: DataWriter<FormatManagerInputTopic>,
+    last_revision: Cell<u64>,
 }
 
 impl FormatSource {
@@ -39,6 +42,7 @@ impl FormatSource {
             reader,
             command_reader,
             writer,
+            last_revision: Cell::new(0),
         })
     }
 
@@ -47,7 +51,10 @@ impl FormatSource {
         if let Ok(samples) = self.reader.take() {
             if let Some(display_id) = display_id {
                 if let Some(sample) = latest_matching(samples, display_id) {
-                    manager.set_assignments(sample.windows.as_slice());
+                    if sample.revision > self.last_revision.get() {
+                        self.last_revision.set(sample.revision);
+                        manager.set_assignments(sample.windows.as_slice());
+                    }
                 }
             }
         }
@@ -128,7 +135,7 @@ fn to_command(sample: &FormatManagerCommandCtlTopic) -> Option<FormatCommand> {
     }
 }
 
-/// The latest sample addressed to `display_id`.
+/// The highest-revision sample addressed to `display_id`.
 fn latest_matching(
     samples: Vec<FormatManagerViewTopic>,
     display_id: u32,
@@ -136,16 +143,18 @@ fn latest_matching(
     samples
         .into_iter()
         .filter(|sample| sample.display_id == display_id)
-        .last()
+        .max_by_key(|sample| sample.revision)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use stations_dds::cyclonedds::DdsSequence;
-    use stations_dds::format_manager::{FormatManagerCommandCtlTopic, FormatWindowAssignment};
+    use std::cell::Cell;
 
-    fn view(display_id: u32, format: &str) -> FormatManagerViewTopic {
+use stations_dds::format_manager::{FormatManagerCommandCtlTopic, FormatWindowAssignment};
+
+    fn view(display_id: u32, format: &str, revision: u64) -> FormatManagerViewTopic {
         FormatManagerViewTopic {
             display_id,
             windows: DdsSequence::from_vec(vec![FormatWindowAssignment {
@@ -153,6 +162,7 @@ mod tests {
                 format: format.to_string(),
             }])
             .unwrap(),
+            revision,
         }
     }
 
@@ -208,9 +218,9 @@ mod tests {
     #[test]
     fn latest_matching_ignores_other_displays() {
         let samples = vec![
-            view(0, "hello-world"),
-            view(1, "default"),
-            view(0, "default"),
+            view(0, "hello-world", 1),
+            view(1, "default", 1),
+            view(0, "default", 2),
         ];
         let sample = latest_matching(samples, 0).expect("matching sample");
         assert_eq!(sample.display_id, 0);

@@ -6,6 +6,8 @@
 #include <utility>
 #include <vector>
 
+#include <windows.h>
+
 #include "support/window_position.hpp"
 
 namespace lil_d {
@@ -35,8 +37,60 @@ struct DisplayMonitor {
     support::MonitorInfo monitor;
 };
 
-std::vector<DisplayMonitor> monitor_list(
-    const std::vector<SDL_DisplayID>& ids) {
+struct Win32Monitor {
+    RECT rect{};
+    std::string name;
+};
+
+BOOL CALLBACK collect_monitor(HMONITOR handle, HDC, LPRECT, LPARAM data) {
+    auto* monitors = reinterpret_cast<std::vector<Win32Monitor>*>(data);
+    MONITORINFOEXW info{};
+    info.cbSize = sizeof(info);
+    if (!GetMonitorInfoW(handle, &info)) {
+        return TRUE;
+    }
+    const int length = WideCharToMultiByte(
+        CP_UTF8,
+        0,
+        info.szDevice,
+        -1,
+        nullptr,
+        0,
+        nullptr,
+        nullptr);
+    if (length <= 1) {
+        return TRUE;
+    }
+    std::string name(static_cast<size_t>(length), '\0');
+    WideCharToMultiByte(
+        CP_UTF8,
+        0,
+        info.szDevice,
+        -1,
+        name.data(),
+        length,
+        nullptr,
+        nullptr);
+    name.resize(static_cast<size_t>(length - 1));
+    monitors->push_back(Win32Monitor{info.rcMonitor, std::move(name)});
+    return TRUE;
+}
+
+std::optional<std::string> device_name_for_bounds(const SDL_Rect& bounds) {
+    std::vector<Win32Monitor> monitors;
+    EnumDisplayMonitors(nullptr, nullptr, collect_monitor, reinterpret_cast<LPARAM>(&monitors));
+    for (const Win32Monitor& monitor : monitors) {
+        if (monitor.rect.left == bounds.x &&
+            monitor.rect.top == bounds.y &&
+            monitor.rect.right == bounds.x + bounds.w &&
+            monitor.rect.bottom == bounds.y + bounds.h) {
+            return monitor.name;
+        }
+    }
+    return std::nullopt;
+}
+
+std::vector<DisplayMonitor> monitor_list(const std::vector<SDL_DisplayID>& ids) {
     std::vector<DisplayMonitor> monitors;
     monitors.reserve(ids.size());
     for (SDL_DisplayID id : ids) {
@@ -46,9 +100,12 @@ std::vector<DisplayMonitor> monitor_list(
         }
         DisplayMonitor entry;
         entry.id = id;
-        if (const char* name = SDL_GetDisplayName(id);
-            name != nullptr && *name != '\0') {
-            entry.monitor.name = name;
+        entry.monitor.name = device_name_for_bounds(bounds);
+        if (!entry.monitor.name) {
+            if (const char* name = SDL_GetDisplayName(id);
+                name != nullptr && *name != '\0') {
+                entry.monitor.name = name;
+            }
         }
         entry.monitor.position = support::Point{bounds.x, bounds.y};
         entry.monitor.size = support::Size{
@@ -196,9 +253,12 @@ void WindowState::save(SDL_Window* window, bool force) {
     }
 
     support::SavedPosition saved;
-    if (const char* name = SDL_GetDisplayName(display_id);
-        name != nullptr && *name != '\0') {
-        saved.monitor = name;
+    saved.monitor = device_name_for_bounds(bounds);
+    if (!saved.monitor) {
+        if (const char* name = SDL_GetDisplayName(display_id);
+            name != nullptr && *name != '\0') {
+            saved.monitor = name;
+        }
     }
     saved.monitor_width = static_cast<std::uint32_t>(std::max(bounds.w, 0));
     saved.monitor_height = static_cast<std::uint32_t>(std::max(bounds.h, 0));
