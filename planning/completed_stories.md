@@ -326,3 +326,10 @@ Implement the C++ display library DLL against ABI v4 with the default format. Ad
 - **Completed:** 2026-11-20 13:12:13.
 - **Depends on:** none.
 - **Minimal test:** Rust `lil-d` loads the C++ `display_lib.dll`, passes ABI v4, and renders the C++ default format.
+
+### cpp-lil-d
+Create the C++ `lil-d` using SDL3 and Dear ImGui. Added the dynamic ABI v4 display-library loader, the 720x720 window and ImGui power console, physical/logical layout conversion, full mouse forwarding, a transparent cursor over the format region, the single-instance guard, Rust-compatible outer window placement and state, C++ deployment under `build/deploy/cpp/bin`, and `launch-cpp.ps1` using the Rust services and `paws` as stand-ins. Added CTest coverage for layout, mouse mapping, and state/placement integration.
+- **Completed:** 2026-11-20 16:12:02.
+- **Depends on:** none.
+- **Minimal test:** C++ `lil-d` shows the C++ default format, forwards mouse input, hides the native cursor over the format, restores window state, and runs from the relocated deploy tree; `launch-cpp.ps1` starts C++ `lil-d` plus the Rust stand-ins.
+- **Note:** verified with a temporary `LOCALAPPDATA`, including duplicate-display rejection and the relocated deploy tree; the real runtime state was untouched.

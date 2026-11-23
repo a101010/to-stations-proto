@@ -11,28 +11,21 @@ Conventions:
 
 ## Stories
 
-### cpp-lil-d
-Create the C++ `lil-d` using SDL3 and Dear ImGui: OpenGL 3.3 window, console and power toggle, display id, display-library loading, full mouse event forwarding, native-cursor hiding over the format, single-instance guard, window placement, and deploy under `build/deploy/cpp/bin` with the C++ default-format display library. Create `launch-cpp.ps1`, which starts C++ `lil-d` with the existing Rust services and `paws` as temporary stand-ins.
+### cpp-display-hello
+Add the generic C++ format manager/menu and the real hello-world format to the display library: HarfBuzz GPU text, Earth cube map, greeting, Auto/Inspect, arcball and inertia, light/color rendering, and the four Rust-compatible menu slots (`Formats`, `Inspect`/`Auto`, `Lux Color`/`World`, `Lux Pos`/`World`). Use the existing Rust hello and format services as stand-ins. The `Formats` slot publishes its selection but remains a no-op until `cpp-display-chooser`; the Lux labels cycle through the Rust view state but their overlays render in later stories.
 - **Depends on:** none.
-- **Minimal test:** C++ `lil-d` shows the C++ default format, forwards mouse input, hides the native cursor over the format, restores window state, and runs from the relocated deploy tree; `launch-cpp.ps1` starts C++ `lil-d` plus the Rust stand-ins.
+- **Minimal test:** C++ `lil-d` with the Rust stand-in services shows the live greeting and Earth, rotates with mouse and controller commands, switches Auto/Inspect, and shows all four menu slots with the expected labels.
 - **Status:** in progress.
 
-### cpp-display-hello
-Add the generic C++ format manager/menu and the real hello-world format to the display library: HarfBuzz GPU text, Earth cube map, greeting, Auto/Inspect, arcball and inertia, light/color rendering, and hello-world menu items. Use the existing Rust hello and format services as stand-ins.
-- **Depends on:** cpp-lil-d.
-- **Minimal test:** C++ `lil-d` with the Rust stand-in services shows the live greeting and Earth, rotates with mouse and controller commands, and switches Auto/Inspect.
-- **Status:** todo.
-
 ### cpp-display-chooser
-Add the C++ format chooser: PNG/JPG icon loading, 4x4 format grid, icon/title tiles, pager strip, selection, D-pad navigation, mouse tile selection, and the `Formats` menu path. Add the icon decoder to the project.
+Add the C++ format chooser: 4x4 format grid, icon/title tiles, pager strip, selection, D-pad navigation, mouse tile selection, and the existing `Formats` menu slot selecting it. Reuse the project's image decoder for PNG/JPG icon loading and add the icon module.
 - **Depends on:** cpp-display-hello.
 - **Minimal test:** C++ `lil-d` with default and hello-world formats switches between them through the menu and chooser; D-pad selection wraps correctly.
 - **Status:** todo.
-- **Records:** icon decoder in `docs/versions.md`.
 
 ### cpp-format-services
 Create C++ `format-ctl-service` and `format-view-service` with per-display assignments, persistence, command relay, contracts, instance guards, and deploy-relative config. Replace the Rust format services in `launch-cpp.ps1`.
-- **Depends on:** cpp-lil-d; cpp-display-hello.
+- **Depends on:** cpp-display-hello.
 - **Minimal test:** C++ `lil-d` with C++ format services switches and persists per-window formats; two display ids remain independent.
 - **Status:** todo.
 
@@ -62,7 +55,7 @@ Add the C++ Lux Pos overlay with the frozen globe, live lighting, spotlight can,
 
 ### cpp-paws
 Create the C++ `paws` using SDL3, Dear ImGui, and SDL gamepad input: the virtual Xbox controller, real controller selection, per-display persistence, R3 checkbox, Start/B/Back/A/D-pad/right-stick behavior, instance guard, window placement, and the same DDS commands as Rust `paws`. Add it to the C++ deploy and `launch-cpp.ps1`. Finish the pure C++ two-display configuration.
-- **Depends on:** cpp-lil-d; cpp-display-hello; cpp-display-chooser; cpp-format-services; cpp-hello-service; cpp-hello-view-ctl; cpp-lux-color; cpp-lux-pos.
+- **Depends on:** cpp-display-hello; cpp-display-chooser; cpp-format-services; cpp-hello-service; cpp-hello-view-ctl; cpp-lux-color; cpp-lux-pos.
 - **Minimal test:** `launch-cpp.ps1` with two displays and a temporary `LOCALAPPDATA` runs the pure C++ configuration; hello-world, menu, arcball, Lux Color, Lux Pos, C++ `paws`, persistence, and display isolation work; the Rust configuration still runs.
 - **Status:** todo.
 
