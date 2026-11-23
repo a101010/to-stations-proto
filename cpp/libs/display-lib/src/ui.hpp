@@ -15,6 +15,8 @@ struct Rect {
     bool contains(int px, int py) const {
         return px >= x && px < x + w && py >= y && py < y + h;
     }
+
+    bool operator==(const Rect&) const = default;
 };
 
 void clear_rect(int framebuffer_height, const Rect& rect, const std::array<float, 4>& color);

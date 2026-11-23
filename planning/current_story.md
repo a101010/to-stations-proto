@@ -32,7 +32,7 @@ Make the format chooser implicit and implement it in C++. Remove `format-chooser
 7. **`FormatInput` carries the selected format name.** The chooser returns a concrete catalog name for tile selection.
 8. **Reuse `stb_image`.** Add the C++ `icon` module; no new dependency.
 9. **No paging controls yet.** Reserve the pager strip; show at most 16 entries.
-10. **No DDS/deploy changes in this story.** The existing Rust format services remain stand-ins.
+10. **Align transient-local DDS reliability.** Rust and C++ `stations-dds` must use reliable reliability with transient-local durability so format-manager assignments are actually delivered to late-joining display readers. The existing Rust format services remain stand-ins.
 
 ## Scope
 
@@ -47,6 +47,7 @@ Make the format chooser implicit and implement it in C++. Remove `format-chooser
 - Add C++ `icon` and `format_chooser` modules.
 - Implement chooser layout, rendering, mouse selection, D-pad wrapping, and controller selection.
 - Add CTest coverage for chooser geometry, navigation, and icon fitting.
+- Align transient-local reliability in Rust and C++ `stations-dds`.
 - Update planning architecture and current story docs.
 
 **Out of scope**
@@ -75,6 +76,8 @@ cpp/libs/display-lib/src/formats/hello_world.cpp
 cpp/libs/display-lib/src/icon.hpp/.cpp
 cpp/libs/display-lib/src/format_chooser.hpp/.cpp
 cpp/libs/display-lib/tests/main.cpp
+cpp/libs/stations-dds/src/dds.cpp
+rust/lib/stations-dds/src/dds.rs
 planning/architecture.md
 planning/backlog.md
 planning/completed_stories.md
@@ -223,11 +226,23 @@ Add `format_chooser.hpp/.cpp`:
 
 The existing manager already closes/hides the menu while the chooser is active and routes input to it.
 
-### 7. Tests
+### 7. DDS QoS alignment
+
+The format-manager view assignment uses transient-local durability. CycloneDDS defaults writers to reliable and readers to best-effort, which prevented the C++ display from receiving `FormatManagerViewTopic` and caused the same behavior in the Rust display.
+
+Update both `stations-dds` implementations so the `transient_local` QoS name sets:
+
+- reliability: reliable
+- durability: transient local
+
+This keeps the format-manager writer/reader endpoints compatible and lets late-joining display readers receive the current assignment.
+
+### 8. Tests
 
 Rust:
 
 - `format-list` rejects an explicit `format-chooser` entry.
+- Transient-local QoS tests, if practical, or live verification of assignment delivery.
 - `is_known("format-chooser")` is true while `contains("format-chooser")` is false.
 - `next` never returns the chooser.
 - Saved assignment validation preserves `format-chooser`.
@@ -276,6 +291,7 @@ With a temporary `LOCALAPPDATA`:
 - Controller A/right-click selects the highlighted tile.
 - The menu is hidden while the chooser is active.
 - `format-chooser` can be assigned and is restored across restart.
+- Both Rust and C++ displays receive the chooser assignment from the Rust format service.
 - `Next` does not select the chooser.
 - Rust and C++ configurations both still run.
 - The relocated deploy still works.
@@ -287,6 +303,7 @@ With a temporary `LOCALAPPDATA`:
 - An explicit `format-chooser` in `formats.toml` must be rejected; silently accepting it would put the chooser back in the catalog and reintroduce the old slot logic.
 - Rust selection and saved-assignment validation must use `is_known`, not `contains`, or the `Formats` menu path will be rejected after the contract change.
 - The chooser must be constructed after the catalog is complete, then appended; it must never be included in its own catalog.
+- Transient-local readers need reliable reliability to receive the format assignment; verify both Rust and C++ after changing QoS.
 - Icon texture/blending state must not leak into the next format or menu render.
 - D-pad wrapping must match Rust exactly, especially sparse grids.
 - Do not touch real `%LOCALAPPDATA%`; GUI tests use temporary state.

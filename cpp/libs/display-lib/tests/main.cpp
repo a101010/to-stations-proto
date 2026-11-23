@@ -7,8 +7,10 @@
 #include <vector>
 
 #include "earth.hpp"
+#include "format_chooser.hpp"
 #include "format_list.hpp"
 #include "formats/default_format.hpp"
+#include "icon.hpp"
 #include "image.hpp"
 #include "text.hpp"
 
@@ -44,13 +46,11 @@ name = "hello-world"
 
 [[formats]]
 name = "default"
-
-[[formats]]
-name = "format-chooser"
 )");
-    check(list.names.size() == 3, "format count");
+    check(list.names.size() == 2, "format count");
     check(list.names[0] == "hello-world", "first format");
-    check(list.contains("format-chooser"), "chooser present");
+    check(!list.contains("format-chooser"), "chooser not in catalog");
+    check(list.is_known("format-chooser"), "chooser is known");
     check(!list.contains("missing"), "missing format");
 
     expect_throw(
@@ -67,6 +67,17 @@ name = "same"
 )");
         },
         "duplicate format");
+    expect_throw(
+        [] {
+            display_lib_impl::parse_format_list(R"(
+[[formats]]
+name = "hello-world"
+
+[[formats]]
+name = "format-chooser"
+)");
+        },
+        "explicit chooser");
 }
 
 void check_default_format() {
@@ -144,6 +155,58 @@ void check_images() {
         "icon pixels");
 }
 
+
+void check_icon_fit() {
+    check(
+        display_lib_impl::fit_rect(display_lib_impl::Rect{10, 20, 100, 50}, 64, 64) ==
+            display_lib_impl::Rect{35, 20, 50, 50},
+        "icon fit wide");
+    check(
+        display_lib_impl::fit_rect(display_lib_impl::Rect{10, 20, 50, 100}, 64, 64) ==
+            display_lib_impl::Rect{10, 45, 50, 50},
+        "icon fit tall");
+    check(
+        display_lib_impl::fit_rect(display_lib_impl::Rect{1, 2, 0, 10}, 64, 64) ==
+            display_lib_impl::Rect{1, 2, 0, 0},
+        "icon fit empty");
+}
+
+void check_chooser_layout() {
+    using namespace display_lib_impl;
+    const Rect region{0, 0, 720, 720};
+    const ChooserLayout layout = ChooserLayout::create(region, 16);
+    check(layout.tiles.size() == 16, "chooser tile count");
+    check(layout.pager.w > 0 && layout.pager.h > 0, "chooser pager");
+    for (const ChooserTile& tile : layout.tiles) {
+        check(tile.rect.x >= region.x && tile.rect.y >= region.y, "tile origin");
+        check(tile.rect.x + tile.rect.w <= region.x + region.w, "tile right");
+        check(tile.rect.y + tile.rect.h <= layout.pager.y, "tile above pager");
+        check(tile.icon.w > 0 && tile.icon.h > 0, "tile icon");
+    }
+    const ChooserLayout two = ChooserLayout::create(region, 2);
+    check(two.tiles.size() == 2, "two chooser tiles");
+    check(two.tiles[0].index == 0 && two.tiles[1].index == 1, "two chooser indexes");
+    const auto center = two.tiles[1].rect;
+    check(
+        two.tile_at(center.x + center.w / 2, center.y + center.h / 2) == 1,
+        "chooser tile hit");
+    check(!two.tile_at(719, 719).has_value(), "chooser empty hit");
+    check(ChooserLayout::create(region, 0).tiles.empty(), "empty chooser");
+}
+
+void check_chooser_wrap() {
+    using display_lib_impl::wrap_index;
+    check(wrap_index(0, 2, 1, 0) == 1, "wrap right");
+    check(wrap_index(1, 2, 1, 0) == 0, "wrap right edge");
+    check(wrap_index(0, 2, -1, 0) == 1, "wrap left");
+    check(wrap_index(0, 2, 0, 1) == 0, "vertical no-op two");
+    check(wrap_index(3, 16, 1, 0) == 0, "full grid right edge");
+    check(wrap_index(0, 16, -1, 0) == 3, "full grid left edge");
+    check(wrap_index(12, 16, 0, 1) == 0, "full grid bottom edge");
+    check(wrap_index(0, 5, 0, 1) == 4, "sparse down");
+    check(wrap_index(1, 5, 0, 1) == 1, "sparse no-op");
+    check(wrap_index(0, 0, 1, 0) == 0, "empty wrap");
+}
 }  // namespace
 
 int main() {
@@ -151,6 +214,9 @@ int main() {
     check_default_format();
     check_earth_geometry();
     check_text_math();
+    check_icon_fit();
+    check_chooser_layout();
+    check_chooser_wrap();
     check_images();
 
     if (failures != 0) {

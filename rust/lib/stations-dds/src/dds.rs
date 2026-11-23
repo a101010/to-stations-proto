@@ -149,7 +149,7 @@ pub fn qos(name: &str) -> Option<Qos> {
         "default" => builder.build().ok(),
         "reliable" => builder.reliable().build().ok(),
         "best_effort" => builder.best_effort().build().ok(),
-        "transient_local" => builder.transient_local().build().ok(),
+        "transient_local" => builder.reliable().transient_local().build().ok(),
         _ => None,
     }
 }

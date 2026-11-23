@@ -8,6 +8,9 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+/// The implicit format chooser, never listed in `formats.toml`.
+pub const FORMAT_CHOOSER: &str = "format-chooser";
+
 /// `FormatManagerInputTopic.command`: advance to the next format.
 pub const FORMAT_COMMAND_NEXT: i32 = 0;
 /// `FormatManagerInputTopic.command`: select the named format.
@@ -127,7 +130,7 @@ impl SavedAssignments {
             if !seen.insert(assignment.window) {
                 continue;
             }
-            if !formats.contains(&assignment.format) {
+            if !formats.is_known(&assignment.format) {
                 assignment.format = "hello-world".to_string();
             }
             windows.push(assignment);
@@ -143,6 +146,7 @@ pub enum FormatListError {
     Toml(String),
     Empty,
     Duplicate(String),
+    Reserved(String),
 }
 
 impl std::fmt::Display for FormatListError {
@@ -152,6 +156,9 @@ impl std::fmt::Display for FormatListError {
             FormatListError::Toml(message) => write!(f, "toml error: {message}"),
             FormatListError::Empty => write!(f, "format list is empty"),
             FormatListError::Duplicate(name) => write!(f, "duplicate format: {name}"),
+            FormatListError::Reserved(name) => {
+                write!(f, "reserved implicit format: {name}")
+            }
         }
     }
 }
@@ -186,6 +193,9 @@ impl FormatList {
             if format.name.is_empty() {
                 return Err(FormatListError::Empty);
             }
+            if format.name == FORMAT_CHOOSER {
+                return Err(FormatListError::Reserved(format.name));
+            }
             if !seen.insert(format.name.clone()) {
                 return Err(FormatListError::Duplicate(format.name));
             }
@@ -216,6 +226,12 @@ impl FormatList {
         self.names.iter().any(|candidate| candidate == name)
     }
 
+    /// Whether `name` can be assigned as an active format. The chooser is
+    /// implicit and is known even though it is not in the catalog.
+    pub fn is_known(&self, name: &str) -> bool {
+        name == FORMAT_CHOOSER || self.contains(name)
+    }
+
     /// The next format name, wrapping. Returns `None` for an unknown format.
     pub fn next(&self, name: &str) -> Option<&str> {
         let index = self.names.iter().position(|candidate| candidate == name)?;
@@ -241,9 +257,27 @@ name = "default"
         assert_eq!(list.names(), ["hello-world", "default"]);
         assert_eq!(list.first(), Some("hello-world"));
         assert!(list.contains("default"));
+        assert!(!list.contains(FORMAT_CHOOSER));
+        assert!(list.is_known(FORMAT_CHOOSER));
         assert_eq!(list.next("hello-world"), Some("default"));
         assert_eq!(list.next("default"), Some("hello-world"));
+        assert_eq!(list.next(FORMAT_CHOOSER), None);
         assert_eq!(list.next("missing"), None);
+    }
+
+    #[test]
+    fn rejects_explicit_chooser() {
+        let text = r#"
+[[formats]]
+name = "hello-world"
+
+[[formats]]
+name = "format-chooser"
+"#;
+        assert!(matches!(
+            FormatList::from_toml(text),
+            Err(FormatListError::Reserved(name)) if name == FORMAT_CHOOSER
+        ));
     }
 
     #[test]
@@ -299,6 +333,10 @@ name = "a"
                     window: 0,
                     format: "hello-world".to_string(),
                 },
+                SavedAssignment {
+                    window: 2,
+                    format: FORMAT_CHOOSER.to_string(),
+                },
             ],
         };
         assert_eq!(
@@ -312,6 +350,10 @@ name = "a"
                     SavedAssignment {
                         window: 1,
                         format: "hello-world".to_string(),
+                    },
+                    SavedAssignment {
+                        window: 2,
+                        format: FORMAT_CHOOSER.to_string(),
                     },
                 ],
             }

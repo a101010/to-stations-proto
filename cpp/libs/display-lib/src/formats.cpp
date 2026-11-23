@@ -2,6 +2,7 @@
 
 #include <stdexcept>
 
+#include "format_chooser.hpp"
 #include "formats/default_format.hpp"
 #include "formats/hello_world_impl.hpp"
 
@@ -42,7 +43,7 @@ FormatRegistry create_registry(
     std::shared_ptr<ViewState> view,
     std::shared_ptr<HelloWorldInput> input) {
     FormatRegistry registry;
-    registry.chooser_available = list.contains(kFormatChooser);
+    std::vector<FormatMeta> catalog;
 
     for (const std::string& name : list.names) {
         if (name == kHelloWorld) {
@@ -51,15 +52,19 @@ FormatRegistry create_registry(
         } else if (name == kDefault) {
             registry.formats.push_back(std::make_unique<DefaultFormat>());
         } else if (name == kFormatChooser) {
-            continue;
+            throw std::runtime_error("formats.toml must not list the implicit format-chooser");
         } else {
             throw std::runtime_error("unknown format in formats.toml: " + name);
         }
+        const Format& format = *registry.formats.back();
+        catalog.push_back(FormatMeta{format.name(), format.title(), format.icon_file()});
     }
 
     if (registry.formats.empty()) {
         throw std::runtime_error("formats.toml has no supported formats");
     }
+
+    registry.formats.push_back(std::make_unique<FormatChooser>(assets_root, catalog));
     return registry;
 }
 

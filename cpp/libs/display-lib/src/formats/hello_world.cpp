@@ -146,26 +146,26 @@ FormatInput HelloWorld::mouse_button(
     int button,
     bool pressed) {
     if (button != 0) {
-        return FormatInput::Ignored;
+        return {FormatInput::Type::Ignored, {}};
     }
     if (!pressed) {
         if (!dragging_) {
-            return FormatInput::Ignored;
+            return {FormatInput::Type::Ignored, {}};
         }
         dragging_ = false;
         send(kHelloActionRelease, last_pointer_.first, last_pointer_.second, false);
-        return FormatInput::Consumed;
+        return {FormatInput::Type::Consumed, {}};
     }
 
     const std::optional<std::pair<float, float>> point =
         hello_normalized(region_x, region_y, region_width, region_height, x, y);
     if (!point || !hello_on_globe(point->first, point->second)) {
-        return FormatInput::Ignored;
+        return {FormatInput::Type::Ignored, {}};
     }
     dragging_ = true;
     last_pointer_ = *point;
     send(kHelloActionGrab, point->first, point->second, true);
-    return FormatInput::Consumed;
+    return {FormatInput::Type::Consumed, {}};
 }
 
 FormatInput HelloWorld::mouse_motion(
@@ -176,12 +176,12 @@ FormatInput HelloWorld::mouse_motion(
     int x,
     int y) {
     if (!dragging_) {
-        return FormatInput::Ignored;
+        return {FormatInput::Type::Ignored, {}};
     }
     const std::optional<std::pair<float, float>> point =
         hello_normalized(region_x, region_y, region_width, region_height, x, y);
     if (!point) {
-        return FormatInput::Ignored;
+        return {FormatInput::Type::Ignored, {}};
     }
     last_pointer_ = *point;
     send(kHelloActionDrag, point->first, point->second, true);
@@ -189,11 +189,11 @@ FormatInput HelloWorld::mouse_motion(
         send(kHelloActionRelease, point->first, point->second, false);
         dragging_ = false;
     }
-    return FormatInput::Consumed;
+    return {FormatInput::Type::Consumed, {}};
 }
 
 FormatInput HelloWorld::mouse_wheel(int, int, int, int, int) {
-    return FormatInput::Ignored;
+    return {FormatInput::Type::Ignored, {}};
 }
 
 FormatInput HelloWorld::command(
@@ -201,7 +201,7 @@ FormatInput HelloWorld::command(
     std::optional<std::pair<int, int>>) {
     if (command.type == FormatCommand::Type::ToggleArcball) {
         send(kHelloActionToggleArcball, 0.0, 0.0, true);
-        return FormatInput::Consumed;
+        return {FormatInput::Type::Consumed, {}};
     }
     if (command.type == FormatCommand::Type::CursorMove && arcball_enabled()) {
         const float half = static_cast<float>(std::max(1, std::min(region_.w, region_.h))) * 0.5f;
@@ -210,9 +210,9 @@ FormatInput HelloWorld::command(
             static_cast<double>(command.dx) / half * kHelloStickFraction,
             -static_cast<double>(command.dy) / half * kHelloStickFraction,
             true);
-        return FormatInput::Consumed;
+        return {FormatInput::Type::Consumed, {}};
     }
-    return FormatInput::Ignored;
+    return {FormatInput::Type::Ignored, {}};
 }
 
 std::vector<MenuItem> HelloWorld::menu_items() const {
@@ -222,17 +222,17 @@ std::vector<MenuItem> HelloWorld::menu_items() const {
 FormatInput HelloWorld::menu_action(const std::string& id) {
     if (id == kHelloMenuMode) {
         send(kHelloActionModeToggle, 0.0, 0.0, true);
-        return FormatInput::Consumed;
+        return {FormatInput::Type::Consumed, {}};
     }
     if (id == kHelloMenuLuxColor) {
         send(kHelloActionToggleLuxColor, 0.0, 0.0, true);
-        return FormatInput::Consumed;
+        return {FormatInput::Type::Consumed, {}};
     }
     if (id == kHelloMenuLuxPos) {
         send(kHelloActionToggleLuxPos, 0.0, 0.0, true);
-        return FormatInput::Consumed;
+        return {FormatInput::Type::Consumed, {}};
     }
-    return FormatInput::Ignored;
+    return {FormatInput::Type::Ignored, {}};
 }
 
 }  // namespace display_lib_impl

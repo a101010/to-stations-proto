@@ -105,13 +105,13 @@ std::optional<FormatAction> FormatManager::command(
     }
 
     const FormatInput input = format->command(command, cursor_);
-    if (input == FormatInput::Ignored && cursor_move) {
+    if (input.type == FormatInput::Type::Ignored && cursor_move) {
         move_cursor(command.dx, command.dy);
         return std::nullopt;
     }
-    if (input == FormatInput::Select) {
+    if (input.type == FormatInput::Type::Select) {
         cancel_overlay();
-        return FormatAction{0, active};
+        return FormatAction{0, input.format};
     }
     return std::nullopt;
 }
@@ -167,8 +167,8 @@ std::optional<FormatAction> FormatManager::mouse_button(
         y,
         button,
         pressed);
-    if (input == FormatInput::Select) {
-        return FormatAction{0, active};
+    if (input.type == FormatInput::Type::Select) {
+        return FormatAction{0, input.format};
     }
     return std::nullopt;
 }
@@ -225,8 +225,9 @@ std::optional<FormatAction> FormatManager::menu_action(const std::string& id) {
     if (format == nullptr) {
         return std::nullopt;
     }
-    if (format->menu_action(id) == FormatInput::Select) {
-        return FormatAction{0, active};
+    const FormatInput input = format->menu_action(id);
+    if (input.type == FormatInput::Type::Select) {
+        return FormatAction{0, input.format.empty() ? active : input.format};
     }
     return std::nullopt;
 }

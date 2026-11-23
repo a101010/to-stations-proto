@@ -1,11 +1,9 @@
-# The ordered format list shared by the format-manager controller, the display
-# library, and the format menu/chooser. The first entry is the default format.
+# The ordered selectable format catalog shared by the format-manager controller,
+# the display library, and the format chooser. The implicit format-chooser is
+# always available and must not be listed here.
 
 [[formats]]
 name = "hello-world"
 
 [[formats]]
 name = "default"
-
-[[formats]]
-name = "format-chooser"

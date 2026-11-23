@@ -194,7 +194,7 @@ fn apply(
             changed
         }
         FORMAT_COMMAND_SELECT => {
-            if !formats.contains(&event.format) {
+            if !formats.is_known(&event.format) {
                 return false;
             }
             let changed = assignments.get(&event.window) != Some(&event.format);
@@ -302,6 +302,16 @@ name = "default"
             input(0, 0, FORMAT_COMMAND_SELECT, "default")
         ));
         assert_eq!(assignments.get(&0).map(String::as_str), Some("default"));
+        assert!(apply_for(
+            0,
+            &formats,
+            &mut assignments,
+            input(0, 0, FORMAT_COMMAND_SELECT, format_list::FORMAT_CHOOSER)
+        ));
+        assert_eq!(
+            assignments.get(&0).map(String::as_str),
+            Some(format_list::FORMAT_CHOOSER)
+        );
         assert!(!apply_for(
             0,
             &formats,

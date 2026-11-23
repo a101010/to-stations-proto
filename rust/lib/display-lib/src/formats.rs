@@ -16,7 +16,7 @@ use format_list::FormatList;
 use crate::DisplayError;
 
 /// The registry name of the format chooser.
-pub(crate) const FORMAT_CHOOSER: &str = "format-chooser";
+pub(crate) const FORMAT_CHOOSER: &str = format_list::FORMAT_CHOOSER;
 
 /// The catalog data the chooser needs for another format.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -136,12 +136,11 @@ pub(crate) fn registry(
     formats: &FormatList,
 ) -> Result<Vec<Box<dyn Format>>, DisplayError> {
     let names = formats.names();
-    let mut slots: Vec<Option<Box<dyn Format>>> = Vec::with_capacity(names.len());
+    let mut renderers: Vec<Box<dyn Format>> = Vec::with_capacity(names.len() + 1);
     let mut catalog = Vec::new();
 
     for name in names {
         match name.as_str() {
-            FORMAT_CHOOSER => slots.push(None),
             "hello-world" => {
                 let format = hello_world::HelloWorld::new(
                     gl,
@@ -150,12 +149,12 @@ pub(crate) fn registry(
                     hello_input.clone(),
                 )?;
                 catalog.push(meta(name, &format));
-                slots.push(Some(Box::new(format)));
+                renderers.push(Box::new(format));
             }
             "default" => {
                 let format = default::Default::new(gl)?;
                 catalog.push(meta(name, &format));
-                slots.push(Some(Box::new(format)));
+                renderers.push(Box::new(format));
             }
             other => {
                 return Err(DisplayError::Formats(format!(
@@ -165,19 +164,12 @@ pub(crate) fn registry(
         }
     }
 
-    for (index, name) in names.iter().enumerate() {
-        if name == FORMAT_CHOOSER {
-            let chooser = format_chooser::FormatChooser::new(gl, assets_root, &catalog)?;
-            slots[index] = Some(Box::new(chooser));
-        }
-    }
-
-    slots
-        .into_iter()
-        .map(|slot| {
-            slot.ok_or_else(|| DisplayError::Formats("missing format renderer".to_string()))
-        })
-        .collect()
+    renderers.push(Box::new(format_chooser::FormatChooser::new(
+        gl,
+        assets_root,
+        &catalog,
+    )?));
+    Ok(renderers)
 }
 
 fn meta<F: Format + ?Sized>(name: &str, format: &F) -> FormatMeta {

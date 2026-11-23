@@ -16,6 +16,10 @@ bool FormatList::contains(std::string_view name) const {
     });
 }
 
+bool FormatList::is_known(std::string_view name) const {
+    return name == kFormatChooser || contains(name);
+}
+
 FormatList parse_format_list(std::string_view text) {
     toml::table root;
     try {
@@ -40,6 +44,9 @@ FormatList parse_format_list(std::string_view text) {
         const std::optional<std::string> name = name_node.value<std::string>();
         if (!name || name->empty()) {
             throw std::runtime_error("formats.toml has an empty format name");
+        }
+        if (*name == kFormatChooser) {
+            throw std::runtime_error("formats.toml must not list the implicit format-chooser");
         }
         if (!seen.insert(*name).second) {
             throw std::runtime_error("duplicate format: " + *name);

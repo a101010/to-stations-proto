@@ -24,10 +24,21 @@ struct MenuItem {
     std::string label;
 };
 
-enum class FormatInput {
-    Ignored,
-    Consumed,
-    Select,
+struct FormatInput {
+    enum class Type {
+        Ignored,
+        Consumed,
+        Select,
+    };
+
+    Type type = Type::Ignored;
+    std::string format;
+};
+
+struct FormatMeta {
+    std::string name;
+    std::string title;
+    std::string icon_file;
 };
 
 struct FormatCommand {
@@ -90,19 +101,19 @@ public:
 };
 
 inline FormatInput Format::mouse_button(int, int, int, int, int, int, int, bool) {
-    return FormatInput::Ignored;
+    return FormatInput{};
 }
 
 inline FormatInput Format::mouse_motion(int, int, int, int, int, int) {
-    return FormatInput::Ignored;
+    return FormatInput{};
 }
 
 inline FormatInput Format::mouse_wheel(int, int, int, int, int) {
-    return FormatInput::Ignored;
+    return FormatInput{};
 }
 
 inline FormatInput Format::command(const FormatCommand&, std::optional<std::pair<int, int>>) {
-    return FormatInput::Ignored;
+    return FormatInput{};
 }
 
 inline bool Format::cursor_hidden() const {
@@ -114,12 +125,11 @@ inline std::vector<MenuItem> Format::menu_items() const {
 }
 
 inline FormatInput Format::menu_action(const std::string&) {
-    return FormatInput::Ignored;
+    return FormatInput{};
 }
 
 struct FormatRegistry {
     std::vector<std::unique_ptr<Format>> formats;
-    bool chooser_available = false;
 
     Format* find(const std::string& name);
     const Format* find(const std::string& name) const;

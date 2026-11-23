@@ -204,4 +204,12 @@ name = "default"
         let view = view_topic(0, &saved).unwrap();
         assert_eq!(view.windows.as_slice()[0].format, "hello-world");
     }
+
+    #[test]
+    fn implicit_chooser_assignment_is_preserved() {
+        let saved = saved_from_control(&control(0, format_list::FORMAT_CHOOSER))
+            .validated(&formats());
+        let view = view_topic(0, &saved).unwrap();
+        assert_eq!(view.windows.as_slice()[0].format, format_list::FORMAT_CHOOSER);
+    }
 }

@@ -51,6 +51,7 @@ struct FormatList {
     }
 
     bool contains(std::string_view name) const;
+    bool is_known(std::string_view name) const;
 };
 
 FormatList parse_format_list(std::string_view text);

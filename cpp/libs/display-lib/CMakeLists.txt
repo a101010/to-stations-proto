@@ -3,11 +3,13 @@ add_library(display_lib SHARED
     src/earth.cpp
     src/format_list.cpp
     src/format_manager_impl.cpp
+    src/format_chooser.cpp
     src/format_menu.cpp
     src/format_source.cpp
     src/formats.cpp
     src/formats/default_format.cpp
     src/formats/hello_world.cpp
+    src/icon.cpp
     src/image.cpp
     src/shader.cpp
     src/text.cpp
@@ -37,10 +39,13 @@ target_link_libraries(display_lib PRIVATE
 add_executable(display-lib-tests
     tests/main.cpp
     src/earth.cpp
+    src/format_chooser.cpp
     src/format_list.cpp
+    src/icon.cpp
     src/image.cpp
     src/shader.cpp
     src/text.cpp
+    src/ui.cpp
     src/formats/default_format.cpp
 )
 target_include_directories(display-lib-tests PRIVATE
