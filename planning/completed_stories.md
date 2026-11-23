@@ -347,3 +347,10 @@ Make the Rust and C++ deploy trees symmetric. Added the shared Rust `deploy-path
 - **Depends on:** none.
 - **Minimal test:** `scripts/build.ps1` produces no `build/deploy/bin`; `launch-rust.ps1` and `launch-cpp.ps1` both run from `rust/bin` and `cpp/bin`; Rust and C++ displays, services, `paws`, and `dds-echo` resolve shared assets/config from the deploy root; relocated deploy works.
 - **Note:** verified with temporary `LOCALAPPDATA`; the real runtime state was untouched.
+
+### cpp-display-chooser
+Make the format chooser implicit and implement it in C++. Removed `format-chooser` from the selectable catalog, added reserved implicit-format handling in Rust, added the C++ icon module and chooser, carried selected format names through `FormatInput`, aligned transient-local QoS, and verified menu-based chooser selection and persistence.
+- **Completed:** 2026-11-23 15:16:59.
+- **Depends on:** none.
+- **Minimal test:** C++ `lil-d` with default and hello-world formats switches between them through the menu and chooser; D-pad selection wraps correctly; `formats.toml` lists no chooser; Rust services accept and preserve a `format-chooser` assignment; `Next` skips the chooser.
+- **Note:** verified with a temporary `LOCALAPPDATA`; the real runtime state was untouched.

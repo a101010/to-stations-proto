@@ -1,316 +1,217 @@
-# Current story: cpp-display-chooser
+# Current story: periodic-current-format
 
 This file is the detailed, living plan for the one active story. It is rewritten for each story. The backlog in `backlog.md` holds all work and the per-story status.
 
 ## Story
 
-Make the format chooser implicit and implement it in C++. Remove `format-chooser` from `formats.toml`; the chooser always exists, is assignable as an active format, and is never a catalog or chooser tile. Update the Rust format list and services to treat it as a reserved implicit format, then add the C++ icon module and chooser: 4x4 grid, icon/title tiles, pager strip, selection, D-pad navigation, mouse tile selection, and the existing `Formats` menu slot selecting it. Reuse the project's image decoder for PNG/JPG icons.
+Make view-service state delivery best effort and periodic, starting with the current format assignment. Change `FormatManagerViewTopic` to best effort, add a monotonic revision, and have `format-view-service` republish the current assignment immediately at startup, immediately after changes, and periodically. Fold in cross-language monitor identity so window placement survives Rust/C++ switches. Record the architecture rule for future reliable control delivery but do not implement an ACK protocol until a message requires it.
 
 - **Depends on:** none.
-- **Minimal test:** C++ `lil-d` with default and hello-world formats switches between them through the menu and chooser; D-pad selection wraps correctly; `formats.toml` lists no chooser; Rust services accept and preserve a `format-chooser` assignment; `Next` skips the chooser.
+- **Minimal test:** move windows and change formats in C++ `lil-d`, clean up, restart C++, then switch to Rust and back; positions and formats restore in both directions; `dds-echo` shows repeated best-effort `FormatManagerViewTopic` samples.
 
 ## Context
 
-- `cleanup-paths` is complete at `2026-11-23 12:05:05`.
-- The Rust display library currently expects a `format-chooser` entry in `formats.toml` and uses a placeholder slot while building the registry.
-- The C++ display library currently skips `format-chooser` and does not expose a chooser renderer.
-- The `Formats` menu item already publishes `Select` for `format-chooser`, but Rust format services currently validate selections against the catalog; after removing the entry they must treat the chooser as implicitly known.
-- The Rust and C++ display libraries both need the chooser to remain an active selectable target even though it is absent from the ordered catalog.
-- `assets/icons/default.png` and `assets/icons/hello-world.png` already exist as 64x64 RGBA PNGs.
-- The C++ `stb_image` decoder and `load_image(path, desired_channels)` wrapper are already present.
-- The C++ format manager already hides the menu while `format-chooser` is active and routes input to the active format.
-- `paws`/`format-ctl-service` already send `Navigate`, `Pointer`, and `Select` commands.
+- `cpp-display-chooser` is complete at `2026-11-23 15:16:59`.
+- Format assignments already persist in `%LOCALAPPDATA%\to-stations\format-view-service\<display-id>.toml`; the failure is startup delivery to the display library.
+- `format-view-service` publishes the saved assignment once at startup and then only on accepted control changes. Displays that miss the one-shot publication keep `hello-world`.
+- `HelloWorldViewTopic` is already best effort and republished at 100 Hz.
+- `FormatManagerViewTopic` is currently transient-local. C++ and Rust transient-local QoS were made reliable during `cpp-display-chooser`.
+- Window position state already lives in `%LOCALAPPDATA%\to-stations\lil-d\<display-id>.toml`.
+- Rust/winit writes monitor names such as `\\.\DISPLAY1`; C++/SDL writes friendly names such as `Acer VG270K`. Placement restoration matches by name, so switching implementations can fall back or cascade and appear to reset the position.
+- There is no current message that requires end-to-end reliable control with ACK. `FormatManagerCtlTopic` is the only transient-local control topic; command topics remain reliable but volatile.
+- This story does not add a `reliable-control-ack` or `monitor-identity` story.
 
 ## Decisions
 
-1. **The format chooser is implicit.** It is not listed in `formats.toml`, is not part of the selectable catalog, and never appears as a tile inside itself.
-2. **It is still assignable.** A `format-chooser` assignment is valid for the active format window.
-3. **It is always constructed.** Both Rust and C++ display libraries build the chooser after building the catalog formats; no slot in the list is required.
-4. **`Next` skips it.** The catalog order contains only selectable formats, so `Next` never advances to the chooser.
-5. **Rust format services recognize the implicit chooser.** `FormatList` exposes a reserved `FORMAT_CHOOSER` constant and an `is_known` check used by selection and saved-assignment validation.
-6. **The list parser rejects an explicit chooser entry.** A `format-chooser` entry in `formats.toml` is a contract error, not a normal format.
-7. **`FormatInput` carries the selected format name.** The chooser returns a concrete catalog name for tile selection.
-8. **Reuse `stb_image`.** Add the C++ `icon` module; no new dependency.
-9. **No paging controls yet.** Reserve the pager strip; show at most 16 entries.
-10. **Align transient-local DDS reliability.** Rust and C++ `stations-dds` must use reliable reliability with transient-local durability so format-manager assignments are actually delivered to late-joining display readers. The existing Rust format services remain stand-ins.
+1. **All view-service state delivered to display libraries is best effort and periodically republished.**
+   - `HelloWorldViewTopic` already satisfies this.
+   - `FormatManagerViewTopic` changes from `transient_local` to `best_effort`.
+2. **`format-view-service` republishes the current assignment.**
+   - Immediately at startup.
+   - Immediately after an accepted assignment change.
+   - Periodically, recommended every 250 ms.
+3. **Current format state is revisioned.**
+   - Add a monotonically increasing `revision` to `FormatManagerViewTopic`.
+   - Displays apply only a higher revision than the last applied revision.
+   - When multiple samples are available, select the highest revision, not the last sample in the batch.
+4. **No ACK or transient-local dependency for view state.**
+   - A missed view sample is acceptable; the next periodic message converges.
+   - Periodic republishes do not write the format state file.
+5. **Monitor identity is canonical.**
+   - C++ maps SDL display bounds to Win32 `MONITORINFOEX.szDevice` names such as `\\.\DISPLAY1`.
+   - Rust/winit already uses those names.
+   - A geometry fallback handles legacy C++ state with friendly monitor names.
+6. **Control topics remain unchanged in this story.**
+   - `FormatManagerCtlTopic` remains transient-local and reliable.
+   - Command and input topics remain reliable but volatile.
+   - No ACK protocol is implemented.
+7. **Architecture records the future reliable-control rule.**
+   - DDS reliable QoS is transport-level, not proof of application delivery.
+   - A future reliable control writer must track outstanding application ACKs per command and expected receiver, retry until all ACKs or a deadline, and stop only when all required ACKs are present.
+   - Receivers ACK after applying and deduplicate by command id.
+   - Prefer idempotent set-state commands over non-idempotent events.
+   - No current message requires this yet.
 
 ## Scope
 
 **In scope**
 
-- Remove `format-chooser` from `contracts/formats.toml` and update its comment.
-- Add the reserved implicit chooser rule to Rust `format-list`.
-- Update Rust services and saved-assignment validation.
-- Update the Rust display registry to always construct the chooser.
-- Refactor C++ `FormatInput` to carry a selected format name.
-- Update the C++ registry to always construct the chooser.
-- Add C++ `icon` and `format_chooser` modules.
-- Implement chooser layout, rendering, mouse selection, D-pad wrapping, and controller selection.
-- Add CTest coverage for chooser geometry, navigation, and icon fitting.
-- Align transient-local reliability in Rust and C++ `stations-dds`.
-- Update planning architecture and current story docs.
+- `FormatManagerViewTopic` QoS change to best effort.
+- Periodic republishing by `format-view-service`.
+- `FormatManagerViewTopic.revision`.
+- Rust and C++ revision filtering.
+- C++ canonical monitor device names.
+- Legacy friendly-name placement fallback.
+- Architecture updates for view-state delivery, monitor identity, and future ACKed control.
+- Tests and manual verification.
 
 **Out of scope**
 
-- Paging controls and more than 16 formats.
-- Animated/hover icons.
-- C++ format services or C++ `paws`.
-- Lux Color/Lux Pos overlays.
-- New assets or icon sizes.
+- ACK protocol implementation.
+- New reliable-control or monitor-identity stories.
+- Changes to `HelloWorldViewTopic`; it already republishes at 100 Hz.
+- Changing control-topic QoS.
 - README restructuring.
 
 ## Files
 
 ```text
-contracts/formats.toml
-rust/lib/format-list/src/lib.rs
-rust/lib/display-lib/src/formats.rs
-rust/lib/display-lib/Cargo.toml
-rust/service/format-ctl-service/src/main.rs
+contracts/topics.toml
+DDS/format_manager.idl
 rust/service/format-view-service/src/main.rs
-cpp/libs/display-lib/CMakeLists.txt
-cpp/libs/display-lib/src/formats.hpp
-cpp/libs/display-lib/src/formats.cpp
-cpp/libs/display-lib/src/format_manager_impl.cpp
-cpp/libs/display-lib/src/formats/hello_world.cpp
-cpp/libs/display-lib/src/icon.hpp/.cpp
-cpp/libs/display-lib/src/format_chooser.hpp/.cpp
+rust/lib/display-lib/src/format_source.rs
+cpp/libs/display-lib/src/format_source.hpp/.cpp
+cpp/libs/display-lib/src/window_state.cpp
+cpp/libs/support/include/support/window_position.hpp
+cpp/libs/support/src/window_position.cpp
+rust/lib/window-position/src/lib.rs
 cpp/libs/display-lib/tests/main.cpp
-cpp/libs/stations-dds/src/dds.cpp
-rust/lib/stations-dds/src/dds.rs
+rust/lib/display-lib/src/format_source.rs tests
+rust/service/format-view-service tests
 planning/architecture.md
 planning/backlog.md
 planning/completed_stories.md
 planning/current_story.md
 ```
 
-No changes are expected in:
-
-- `scripts/build.ps1`
-- `scripts/launch-*.ps1`
-- `scripts/cleanup.ps1`
-- `assets/`
-- `docs/versions.md`
+No `docs/versions.md` change is needed.
 
 ## Implementation
 
-### 1. Contract and Rust implicit chooser
+### 1. Contract and IDL
 
-`contracts/formats.toml`:
+`contracts/topics.toml`:
 
-- Keep only the selectable catalog:
-  - `hello-world`
-  - `default`
-- Update the comment to state that `format-chooser` is implicit and must not be listed.
+- Change `FormatManagerViewTopic.qos` from `transient_local` to `best_effort`.
 
-`rust/lib/format-list/src/lib.rs`:
+`DDS/format_manager.idl`:
 
-- Add `pub const FORMAT_CHOOSER: &str = "format-chooser";`.
-- Reject `format-chooser` in `FormatList::from_toml` with a clear error.
-- Keep `names()` and `next()` limited to the catalog.
-- Add:
+- Add `unsigned long long revision;` to `FormatManagerViewTopic`.
+- Update generated Rust/C++ constructors, tests, and any field metadata.
 
-```rust
-pub fn is_known(&self, name: &str) -> bool {
-    name == FORMAT_CHOOSER || self.contains(name)
-}
-```
+### 2. `format-view-service`
 
-- Keep `contains()` meaning “is in the ordered catalog.”
-- Use `is_known` in `SavedAssignments::validated`, so a persisted chooser assignment is preserved instead of falling back to `hello-world`.
+Add a publish period, default 250 ms, preferably exposed as `--rate-ms`.
 
-`rust/service/format-ctl-service/src/main.rs`:
+Behavior:
 
-- Use `formats.is_known(&event.format)` for `Select` validation.
-- Add tests that `format-chooser` is accepted and `Next` never selects it.
+1. Load and validate saved assignments.
+2. Publish immediately with revision 1.
+3. In the main loop:
+   - process control input;
+   - write the state file only when the assignment actually changes;
+   - publish when changed or when the periodic interval elapses;
+   - increment `revision` on every publish.
+4. Keep the writer best effort.
+5. Do not write state on periodic republishes.
 
-`rust/service/format-view-service/src/main.rs`:
+### 3. Display libraries
 
-- Rely on the updated `SavedAssignments::validated` behavior.
-- Add a test that a `format-chooser` control assignment survives validation.
+Rust `format_source` and C++ `FormatSource`:
 
-### 2. Rust display registry
+- Track `last_revision` for the active display.
+- Apply an assignment only when `incoming.revision > last_revision`.
+- When multiple samples are available, select the highest revision for the display id.
+- Treat repeated samples as idempotent.
+- Continue filtering by display id.
+- Do not add file fallback or ACK handling.
 
-`rust/lib/display-lib/src/formats.rs`:
+### 4. Monitor identity
 
-- Use the shared `format_list::FORMAT_CHOOSER` constant.
-- Remove the chooser slot/placeholder logic.
-- Build the catalog from the listed formats only.
-- Always construct `FormatChooser` after the catalog is complete.
-- Append the chooser to the registry so assignments to `format-chooser` resolve.
-- Keep the chooser out of its own catalog.
-- Unknown listed names remain errors.
+Add a Windows C++ helper that:
 
-### 3. C++ selection plumbing
+- enumerates Win32 monitors with `EnumDisplayMonitors`/`GetMonitorInfoW`;
+- maps SDL display bounds to `MONITORINFOEX.szDevice`;
+- returns the device name when a match exists.
 
-Change `FormatInput` from a bare enum to:
+Use the canonical name when:
 
-```cpp
-struct FormatInput {
-    enum class Type { Ignored, Consumed, Select };
-    Type type = Type::Ignored;
-    std::string format;
-};
-```
+- building the monitor list for placement restore;
+- saving the current window monitor.
 
-Update:
+Fall back to the SDL friendly name only if no Win32 match exists.
 
-- Base `Format` defaults.
-- `HelloWorld` ignored/consumed returns.
-- `FormatManager` checks and selections.
-- `FormatManager::mouse_button`/`command` use `input.format` for selection.
-- `FormatManager::menu_action` selection checks.
+Legacy placement fallback:
 
-The chooser returns `Select` with `default` or `hello-world`; it does not return `Select` for the chooser itself.
+- If the saved monitor name does not match, try a monitor with matching saved monitor dimensions.
+- Use the unique resolution match.
+- Otherwise retain the existing primary-monitor and cascade fallback.
 
-### 4. C++ implicit registry and catalog
+Apply the geometry fallback in the shared placement code used by both Rust and C++ so old C++ friendly-name state migrates without a guaranteed reset.
 
-In `formats.hpp`:
+### 5. Architecture
 
-- Add `FormatMeta { name, title, icon_file }`.
+Update `planning/architecture.md` with:
 
-In `formats.cpp`:
+- View-state topics are best effort, idempotent, revisioned where ordering matters, and periodically republished.
+- Consumers tolerate repeats and ignore stale revisions.
+- `HelloWorldViewTopic` already follows this policy; `FormatManagerViewTopic` does after this story.
+- Window placement uses the Win32 monitor device name as the canonical monitor identity, with geometry fallback for legacy state.
+- Reliable control delivery is an application-level ACK contract; DDS reliable QoS alone is insufficient.
+- Writers of future reliable control track every required ACK and retry until all ACKs or a failure deadline.
+- Receivers ACK after applying and deduplicate.
+- Prefer idempotent current-state publication over ACK where the payload is state.
+- The ACK rule is guidance for future work; no current topic implements it.
 
-- Build listed formats and collect their metadata.
-- Reject `format-chooser` in the C++ format list parser.
-- Always construct `FormatChooser(assets_root, catalog)` after the catalog is complete.
-- Append it to the registry.
-- Remove the obsolete `chooser_available` flag; the chooser is unconditional.
-- Ensure `first_name()` remains the first catalog format.
+## Tests
 
-Assignments to `format-chooser` now resolve through the registry, and `Formats` selection continues to publish that name.
+- Contract test expects `FormatManagerViewTopic` QoS `best_effort`.
+- `format-view-service` revision increments on every publish.
+- State is written only when assignments change; periodic republishes do not write it.
+- Rust `FormatSource` ignores older revisions and applies newer ones.
+- C++ `FormatSource` ignores older revisions and applies newer ones.
+- Multiple available samples resolve to the highest revision.
+- Monitor device-name mapping and legacy geometry fallback tests where practical.
+- Full `scripts/build.ps1 -Test` and CTest remain green.
 
-### 5. C++ icon module
+## Manual Verification
 
-Add `icon.hpp/.cpp`:
-
-- `Icon` owns a 2D RGBA texture and dimensions.
-- Load via `load_image(path, 4)`.
-- Upload as `GL_RGBA8` with linear filtering and clamp-to-edge.
-- `fit_rect(rect, image_w, image_h)` centers an aspect-preserving fit.
-- `Icon::fit(rect)` uses the image dimensions.
-- `IconRenderer` owns the textured-quad shader, VAO, and VBO.
-- Draw maps the icon rect from format-region coordinates into clip space.
-- Enable source-alpha blending and restore state.
-
-No new assets or dependency.
-
-### 6. C++ chooser
-
-Add `format_chooser.hpp/.cpp`:
-
-- 4 columns × 4 rows, capacity 16.
-- `ChooserTile` with tile/icon/title rects and index.
-- `ChooserLayout` with tiles and reserved pager rect.
-- `tile_at(x, y)` hit-testing.
-- `wrap_index(selected, count, dx, dy)` matching Rust:
-  - horizontal movement wraps within the current row;
-  - vertical movement wraps within the current column;
-  - sparse grids skip empty cells;
-  - no movement when no other occupied tile exists.
-- `selectable` excludes the implicit chooser by construction (catalog contains only listed formats).
-- Background, tile, selected-tile, and title colors matching Rust.
-- Render:
-  - clear the full format region;
-  - set viewport and disable depth;
-  - draw tile backgrounds;
-  - draw fitted icons and centered titles.
-- Input:
-  - left-click on a tile selects it and returns `Select` with the format name;
-  - left-click elsewhere in the region consumes;
-  - right-click is ignored;
-  - `Navigate` updates selection and consumes;
-  - controller right-pointer selects the highlighted tile;
-  - other pointer/move/menu/overlay commands consume.
-- The chooser never contributes menu items.
-
-The existing manager already closes/hides the menu while the chooser is active and routes input to it.
-
-### 7. DDS QoS alignment
-
-The format-manager view assignment uses transient-local durability. CycloneDDS defaults writers to reliable and readers to best-effort, which prevented the C++ display from receiving `FormatManagerViewTopic` and caused the same behavior in the Rust display.
-
-Update both `stations-dds` implementations so the `transient_local` QoS name sets:
-
-- reliability: reliable
-- durability: transient local
-
-This keeps the format-manager writer/reader endpoints compatible and lets late-joining display readers receive the current assignment.
-
-### 8. Tests
-
-Rust:
-
-- `format-list` rejects an explicit `format-chooser` entry.
-- Transient-local QoS tests, if practical, or live verification of assignment delivery.
-- `is_known("format-chooser")` is true while `contains("format-chooser")` is false.
-- `next` never returns the chooser.
-- Saved assignment validation preserves `format-chooser`.
-- `format-ctl-service` accepts a chooser `Select`.
-- Display registry tests, if practical, verify chooser availability without relying on a list slot.
-
-C++:
-
-- `fit_rect` centers in wide/tall/invalid/zero-size rects.
-- `ChooserLayout` has 16 cells in 4 columns for 16 entries.
-- Tiles stay inside the region and above the pager.
-- Two entries use only the first two cells.
-- `tile_at` maps centers and ignores empty space.
-- Empty catalog/invalid region has no tiles.
-- `wrap_index` covers two-entry, full-grid, sparse-grid, and empty cases.
-- Format-list parser rejects `format-chooser`.
-- Existing image test continues to verify both icon assets are 64x64 RGBA.
-
-### 8. Documentation
-
-- Update `architecture.md`:
-  - `formats.toml` is the ordered catalog only; `format-chooser` is implicit.
-  - The chooser is always available and assignable but never a catalog item.
-  - Rust `format-list` owns the reserved chooser rule.
-  - C++ display-lib module list includes `icon`.
-- Keep README changes out of scope.
-
-## Manual verification
-
-```powershell
-.\scripts\build.ps1 -Test
-.\scripts\build.ps1
-.\scripts\launch-cpp.ps1 -DisplayId 0
-```
-
-With a temporary `LOCALAPPDATA`:
-
-- `contracts/formats.toml` contains only `hello-world` and `default`.
-- Open the menu and choose `Formats`; the chooser appears.
-- The chooser offers only `Hello World` and `Default` tiles with their icons.
-- The first tile is selected initially.
-- Mouse tile click switches the format.
-- Clicking empty chooser space consumes without changing the format.
-- D-pad left/right wraps between the two tiles.
-- D-pad up/down is a no-op with two entries.
-- Controller A/right-click selects the highlighted tile.
-- The menu is hidden while the chooser is active.
-- `format-chooser` can be assigned and is restored across restart.
-- Both Rust and C++ displays receive the chooser assignment from the Rust format service.
-- `Next` does not select the chooser.
-- Rust and C++ configurations both still run.
-- The relocated deploy still works.
-- Remove only temporary test state.
+1. Run `scripts/build.ps1 -Test`, then `scripts/build.ps1`.
+2. With a temporary `LOCALAPPDATA`, launch C++ `lil-d` for displays 0 and 1.
+3. Move both windows to known positions.
+4. Change both formats.
+5. Run `scripts/cleanup.ps1`.
+6. Relaunch C++; verify positions and formats restore.
+7. Clean up and launch Rust; verify the same positions and formats restore.
+8. Clean up and switch back to C++; verify again.
+9. Confirm `format-view-service\<id>.toml` retains the expected formats.
+10. Confirm `lil-d\<id>.toml` uses `\\.\DISPLAY…` monitor names.
+11. Use `dds-echo` to observe repeated best-effort `FormatManagerViewTopic` samples.
+12. Remove only the temporary state and processes.
 
 ## Risks
 
-- `FormatInput` must carry the format name and all call sites must use `.type`; otherwise chooser selection can select the current active format instead of the clicked tile.
-- An explicit `format-chooser` in `formats.toml` must be rejected; silently accepting it would put the chooser back in the catalog and reintroduce the old slot logic.
-- Rust selection and saved-assignment validation must use `is_known`, not `contains`, or the `Formats` menu path will be rejected after the contract change.
-- The chooser must be constructed after the catalog is complete, then appended; it must never be included in its own catalog.
-- Transient-local readers need reliable reliability to receive the format assignment; verify both Rust and C++ after changing QoS.
-- Icon texture/blending state must not leak into the next format or menu render.
-- D-pad wrapping must match Rust exactly, especially sparse grids.
-- Do not touch real `%LOCALAPPDATA%`; GUI tests use temporary state.
+- Best-effort samples can arrive out of order; revision handling is required.
+- Periodic publishing must not rewrite the format state file.
+- Legacy friendly-name state may require one migration; geometry fallback should minimize visible resets.
+- High-DPI monitor bounds must match between SDL and Win32.
+- Control-topic behavior remains unchanged; do not accidentally add ACK logic to this story.
+- Do not touch real `%LOCALAPPDATA%`; use temporary state for GUI verification.
 
 ## Bookkeeping
 
-- `cleanup-paths` is completed at `2026-11-23 12:05:05`.
-- `cpp-display-chooser` is `in progress` in `backlog.md`.
-- `cpp-display-chooser` has no remaining story prerequisites.
-- Do not move `cpp-display-chooser` to `completed_stories.md` until the user asks to plan the next story.
+- `cpp-display-chooser` is completed at `2026-11-23 15:16:59`.
+- `periodic-current-format` is `in progress` in `backlog.md`.
+- `periodic-current-format` has no remaining story prerequisites.
+- Do not add `reliable-control-ack` or `monitor-identity` stories.
+- Do not move `periodic-current-format` to `completed_stories.md` until the user asks to plan the next story.
