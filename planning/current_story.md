@@ -1,301 +1,299 @@
-# Current story: cleanup-paths
+# Current story: cpp-display-chooser
 
 This file is the detailed, living plan for the one active story. It is rewritten for each story. The backlog in `backlog.md` holds all work and the per-story status.
 
 ## Story
 
-Make the Rust and C++ deploy trees symmetric: move Rust deploy artifacts from `build/deploy/bin` to `build/deploy/rust/bin`, keep C++ under `build/deploy/cpp/bin`, and keep shared `assets/` and `config/` at the deploy root. Add a shared Rust `deploy-paths` crate for the deploy-root rule and migrate the Rust display libraries, services, `paws`, and `dds-echo` to it. Update the build and launch scripts, path tests, and path documentation.
+Make the format chooser implicit and implement it in C++. Remove `format-chooser` from `formats.toml`; the chooser always exists, is assignable as an active format, and is never a catalog or chooser tile. Update the Rust format list and services to treat it as a reserved implicit format, then add the C++ icon module and chooser: 4x4 grid, icon/title tiles, pager strip, selection, D-pad navigation, mouse tile selection, and the existing `Formats` menu slot selecting it. Reuse the project's image decoder for PNG/JPG icons.
 
 - **Depends on:** none.
-- **Minimal test:** `scripts/build.ps1` produces no `build/deploy/bin`; `launch-rust.ps1` and `launch-cpp.ps1` both run from `rust/bin` and `cpp/bin`; Rust and C++ displays, services, `paws`, and `dds-echo` resolve shared assets/config from the deploy root; relocated deploy works.
+- **Minimal test:** C++ `lil-d` with default and hello-world formats switches between them through the menu and chooser; D-pad selection wraps correctly; `formats.toml` lists no chooser; Rust services accept and preserve a `format-chooser` assignment; `Next` skips the chooser.
 
 ## Context
 
-- `cpp-display-hello` is complete at `2026-11-23 10:16:54`.
-- Rust currently deploys to `build/deploy/bin`; C++ deploys to `build/deploy/cpp/bin`.
-- Both configurations share `build/deploy/assets` and `build/deploy/config`.
-- The C++ `support` library already derives the deploy root by walking three parent levels from the main executable, which works for both `rust/bin` and `cpp/bin`.
-- Rust has duplicated two-level parent logic in `display-lib`, the five services, `paws`, and `dds-echo`; it assumes the executable lives directly under `build/deploy/bin`.
-- `lil-d` resolves its display library relative to its own executable directory, so its DLL lookup does not need a deploy-root change.
-- `cleanup.ps1` stops processes by image name, so it needs no functional path change.
-- The broad README rewrite belongs to `readme-cleanup`; this story only corrects deploy-path references.
+- `cleanup-paths` is complete at `2026-11-23 12:05:05`.
+- The Rust display library currently expects a `format-chooser` entry in `formats.toml` and uses a placeholder slot while building the registry.
+- The C++ display library currently skips `format-chooser` and does not expose a chooser renderer.
+- The `Formats` menu item already publishes `Select` for `format-chooser`, but Rust format services currently validate selections against the catalog; after removing the entry they must treat the chooser as implicitly known.
+- The Rust and C++ display libraries both need the chooser to remain an active selectable target even though it is absent from the ordered catalog.
+- `assets/icons/default.png` and `assets/icons/hello-world.png` already exist as 64x64 RGBA PNGs.
+- The C++ `stb_image` decoder and `load_image(path, desired_channels)` wrapper are already present.
+- The C++ format manager already hides the menu while `format-chooser` is active and routes input to the active format.
+- `paws`/`format-ctl-service` already send `Navigate`, `Pointer`, and `Select` commands.
 
 ## Decisions
 
-1. **Use `rust/bin` and `cpp/bin`.** Both languages live under the same deploy root and share `assets/` and `config/`.
-2. **Add a Rust `deploy-paths` crate.** It owns the deploy-root rule and exposes config/assets helpers.
-3. **Keep C++ `support` functionally unchanged.** Its three-level `deploy_root_for` rule already fits both layouts; add a Rust-layout test.
-4. **No new `lib/` deploy directory.** Binaries and their immediate runtime DLLs stay in each language's `bin`.
-5. **No hybrid-launch work.** This story only corrects the layout and path resolution.
-6. **No README rewrite.** Update only the deploy-path references needed for correctness.
-7. **No real `%LOCALAPPDATA%` in smoke tests.** Use a temporary directory.
-
-## Target deploy layout
-
-```text
-build/deploy/
-  rust/bin/
-    dds-echo.exe
-    display_lib.dll
-    format-ctl-service.exe
-    format-view-service.exe
-    harfbuzz.dll
-    harfbuzz-gpu.dll
-    hello-ctl-service.exe
-    hello-service.exe
-    hello-view-service.exe
-    lil-d.exe
-    paws.exe
-  cpp/bin/
-    ddsc.dll
-    ddscxx.dll
-    display_lib.dll
-    harfbuzz.dll
-    harfbuzz-gpu.dll
-    lil-d.exe
-  assets/
-  config/
-  dds-echo-discovery.log
-```
+1. **The format chooser is implicit.** It is not listed in `formats.toml`, is not part of the selectable catalog, and never appears as a tile inside itself.
+2. **It is still assignable.** A `format-chooser` assignment is valid for the active format window.
+3. **It is always constructed.** Both Rust and C++ display libraries build the chooser after building the catalog formats; no slot in the list is required.
+4. **`Next` skips it.** The catalog order contains only selectable formats, so `Next` never advances to the chooser.
+5. **Rust format services recognize the implicit chooser.** `FormatList` exposes a reserved `FORMAT_CHOOSER` constant and an `is_known` check used by selection and saved-assignment validation.
+6. **The list parser rejects an explicit chooser entry.** A `format-chooser` entry in `formats.toml` is a contract error, not a normal format.
+7. **`FormatInput` carries the selected format name.** The chooser returns a concrete catalog name for tile selection.
+8. **Reuse `stb_image`.** Add the C++ `icon` module; no new dependency.
+9. **No paging controls yet.** Reserve the pager strip; show at most 16 entries.
+10. **No DDS/deploy changes in this story.** The existing Rust format services remain stand-ins.
 
 ## Scope
 
 **In scope**
 
-- Add `rust/lib/deploy-paths`.
-- Migrate all Rust deploy-root/config/assets resolution to `deploy-paths`.
-- Move Rust deploy artifacts to `build/deploy/rust/bin`.
-- Update `scripts/build.ps1`, `scripts/launch-rust.ps1`, and `scripts/launch-cpp.ps1`.
-- Update targeted deploy-path references in `README.md`.
-- Update architecture and path tests.
-- Remove stale `build/deploy/bin` during the build.
+- Remove `format-chooser` from `contracts/formats.toml` and update its comment.
+- Add the reserved implicit chooser rule to Rust `format-list`.
+- Update Rust services and saved-assignment validation.
+- Update the Rust display registry to always construct the chooser.
+- Refactor C++ `FormatInput` to carry a selected format name.
+- Update the C++ registry to always construct the chooser.
+- Add C++ `icon` and `format_chooser` modules.
+- Implement chooser layout, rendering, mouse selection, D-pad wrapping, and controller selection.
+- Add CTest coverage for chooser geometry, navigation, and icon fitting.
+- Update planning architecture and current story docs.
 
 **Out of scope**
 
-- Hybrid launch configuration.
-- Moving Rust or C++ build output directories.
-- C++ services or C++ `paws`.
-- Broad README restructuring.
-- A shared `deploy/lib` directory.
-- Changing C++ CMake install-prefix semantics.
+- Paging controls and more than 16 formats.
+- Animated/hover icons.
+- C++ format services or C++ `paws`.
+- Lux Color/Lux Pos overlays.
+- New assets or icon sizes.
+- README restructuring.
 
 ## Files
 
 ```text
-rust/lib/deploy-paths/
-  Cargo.toml
-  src/lib.rs
-```
-
-Other Rust changes:
-
-```text
-rust/Cargo.toml
+contracts/formats.toml
+rust/lib/format-list/src/lib.rs
+rust/lib/display-lib/src/formats.rs
 rust/lib/display-lib/Cargo.toml
-rust/lib/display-lib/src/lib.rs
-rust/service/hello-service/Cargo.toml
-rust/service/hello-service/src/main.rs
-rust/service/hello-view-service/Cargo.toml
-rust/service/hello-view-service/src/main.rs
-rust/service/hello-ctl-service/Cargo.toml
-rust/service/hello-ctl-service/src/main.rs
-rust/service/format-ctl-service/Cargo.toml
 rust/service/format-ctl-service/src/main.rs
-rust/service/format-view-service/Cargo.toml
 rust/service/format-view-service/src/main.rs
-rust/tool/dds-echo/Cargo.toml
-rust/tool/dds-echo/src/main.rs
-rust/ui/paws/Cargo.toml
-rust/ui/paws/src/commands.rs
-```
-
-Scripts and docs:
-
-```text
-scripts/build.ps1
-scripts/launch-rust.ps1
-scripts/launch-cpp.ps1
-cpp/libs/support/tests/main.cpp
-README.md
+cpp/libs/display-lib/CMakeLists.txt
+cpp/libs/display-lib/src/formats.hpp
+cpp/libs/display-lib/src/formats.cpp
+cpp/libs/display-lib/src/format_manager_impl.cpp
+cpp/libs/display-lib/src/formats/hello_world.cpp
+cpp/libs/display-lib/src/icon.hpp/.cpp
+cpp/libs/display-lib/src/format_chooser.hpp/.cpp
+cpp/libs/display-lib/tests/main.cpp
 planning/architecture.md
 planning/backlog.md
 planning/completed_stories.md
 planning/current_story.md
 ```
 
-No `docs/versions.md` change is needed.
+No changes are expected in:
+
+- `scripts/build.ps1`
+- `scripts/launch-*.ps1`
+- `scripts/cleanup.ps1`
+- `assets/`
+- `docs/versions.md`
 
 ## Implementation
 
-### 1. Add `deploy-paths`
+### 1. Contract and Rust implicit chooser
 
-Create `rust/lib/deploy-paths` with:
+`contracts/formats.toml`:
+
+- Keep only the selectable catalog:
+  - `hello-world`
+  - `default`
+- Update the comment to state that `format-chooser` is implicit and must not be listed.
+
+`rust/lib/format-list/src/lib.rs`:
+
+- Add `pub const FORMAT_CHOOSER: &str = "format-chooser";`.
+- Reject `format-chooser` in `FormatList::from_toml` with a clear error.
+- Keep `names()` and `next()` limited to the catalog.
+- Add:
 
 ```rust
-pub fn deploy_root_for(executable: &Path) -> PathBuf;
-pub fn deploy_root() -> Option<PathBuf>;
-pub fn config_dir() -> Option<PathBuf>;
-pub fn assets_dir() -> Option<PathBuf>;
+pub fn is_known(&self, name: &str) -> bool {
+    name == FORMAT_CHOOSER || self.contains(name)
+}
 ```
 
-Rules:
+- Keep `contains()` meaning “is in the ordered catalog.”
+- Use `is_known` in `SavedAssignments::validated`, so a persisted chooser assignment is preserved instead of falling back to `hello-world`.
 
-- Deploy root is three parent levels above the executable:
-  - `deploy/rust/bin/tool.exe` -> `deploy`
-  - `deploy/cpp/bin/tool.exe` -> `deploy`
-- `deploy_root()` uses `std::env::current_exe()`.
-- `config_dir()` returns `<deploy_root>/config`.
-- `assets_dir()` returns `<deploy_root>/assets`.
-- Short or incomplete paths fall back safely without panicking.
-- Add unit tests for both language layouts, config paths, and assets paths.
+`rust/service/format-ctl-service/src/main.rs`:
 
-Workspace changes:
+- Use `formats.is_known(&event.format)` for `Select` validation.
+- Add tests that `format-chooser` is accepted and `Next` never selects it.
 
-- Add `lib/deploy-paths` to `rust/Cargo.toml`.
-- Add `deploy-paths = { path = "lib/deploy-paths" }` to workspace dependencies.
-- Add the dependency to `display-lib`, the five services, `paws`, and `dds-echo`.
+`rust/service/format-view-service/src/main.rs`:
 
-### 2. Migrate Rust consumers
+- Rely on the updated `SavedAssignments::validated` behavior.
+- Add a test that a `format-chooser` control assignment survives validation.
 
-#### Display library
+### 2. Rust display registry
 
-- Replace the local `assets_root` and `config_root` parent arithmetic with `deploy_paths::assets_dir()` and `deploy_paths::config_dir()`.
-- Preserve the development fallback to `<cwd>/contracts` when the deployed config is unavailable.
-- Update comments from `build/deploy/bin` to `build/deploy/rust/bin`.
+`rust/lib/display-lib/src/formats.rs`:
 
-#### Services
+- Use the shared `format_list::FORMAT_CHOOSER` constant.
+- Remove the chooser slot/placeholder logic.
+- Build the catalog from the listed formats only.
+- Always construct `FormatChooser` after the catalog is complete.
+- Append the chooser to the registry so assignments to `format-chooser` resolve.
+- Keep the chooser out of its own catalog.
+- Unknown listed names remain errors.
 
-Update each service's `contracts_dir` to:
+### 3. C++ selection plumbing
 
-1. Honor an explicit `--config`.
-2. Try `deploy_paths::config_dir()` and use it when `topics.toml` exists.
-3. Fall back to `<cwd>/contracts`.
+Change `FormatInput` from a bare enum to:
 
-Update CLI help/comments from `<exe_dir>/../config` to the deploy-root meaning.
-
-#### `paws`
-
-- Replace its local two-level lookup in `commands.rs` with `deploy_paths::config_dir()`.
-- Keep explicit `--config` and development fallback behavior.
-
-#### `dds-echo`
-
-- Replace the local `deploy_root()` with `deploy_paths::deploy_root()`.
-- Use `config_dir()` for deployed config/registry discovery.
-- Keep the discovery log at the deploy root.
-- Preserve explicit options and current-directory fallbacks.
-
-#### `lil-d`
-
-No deploy-root change. Its display library remains next to the executable in `rust/bin`.
-
-### 3. Build and deploy
-
-Update `scripts/build.ps1`:
-
-- Rename `$deployBin` to `$deployRustBin`.
-- Set:
-
-```powershell
-$deployRustBin = Join-Path $deployRoot 'rust\bin'
-$deployCppBin = Join-Path $deployRoot 'cpp\bin'
+```cpp
+struct FormatInput {
+    enum class Type { Ignored, Consumed, Select };
+    Type type = Type::Ignored;
+    std::string format;
+};
 ```
 
-- Create both directories.
-- Remove the legacy `build/deploy/bin` directory if it exists.
-- Copy all Rust artifacts to `$deployRustBin`.
-- Copy HarfBuzz DLLs to `$deployRustBin`.
-- Keep C++ artifacts and runtime DLLs in `$deployCppBin`.
-- Keep `assets/` and `config/` at `$deployRoot`.
-- Update the completion message.
+Update:
 
-No CMake install-prefix change is required.
+- Base `Format` defaults.
+- `HelloWorld` ignored/consumed returns.
+- `FormatManager` checks and selections.
+- `FormatManager::mouse_button`/`command` use `input.format` for selection.
+- `FormatManager::menu_action` selection checks.
 
-### 4. Launch scripts
+The chooser returns `Select` with `default` or `hello-world`; it does not return `Select` for the chooser itself.
 
-#### `launch-rust.ps1`
+### 4. C++ implicit registry and catalog
 
-- Change `$bin` to `build/deploy/rust/bin`.
+In `formats.hpp`:
 
-#### `launch-cpp.ps1`
+- Add `FormatMeta { name, title, icon_file }`.
 
-- Rename the Rust service path to `$rustBin` = `build/deploy/rust/bin`.
-- Keep `$cppBin` = `build/deploy/cpp/bin`.
-- Start Rust stand-ins from `$rustBin` and C++ `lil-d` from `$cppBin`.
-- Update the script description.
+In `formats.cpp`:
 
-#### `cleanup.ps1`
+- Build listed formats and collect their metadata.
+- Reject `format-chooser` in the C++ format list parser.
+- Always construct `FormatChooser(assets_root, catalog)` after the catalog is complete.
+- Append it to the registry.
+- Remove the obsolete `chooser_available` flag; the chooser is unconditional.
+- Ensure `first_name()` remains the first catalog format.
 
-- No functional change; image-name stopping still covers both configurations.
-- Optional comment update only.
+Assignments to `format-chooser` now resolve through the registry, and `Formats` selection continues to publish that name.
 
-### 5. C++ support test
+### 5. C++ icon module
 
-No functional C++ code change.
+Add `icon.hpp/.cpp`:
 
-Extend `cpp/libs/support/tests/main.cpp` to verify both:
+- `Icon` owns a 2D RGBA texture and dimensions.
+- Load via `load_image(path, 4)`.
+- Upload as `GL_RGBA8` with linear filtering and clamp-to-edge.
+- `fit_rect(rect, image_w, image_h)` centers an aspect-preserving fit.
+- `Icon::fit(rect)` uses the image dimensions.
+- `IconRenderer` owns the textured-quad shader, VAO, and VBO.
+- Draw maps the icon rect from format-region coordinates into clip space.
+- Enable source-alpha blending and restore state.
 
-```text
-deploy/rust/bin/tool.exe -> deploy
-deploy/cpp/bin/tool.exe  -> deploy
-```
+No new assets or dependency.
 
-### 6. Documentation
+### 6. C++ chooser
 
-- Update `planning/architecture.md` with the `rust/bin` + `cpp/bin` layout, shared assets/config, runtime DLL placement, and the `deploy-paths` crate.
-- Update only the README deploy-path references:
-  - `build/deploy/bin` -> `build/deploy/rust/bin`
-  - explain the symmetric `rust/bin` and `cpp/bin` layout
-  - reconcile runtime-DLL placement for each language
-- Leave the broader README rewrite to `readme-cleanup`.
+Add `format_chooser.hpp/.cpp`:
 
-## Tests
+- 4 columns × 4 rows, capacity 16.
+- `ChooserTile` with tile/icon/title rects and index.
+- `ChooserLayout` with tiles and reserved pager rect.
+- `tile_at(x, y)` hit-testing.
+- `wrap_index(selected, count, dx, dy)` matching Rust:
+  - horizontal movement wraps within the current row;
+  - vertical movement wraps within the current column;
+  - sparse grids skip empty cells;
+  - no movement when no other occupied tile exists.
+- `selectable` excludes the implicit chooser by construction (catalog contains only listed formats).
+- Background, tile, selected-tile, and title colors matching Rust.
+- Render:
+  - clear the full format region;
+  - set viewport and disable depth;
+  - draw tile backgrounds;
+  - draw fitted icons and centered titles.
+- Input:
+  - left-click on a tile selects it and returns `Select` with the format name;
+  - left-click elsewhere in the region consumes;
+  - right-click is ignored;
+  - `Navigate` updates selection and consumes;
+  - controller right-pointer selects the highlighted tile;
+  - other pointer/move/menu/overlay commands consume.
+- The chooser never contributes menu items.
 
-Add or update:
+The existing manager already closes/hides the menu while the chooser is active and routes input to it.
 
-- `deploy-paths` unit tests for deploy roots, config paths, and asset paths.
-- C++ `support-tests` for both `rust/bin` and `cpp/bin`.
-- Existing Rust and CTest suites remain green.
+### 7. Tests
 
-Verification must also confirm there is no leftover `build/deploy/bin`.
+Rust:
 
-## Verification
+- `format-list` rejects an explicit `format-chooser` entry.
+- `is_known("format-chooser")` is true while `contains("format-chooser")` is false.
+- `next` never returns the chooser.
+- Saved assignment validation preserves `format-chooser`.
+- `format-ctl-service` accepts a chooser `Select`.
+- Display registry tests, if practical, verify chooser availability without relying on a list slot.
+
+C++:
+
+- `fit_rect` centers in wide/tall/invalid/zero-size rects.
+- `ChooserLayout` has 16 cells in 4 columns for 16 entries.
+- Tiles stay inside the region and above the pager.
+- Two entries use only the first two cells.
+- `tile_at` maps centers and ignores empty space.
+- Empty catalog/invalid region has no tiles.
+- `wrap_index` covers two-entry, full-grid, sparse-grid, and empty cases.
+- Format-list parser rejects `format-chooser`.
+- Existing image test continues to verify both icon assets are 64x64 RGBA.
+
+### 8. Documentation
+
+- Update `architecture.md`:
+  - `formats.toml` is the ordered catalog only; `format-chooser` is implicit.
+  - The chooser is always available and assignable but never a catalog item.
+  - Rust `format-list` owns the reserved chooser rule.
+  - C++ display-lib module list includes `icon`.
+- Keep README changes out of scope.
+
+## Manual verification
 
 ```powershell
 .\scripts\build.ps1 -Test
 .\scripts\build.ps1
-Test-Path .\build\deploy\bin                 # false
-Test-Path .\build\deploy\rust\bin\lil-d.exe  # true
-Test-Path .\build\deploy\cpp\bin\lil-d.exe   # true
-.\scripts\launch-rust.ps1 -DisplayId 0
-.\scripts\cleanup.ps1
 .\scripts\launch-cpp.ps1 -DisplayId 0
-.\scripts\cleanup.ps1
 ```
 
-Manual checks with a temporary `LOCALAPPDATA`:
+With a temporary `LOCALAPPDATA`:
 
-- Rust `lil-d` renders greeting/Earth and loads assets from the shared deploy root.
-- C++ `lil-d` renders greeting/Earth and loads assets/config from the shared deploy root.
-- Rust services, `paws`, and `dds-echo` find `deploy/config`.
-- `dds-echo` starts from `rust/bin` and keeps its discovery log at the deploy root.
-- Relocated deploy trees work for both Rust and C++ without repository paths or external `PATH`.
-- The old `build/deploy/bin` is not recreated.
-- The Rust configuration and C++ configuration both remain functional.
-- Remove only temporary state; never touch the real `%LOCALAPPDATA%`.
+- `contracts/formats.toml` contains only `hello-world` and `default`.
+- Open the menu and choose `Formats`; the chooser appears.
+- The chooser offers only `Hello World` and `Default` tiles with their icons.
+- The first tile is selected initially.
+- Mouse tile click switches the format.
+- Clicking empty chooser space consumes without changing the format.
+- D-pad left/right wraps between the two tiles.
+- D-pad up/down is a no-op with two entries.
+- Controller A/right-click selects the highlighted tile.
+- The menu is hidden while the chooser is active.
+- `format-chooser` can be assigned and is restored across restart.
+- `Next` does not select the chooser.
+- Rust and C++ configurations both still run.
+- The relocated deploy still works.
+- Remove only temporary test state.
 
 ## Risks
 
-- Missing a Rust consumer leaves it looking in `deploy/rust/config` or `deploy/rust/assets`.
-- `std::env::current_exe()` returns the main executable, not the display DLL; this is exactly what the three-level rule needs.
-- `launch-cpp.ps1` must point Rust stand-ins at `rust/bin`, not `cpp/bin`.
-- Stale `build/deploy/bin` artifacts could mask layout mistakes; the build script removes the legacy directory.
-- Relocated deploy must remain independent of the repository root and current working directory.
-- GUI smoke tests must use temporary `LOCALAPPDATA`.
+- `FormatInput` must carry the format name and all call sites must use `.type`; otherwise chooser selection can select the current active format instead of the clicked tile.
+- An explicit `format-chooser` in `formats.toml` must be rejected; silently accepting it would put the chooser back in the catalog and reintroduce the old slot logic.
+- Rust selection and saved-assignment validation must use `is_known`, not `contains`, or the `Formats` menu path will be rejected after the contract change.
+- The chooser must be constructed after the catalog is complete, then appended; it must never be included in its own catalog.
+- Icon texture/blending state must not leak into the next format or menu render.
+- D-pad wrapping must match Rust exactly, especially sparse grids.
+- Do not touch real `%LOCALAPPDATA%`; GUI tests use temporary state.
 
 ## Bookkeeping
 
-- `cpp-display-hello` is completed at `2026-11-23 10:16:54`.
-- `cleanup-paths` is `in progress` in `backlog.md`.
-- `cleanup-paths` has no remaining story prerequisites.
-- Do not move `cleanup-paths` to `completed_stories.md` until the user asks to plan the next story.
+- `cleanup-paths` is completed at `2026-11-23 12:05:05`.
+- `cpp-display-chooser` is `in progress` in `backlog.md`.
+- `cpp-display-chooser` has no remaining story prerequisites.
+- Do not move `cpp-display-chooser` to `completed_stories.md` until the user asks to plan the next story.

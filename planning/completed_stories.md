@@ -340,3 +340,10 @@ Add the generic C++ format manager/menu and the real hello-world format to the d
 - **Depends on:** none.
 - **Minimal test:** C++ `lil-d` with the Rust stand-in services shows the live greeting and Earth, rotates with mouse and controller commands, switches Auto/Inspect, and shows all four menu slots with the expected labels.
 - **Note:** verified with a temporary `LOCALAPPDATA`; the real runtime state was untouched.
+
+### cleanup-paths
+Make the Rust and C++ deploy trees symmetric. Added the shared Rust `deploy-paths` crate, migrated the Rust display library, services, `paws`, and `dds-echo` to it, moved Rust artifacts to `build/deploy/rust/bin`, kept C++ under `build/deploy/cpp/bin`, retained shared `assets/` and `config/` at the deploy root, and updated build/launch scripts, README path references, and path tests. Verified both configurations and a relocated deploy.
+- **Completed:** 2026-11-23 12:05:05.
+- **Depends on:** none.
+- **Minimal test:** `scripts/build.ps1` produces no `build/deploy/bin`; `launch-rust.ps1` and `launch-cpp.ps1` both run from `rust/bin` and `cpp/bin`; Rust and C++ displays, services, `paws`, and `dds-echo` resolve shared assets/config from the deploy root; relocated deploy works.
+- **Note:** verified with temporary `LOCALAPPDATA`; the real runtime state was untouched.
