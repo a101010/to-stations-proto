@@ -333,3 +333,10 @@ Create the C++ `lil-d` using SDL3 and Dear ImGui. Added the dynamic ABI v4 displ
 - **Depends on:** none.
 - **Minimal test:** C++ `lil-d` shows the C++ default format, forwards mouse input, hides the native cursor over the format, restores window state, and runs from the relocated deploy tree; `launch-cpp.ps1` starts C++ `lil-d` plus the Rust stand-ins.
 - **Note:** verified with a temporary `LOCALAPPDATA`, including duplicate-display rejection and the relocated deploy tree; the real runtime state was untouched.
+
+### cpp-display-hello
+Add the generic C++ format manager/menu and the real hello-world format to the display library. Added the four Rust-compatible menu slots, HarfBuzz GPU text, the Earth cube map with stb_image decoding, greeting and Auto/Inspect, arcball input, light/color rendering, hello-world view/input and format-manager DDS endpoints, and C++ HarfBuzz/CycloneDDS runtime deployment. Verified with the Rust stand-in services, menu switching, relocated deploy, and CTest.
+- **Completed:** 2026-11-23 10:16:54.
+- **Depends on:** none.
+- **Minimal test:** C++ `lil-d` with the Rust stand-in services shows the live greeting and Earth, rotates with mouse and controller commands, switches Auto/Inspect, and shows all four menu slots with the expected labels.
+- **Note:** verified with a temporary `LOCALAPPDATA`; the real runtime state was untouched.
