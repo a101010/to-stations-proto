@@ -169,9 +169,13 @@ if (-not $Test) {
     Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\format-ctl-service.exe') -Destination $deployBin -Force
     Copy-Item -Path (Join-Path $repoRoot 'build\rust\release\format-view-service.exe') -Destination $deployBin -Force
 
-    # The C++ display loads its C++ display library from next to its executable.
+    # The C++ display loads its C++ display library and runtime DLLs from next to its executable.
     Copy-Item -Path (Join-Path $repoRoot 'build\cpp\Release\lil-d.exe') -Destination $deployCppBin -Force
     Copy-Item -Path (Join-Path $repoRoot 'build\cpp\Release\display_lib.dll') -Destination $deployCppBin -Force
+    Copy-Item -Path (Join-Path $extPathPrefix 'harfbuzz/bin/harfbuzz.dll') -Destination $deployCppBin -Force
+    Copy-Item -Path (Join-Path $extPathPrefix 'harfbuzz/bin/harfbuzz-gpu.dll') -Destination $deployCppBin -Force
+    Copy-Item -Path (Join-Path $extPathPrefix 'cyclonedds/bin/ddsc.dll') -Destination $deployCppBin -Force
+    Copy-Item -Path (Join-Path $extPathPrefix 'cyclonedds-cxx/bin/ddscxx.dll') -Destination $deployCppBin -Force
 
     # The display library loads its font and (later) the earth cube map from
     # <deploy>/assets, and links the HarfBuzz runtime from next to the exe.
@@ -185,5 +189,5 @@ if (-not $Test) {
     Copy-Item -Path (Join-Path $repoRoot 'contracts\topics.toml') -Destination $deployConfig -Force
     Copy-Item -Path (Join-Path $repoRoot 'contracts\formats.toml') -Destination $deployConfig -Force
     Copy-Item -Path (Join-Path $repoRoot 'contracts\services') -Destination $deployConfig -Recurse -Force
-    Write-Host "Deployed Rust lil-d.exe and services, C++ lil-d.exe + display_lib.dll, Rust display_lib.dll, assets, the HarfBuzz runtime, and the DDS config + contracts"
+    Write-Host "Deployed Rust lil-d.exe and services, C++ lil-d.exe + display_lib.dll + C++ runtime DLLs, Rust display_lib.dll, assets, the HarfBuzz runtime, and the DDS config + contracts"
 }

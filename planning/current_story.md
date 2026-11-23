@@ -23,7 +23,7 @@ Add the generic C++ format manager/menu and the real hello-world format to the d
 
 ## Decisions
 
-1. **Add `stb_image` now.** Earth's cube-map faces are JPEGs. Add `stb_image` 2.30 under `cpp/third_party/stb/`, record it in `docs/versions.md`, and reuse it for format icons in `cpp-display-chooser`.
+1. **Add `stb_image` now.** Earth's cube-map faces are JPEGs. Add `stb_image` 2.34 under `cpp/third_party/stb/`, record it in `docs/versions.md`, and reuse it for format icons in `cpp-display-chooser`.
 2. **Link HarfBuzz into the C++ display library.** Add imported CMake targets for `harfbuzz` and `harfbuzz-gpu`; copy their runtime DLLs next to the C++ display library.
 3. **Keep DDS inside the display library.** The display library owns the hello-world view/input endpoints and the format-manager view/command/input endpoints. The display app remains unaware of topics.
 4. **Use `stations_dds::Node` on domain 0.** Load the contracts and DDS configuration from the deploy root derived from the display library path. `Node` sets `CYCLONEDDS_URI` from the deploy configuration before creating the participant.
@@ -65,8 +65,8 @@ cpp/libs/display-lib/
   src/format_list.hpp/.cpp
   src/formats.hpp/.cpp
   src/formats/default_format.hpp/.cpp
-  src/formats/hello_world.hpp/.cpp
-  src/format_manager.hpp/.cpp
+  src/formats/hello_world_impl.hpp/.cpp
+  src/format_manager_impl.hpp/.cpp
   src/format_menu.hpp/.cpp
   src/format_source.hpp/.cpp
   src/view.hpp/.cpp

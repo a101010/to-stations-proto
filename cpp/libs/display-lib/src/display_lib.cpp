@@ -1,37 +1,33 @@
 #include "display_lib.h"
 
-#include "default_format.hpp"
-
-#include <glad/gl.h>
-
 #include <cstdint>
+#include <filesystem>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
-#include <vector>
+
+#include <glad/gl.h>
+
+#include "format_list.hpp"
+#include "format_manager_impl.hpp"
+#include "format_source.hpp"
+#include "formats.hpp"
+#include "stations_dds/contract.hpp"
+#include "stations_dds/dds.hpp"
+#include "support/paths.hpp"
+#include "view.hpp"
 
 struct Display {
-    uint32_t display_id = 0;
-    GLuint program = 0;
-    GLuint vao = 0;
-    GLuint vbo = 0;
-    GLsizei vertex_count = 0;
-    int pointer_x = 0;
-    int pointer_y = 0;
-    uint32_t buttons = 0;
-
-    ~Display() {
-        if (vbo != 0) {
-            glDeleteBuffers(1, &vbo);
-        }
-        if (vao != 0) {
-            glDeleteVertexArrays(1, &vao);
-        }
-        if (program != 0) {
-            glDeleteProgram(program);
-        }
-    }
+    std::optional<uint32_t> display_id;
+    std::shared_ptr<display_lib_impl::ViewState> state =
+        std::make_shared<display_lib_impl::ViewState>();
+    std::unique_ptr<stations_dds::Node> node;
+    std::unique_ptr<display_lib_impl::ViewSource> view;
+    std::shared_ptr<display_lib_impl::HelloWorldInput> input;
+    std::unique_ptr<display_lib_impl::FormatSource> format_source;
+    std::unique_ptr<display_lib_impl::FormatManager> manager;
 };
 
 namespace {
@@ -55,119 +51,7 @@ void clear_last_error() {
     g_last_error.clear();
 }
 
-GLuint compile_shader(GLenum kind, const char* source) {
-    const GLuint shader = glCreateShader(kind);
-    glShaderSource(shader, 1, &source, nullptr);
-    glCompileShader(shader);
-
-    GLint compiled = 0;
-    glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
-    if (compiled == 0) {
-        GLint length = 0;
-        glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &length);
-        std::string log(static_cast<size_t>(length), '\0');
-        if (length > 1) {
-            glGetShaderInfoLog(shader, length, nullptr, log.data());
-        }
-        glDeleteShader(shader);
-        throw std::runtime_error("shader compile failed: " + log);
-    }
-    return shader;
-}
-
-GLuint link_program(const char* vertex_source, const char* fragment_source) {
-    const GLuint vertex = compile_shader(GL_VERTEX_SHADER, vertex_source);
-    GLuint fragment = 0;
-    try {
-        fragment = compile_shader(GL_FRAGMENT_SHADER, fragment_source);
-    } catch (...) {
-        glDeleteShader(vertex);
-        throw;
-    }
-
-    const GLuint program = glCreateProgram();
-    glAttachShader(program, vertex);
-    glAttachShader(program, fragment);
-    glLinkProgram(program);
-    glDeleteShader(vertex);
-    glDeleteShader(fragment);
-
-    GLint linked = 0;
-    glGetProgramiv(program, GL_LINK_STATUS, &linked);
-    if (linked == 0) {
-        GLint length = 0;
-        glGetProgramiv(program, GL_INFO_LOG_LENGTH, &length);
-        std::string log(static_cast<size_t>(length), '\0');
-        if (length > 1) {
-            glGetProgramInfoLog(program, length, nullptr, log.data());
-        }
-        glDeleteProgram(program);
-        throw std::runtime_error("shader link failed: " + log);
-    }
-    return program;
-}
-
-const char* kVertexShader = R"(#version 330 core
-layout (location = 0) in vec2 a_pos;
-layout (location = 1) in vec4 a_color;
-out vec4 v_color;
-void main() {
-    v_color = a_color;
-    gl_Position = vec4(a_pos, 0.0, 1.0);
-})";
-
-const char* kFragmentShader = R"(#version 330 core
-in vec4 v_color;
-out vec4 f_color;
-void main() {
-    f_color = v_color;
-})";
-
-void initialize(Display& display) {
-    const std::vector<float> vertices = display_lib_impl::default_vertices();
-    if (vertices.empty()) {
-        throw std::runtime_error("default format has no vertices");
-    }
-
-    display.program = link_program(kVertexShader, kFragmentShader);
-    glGenVertexArrays(1, &display.vao);
-    glGenBuffers(1, &display.vbo);
-    if (display.vao == 0 || display.vbo == 0) {
-        throw std::runtime_error("failed to create default-format buffers");
-    }
-
-    glBindVertexArray(display.vao);
-    glBindBuffer(GL_ARRAY_BUFFER, display.vbo);
-    glBufferData(
-        GL_ARRAY_BUFFER,
-        static_cast<GLsizeiptr>(vertices.size() * sizeof(float)),
-        vertices.data(),
-        GL_STATIC_DRAW);
-
-    constexpr GLsizei stride = 6 * static_cast<GLsizei>(sizeof(float));
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(
-        0,
-        2,
-        GL_FLOAT,
-        GL_FALSE,
-        stride,
-        reinterpret_cast<const void*>(0));
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(
-        1,
-        4,
-        GL_FLOAT,
-        GL_FALSE,
-        stride,
-        reinterpret_cast<const void*>(2 * sizeof(float)));
-    glBindVertexArray(0);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-
-    display.vertex_count = static_cast<GLsizei>(vertices.size() / 6);
-}
-
-Display* create(display_lib_gl_loader loader, void* userdata) {
+std::unique_ptr<Display> create(display_lib_gl_loader loader, void* userdata) {
     if (loader == nullptr) {
         throw std::runtime_error("display library requires a GL loader");
     }
@@ -181,9 +65,49 @@ Display* create(display_lib_gl_loader loader, void* userdata) {
         throw std::runtime_error("failed to load OpenGL functions");
     }
 
+    const std::filesystem::path config_root = support::deploy_path("config");
+    const std::filesystem::path assets_root = support::deploy_path("assets");
+    const display_lib_impl::FormatList formats =
+        display_lib_impl::load_format_list(config_root / "formats.toml");
+
     auto display = std::make_unique<Display>();
-    initialize(*display);
-    return display.release();
+
+    try {
+        const stations_dds::TopicRegistry registry =
+            stations_dds::TopicRegistry::load(config_root / "topics.toml");
+        display->node = std::make_unique<stations_dds::Node>(
+            0,
+            registry,
+            config_root / "cyclonedds-config.xml");
+    } catch (const std::exception&) {
+        display->node.reset();
+    }
+
+    if (display->node) {
+        try {
+            display->view = std::make_unique<display_lib_impl::ViewSource>(*display->node);
+        } catch (const std::exception&) {
+            display->view.reset();
+        }
+        try {
+            display->input = std::make_shared<display_lib_impl::HelloWorldInput>(*display->node);
+        } catch (const std::exception&) {
+            display->input.reset();
+        }
+        try {
+            display->format_source =
+                std::make_unique<display_lib_impl::FormatSource>(*display->node);
+        } catch (const std::exception&) {
+            display->format_source.reset();
+        }
+    }
+
+    display->manager = std::make_unique<display_lib_impl::FormatManager>(
+        assets_root,
+        display->state,
+        display->input,
+        formats);
+    return display;
 }
 
 void render(
@@ -193,31 +117,13 @@ void render(
     int y,
     int width,
     int height) {
-    if (width <= 0 || height <= 0) {
-        return;
+    if (display.view) {
+        display.view->poll(*display.state, display.display_id);
     }
-    const int y_gl = framebuffer_height - y - height;
-
-    glEnable(GL_SCISSOR_TEST);
-    glScissor(x, y_gl, width, height);
-    glClearColor(
-        display_lib_impl::kBackground[0],
-        display_lib_impl::kBackground[1],
-        display_lib_impl::kBackground[2],
-        display_lib_impl::kBackground[3]);
-    glClear(GL_COLOR_BUFFER_BIT);
-    glDisable(GL_SCISSOR_TEST);
-
-    glViewport(x, y_gl, width, height);
-    glDisable(GL_DEPTH_TEST);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glUseProgram(display.program);
-    glBindVertexArray(display.vao);
-    glDrawArrays(GL_TRIANGLES, 0, display.vertex_count);
-    glBindVertexArray(0);
-    glUseProgram(0);
-    glDisable(GL_BLEND);
+    if (display.format_source) {
+        display.format_source->poll(*display.manager, display.display_id);
+    }
+    display.manager->render(framebuffer_height, x, y, width, height);
 }
 
 }  // namespace
@@ -233,7 +139,7 @@ display_lib* display_lib_create(
     void* userdata) {
     clear_last_error();
     try {
-        return reinterpret_cast<display_lib*>(create(loader, userdata));
+        return reinterpret_cast<display_lib*>(create(loader, userdata).release());
     } catch (const std::exception& error) {
         set_last_error(error.what());
         return nullptr;
@@ -247,7 +153,11 @@ void display_lib_set_identity(
     display_lib* display,
     uint32_t display_id) {
     if (display != nullptr) {
-        reinterpret_cast<Display*>(display)->display_id = display_id;
+        Display* value = reinterpret_cast<Display*>(display);
+        value->display_id = display_id;
+        if (value->input) {
+            value->input->set_display_id(display_id);
+        }
     }
 }
 
@@ -259,7 +169,13 @@ void display_lib_render(
     int width,
     int height) {
     if (display != nullptr) {
-        render(*reinterpret_cast<Display*>(display), framebuffer_height, x, y, width, height);
+        render(
+            *reinterpret_cast<Display*>(display),
+            framebuffer_height,
+            x,
+            y,
+            width,
+            height);
     }
 }
 
@@ -273,15 +189,13 @@ void display_lib_mouse_button(
         return;
     }
     Display* value = reinterpret_cast<Display*>(display);
-    value->pointer_x = x;
-    value->pointer_y = y;
-    if (button >= 0 && button < 32) {
-        const uint32_t bit = 1u << button;
-        if (pressed != 0) {
-            value->buttons |= bit;
-        } else {
-            value->buttons &= ~bit;
-        }
+    const std::optional<display_lib_impl::FormatAction> action =
+        value->manager->mouse_button(x, y, button, pressed != 0);
+    if (action && value->format_source) {
+        value->format_source->send_select(
+            action->window,
+            action->format,
+            value->display_id);
     }
 }
 
@@ -290,17 +204,16 @@ void display_lib_mouse_motion(
     int x,
     int y) {
     if (display != nullptr) {
-        Display* value = reinterpret_cast<Display*>(display);
-        value->pointer_x = x;
-        value->pointer_y = y;
+        reinterpret_cast<Display*>(display)->manager->mouse_motion(x, y);
     }
 }
 
 void display_lib_mouse_wheel(
     display_lib* display,
     int delta) {
-    (void)display;
-    (void)delta;
+    if (display != nullptr) {
+        reinterpret_cast<Display*>(display)->manager->mouse_wheel(delta);
+    }
 }
 
 void display_lib_destroy(display_lib* display) {
