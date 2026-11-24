@@ -4,8 +4,10 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "color_picker.hpp"
 #include "earth.hpp"
 #include "format_chooser.hpp"
 #include "format_list.hpp"
@@ -207,7 +209,68 @@ void check_chooser_wrap() {
     check(wrap_index(1, 5, 0, 1) == 1, "sparse no-op");
     check(wrap_index(0, 0, 1, 0) == 0, "empty wrap");
 }
-}  // namespace
+void check_color_picker() {
+    using namespace display_lib_impl;
+
+    WheelLatch wheel;
+    check(wheel.motion(20, 0) == std::make_pair(1, 20.0f), "wheel latch starts right");
+    check(wheel.motion(0, -20) == std::make_pair(1, 20.0f), "wheel latch keeps direction");
+    check(wheel.motion(-20, 0) == std::make_pair(1, 20.0f), "wheel latch circle");
+    check(wheel.motion(0, 20) == std::make_pair(1, 20.0f), "wheel latch circle again");
+    check(!wheel.motion(0, 0).has_value(), "wheel rest clears");
+    check(wheel.motion(-20, 0) == std::make_pair(-1, 20.0f), "wheel reverses after rest");
+    WheelLatch capped;
+    check(capped.motion(20, 20) == std::make_pair(1, 20.0f), "wheel speed cap");
+
+    const Rect region{0, 0, 720, 720};
+    const PickerLayout layout = PickerLayout::create(region);
+    check(layout.back.x + layout.back.w <= layout.done.x, "color back left of done");
+    check(layout.back.y == layout.done.y, "color buttons share row");
+    check(layout.preview.y > static_cast<int>(layout.center_y + layout.outer), "preview below ring");
+    check(layout.preview.y + layout.preview.h < layout.back.y, "preview above buttons");
+    check(layout.preview.x == layout.back.x, "preview aligns back");
+    check(
+        layout.preview.w == layout.done.x + layout.done.w - layout.back.x,
+        "preview spans buttons");
+
+    const auto inside = layout.sv_marker(0.3f, 0.7f);
+    const auto clamped = layout.clamp_triangle(inside.first, inside.second);
+    check(std::abs(clamped.first - inside.first) < 1e-3f, "clamp keeps triangle x");
+    check(std::abs(clamped.second - inside.second) < 1e-3f, "clamp keeps triangle y");
+    const auto outside = layout.clamp_triangle(
+        layout.center_x,
+        layout.center_y + layout.outer);
+    check(layout.hit(outside.first, outside.second) == PickerHit::Triangle, "clamp inside triangle");
+
+    check(next_picker_control(PickerControl::HueRing, 1) == PickerControl::Triangle, "focus ring to triangle");
+    check(next_picker_control(PickerControl::Triangle, 1) == PickerControl::Back, "focus triangle to back");
+    check(next_picker_control(PickerControl::Back, 1) == PickerControl::Done, "focus back to done");
+    check(next_picker_control(PickerControl::Done, 1) == PickerControl::HueRing, "focus wraps");
+    check(next_picker_control(PickerControl::HueRing, -1) == PickerControl::Done, "focus reverses");
+
+    const auto hue_point = layout.hue_marker(0.25f);
+    check(layout.hit(hue_point.first, hue_point.second) == PickerHit::HueRing, "hue ring hit");
+    const auto sv_point = layout.sv_marker(0.5f, 0.75f);
+    check(layout.hit(sv_point.first, sv_point.second) == PickerHit::Triangle, "triangle hit");
+    check(
+        layout.hit(
+            static_cast<float>(layout.back.x + 2),
+            static_cast<float>(layout.back.y + 2)) == PickerHit::Back,
+        "back hit");
+    check(
+        layout.hit(
+            static_cast<float>(layout.done.x + 2),
+            static_cast<float>(layout.done.y + 2)) == PickerHit::Done,
+        "done hit");
+
+    const auto hue = layout.hue_marker(0.4f);
+    check(std::abs(layout.hue_at(hue.first, hue.second) - 0.4f) < 1e-4f, "hue round trip");
+    const auto sv = layout.sv_marker(0.25f, 0.75f);
+    const auto [saturation, value] = layout.sv_at(sv.first, sv.second);
+    check(std::abs(saturation - 0.25f) < 1e-4f, "saturation round trip");
+    check(std::abs(value - 0.75f) < 1e-4f, "value round trip");
+}
+}
 
 int main() {
     check_format_list();
@@ -217,6 +280,7 @@ int main() {
     check_icon_fit();
     check_chooser_layout();
     check_chooser_wrap();
+    check_color_picker();
     check_images();
 
     if (failures != 0) {

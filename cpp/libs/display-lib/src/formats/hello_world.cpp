@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <fstream>
+#include <numbers>
 
 namespace display_lib_impl {
 
@@ -12,6 +12,16 @@ namespace {
 constexpr std::array<float, 4> kBackground{0.02f, 0.03f, 0.08f, 1.0f};
 constexpr std::array<float, 4> kNoDataBackground{0.0f, 0.0f, 0.0f, 1.0f};
 constexpr std::array<float, 4> kTextColor{1.0f, 1.0f, 1.0f, 1.0f};
+constexpr float kStickColorRate = 0.5f;
+constexpr float kTriangleStickStep = 0.5f;
+
+float wrap_unit(float value) {
+    float wrapped = std::fmod(value, 1.0f);
+    if (wrapped < 0.0f) {
+        wrapped += 1.0f;
+    }
+    return wrapped;
+}
 
 }  // namespace
 
@@ -58,7 +68,8 @@ HelloWorld::HelloWorld(
     : state_(std::move(view)),
       input_(std::move(input)),
       earth_(assets_root),
-      text_(assets_root / kFontFile) {}
+      text_(assets_root / kFontFile),
+      picker_(assets_root) {}
 
 const char* HelloWorld::name() const {
     return kHelloWorld;
@@ -90,10 +101,102 @@ int HelloWorld::overlay() const {
     return state_->value->overlay;
 }
 
+std::tuple<float, float, float> HelloWorld::color_state() const {
+    if (!state_ || !state_->value) {
+        return {0.0f, 0.0f, 1.0f};
+    }
+    return {state_->value->hue, state_->value->saturation, state_->value->value};
+}
+
+void HelloWorld::sync_overlay(int overlay) {
+    if (overlay != last_overlay_) {
+        picker_focus_ = PickerControl::HueRing;
+        picker_captured_ = overlay == kHelloOverlayColor;
+        mouse_picking_.reset();
+        triangle_cursor_.reset();
+        wheel_.clear();
+        dragging_ = false;
+        last_overlay_ = overlay;
+    }
+}
+
+void HelloWorld::clear_capture() {
+    picker_captured_ = false;
+    mouse_picking_.reset();
+    triangle_cursor_.reset();
+    wheel_.clear();
+}
+
+void HelloWorld::send_commit() {
+    send(kHelloActionColorCommit, 0.0, 0.0, true);
+    clear_capture();
+}
+
+void HelloWorld::send_cancel() {
+    send(kHelloActionColorCancel, 0.0, 0.0, true);
+    clear_capture();
+}
+
 void HelloWorld::send(int action, double x, double y, bool pressed) {
     if (input_) {
         input_->send(action, x, y, 0.0, pressed);
     }
+}
+
+void HelloWorld::focus_picker(PickerControl focus, bool capture) {
+    picker_focus_ = focus;
+    picker_captured_ = capture;
+    if (capture && focus == PickerControl::Triangle) {
+        const auto [_, saturation, value] = color_state();
+        triangle_cursor_ = PickerLayout::create(region_).sv_marker(saturation, value);
+    } else {
+        triangle_cursor_.reset();
+    }
+}
+
+PickerHit HelloWorld::picker_hit_at(std::optional<std::pair<int, int>> cursor) const {
+    if (!cursor) {
+        return PickerHit::None;
+    }
+    return PickerLayout::create(region_).hit(
+        static_cast<float>(cursor->first),
+        static_cast<float>(cursor->second));
+}
+
+void HelloWorld::toggle_picker_focus() {
+    const PickerControl next = picker_focus_ == PickerControl::HueRing
+                                   ? PickerControl::Triangle
+                                   : PickerControl::HueRing;
+    focus_picker(next, picker_captured_);
+}
+
+void HelloWorld::move_triangle_cursor(int dx, int dy) {
+    const PickerLayout layout = PickerLayout::create(region_);
+    const auto [_, saturation, value] = color_state();
+    const std::pair<float, float> current = triangle_cursor_.value_or(
+        layout.sv_marker(saturation, value));
+    const std::pair<float, float> point = layout.clamp_triangle(
+        current.first + static_cast<float>(dx) * kTriangleStickStep,
+        current.second + static_cast<float>(dy) * kTriangleStickStep);
+    triangle_cursor_ = point;
+    const auto [new_saturation, new_value] = layout.sv_at(point.first, point.second);
+    send(kHelloActionColorSv, new_saturation, new_value, true);
+}
+
+void HelloWorld::move_hue_wheel(int dx, int dy) {
+    const auto motion = wheel_.motion(dx, dy);
+    if (!motion) {
+        return;
+    }
+    const auto [direction, magnitude] = *motion;
+    const float half =
+        static_cast<float>(std::max(1, std::min(region_.w, region_.h))) * 0.5f;
+    const auto [hue, _, __] = color_state();
+    send(
+        kHelloActionColorHue,
+        wrap_unit(static_cast<float>(hue) + direction * magnitude / half * kStickColorRate),
+        0.0,
+        true);
 }
 
 void HelloWorld::render(
@@ -107,6 +210,9 @@ void HelloWorld::render(
     }
     region_ = Rect{x, y, width, height};
     const std::optional<View> view = state_ ? state_->value : std::nullopt;
+    const int current_overlay = view ? view->overlay : kHelloOverlayNone;
+    sync_overlay(current_overlay);
+
     const std::array<float, 4>& background = view ? kBackground : kNoDataBackground;
     const int y_gl = framebuffer_height - y - height;
 
@@ -119,6 +225,24 @@ void HelloWorld::render(
     glViewport(x, y_gl, width, height);
     glDisable(GL_DEPTH_TEST);
     if (!view) {
+        return;
+    }
+
+    if (current_overlay == kHelloOverlayColor) {
+        const std::optional<std::pair<float, float>> triangle_marker =
+            picker_captured_ && picker_focus_ == PickerControl::Triangle
+                ? triangle_cursor_
+                : std::nullopt;
+        picker_.render(
+            framebuffer_height,
+            region_,
+            view->hue,
+            view->saturation,
+            view->value,
+            view->color,
+            triangle_marker,
+            picker_focus_,
+            picker_captured_);
         return;
     }
 
@@ -145,9 +269,53 @@ FormatInput HelloWorld::mouse_button(
     int y,
     int button,
     bool pressed) {
+    const int current_overlay = overlay();
+    sync_overlay(current_overlay);
+    if (current_overlay == kHelloOverlayColor && pressed) {
+        clear_capture();
+    }
     if (button != 0) {
         return {FormatInput::Type::Ignored, {}};
     }
+    if (current_overlay == kHelloOverlayColor) {
+        if (pressed) {
+            const PickerLayout layout = PickerLayout::create(
+                Rect{region_x, region_y, region_width, region_height});
+            switch (layout.hit(static_cast<float>(x), static_cast<float>(y))) {
+                case PickerHit::Back:
+                    send_cancel();
+                    break;
+                case PickerHit::Done:
+                    send_commit();
+                    break;
+                case PickerHit::HueRing:
+                    focus_picker(PickerControl::HueRing, false);
+                    mouse_picking_ = PickerHit::HueRing;
+                    send(
+                        kHelloActionColorHue,
+                        layout.hue_at(static_cast<float>(x), static_cast<float>(y)),
+                        0.0,
+                        true);
+                    break;
+                case PickerHit::Triangle:
+                    focus_picker(PickerControl::Triangle, false);
+                    mouse_picking_ = PickerHit::Triangle;
+                    {
+                        const auto [saturation, value] = layout.sv_at(
+                            static_cast<float>(x),
+                            static_cast<float>(y));
+                        send(kHelloActionColorSv, saturation, value, true);
+                    }
+                    break;
+                case PickerHit::None:
+                    break;
+            }
+        } else {
+            mouse_picking_.reset();
+        }
+        return {FormatInput::Type::Consumed, {}};
+    }
+
     if (!pressed) {
         if (!dragging_) {
             return {FormatInput::Type::Ignored, {}};
@@ -175,6 +343,32 @@ FormatInput HelloWorld::mouse_motion(
     int region_height,
     int x,
     int y) {
+    const int current_overlay = overlay();
+    sync_overlay(current_overlay);
+    if (current_overlay == kHelloOverlayColor) {
+        if (picker_captured_) {
+            clear_capture();
+        }
+        if (!mouse_picking_) {
+            return {FormatInput::Type::Ignored, {}};
+        }
+        const PickerLayout layout = PickerLayout::create(
+            Rect{region_x, region_y, region_width, region_height});
+        if (*mouse_picking_ == PickerHit::HueRing) {
+            send(
+                kHelloActionColorHue,
+                layout.hue_at(static_cast<float>(x), static_cast<float>(y)),
+                0.0,
+                true);
+        } else if (*mouse_picking_ == PickerHit::Triangle) {
+            const auto [saturation, value] = layout.sv_at(
+                static_cast<float>(x),
+                static_cast<float>(y));
+            send(kHelloActionColorSv, saturation, value, true);
+        }
+        return {FormatInput::Type::Consumed, {}};
+    }
+
     if (!dragging_) {
         return {FormatInput::Type::Ignored, {}};
     }
@@ -198,7 +392,81 @@ FormatInput HelloWorld::mouse_wheel(int, int, int, int, int) {
 
 FormatInput HelloWorld::command(
     const FormatCommand& command,
-    std::optional<std::pair<int, int>>) {
+    std::optional<std::pair<int, int>> cursor) {
+    const int current_overlay = overlay();
+    sync_overlay(current_overlay);
+
+    if (current_overlay == kHelloOverlayColor) {
+        switch (command.type) {
+            case FormatCommand::Type::Navigate: {
+                const int direction = command.dx < 0 || command.dy < 0 ? -1 : 1;
+                focus_picker(
+                    next_picker_control(picker_focus_, direction),
+                    picker_captured_);
+                return {FormatInput::Type::Consumed, {}};
+            }
+            case FormatCommand::Type::Pointer:
+                if (command.button == kFormatPointerRight && command.pressed) {
+                    const PickerHit hit = picker_hit_at(cursor);
+                    if (hit == PickerHit::Back) {
+                        send_cancel();
+                    } else if (hit == PickerHit::Done) {
+                        send_commit();
+                    } else if (picker_focus_ == PickerControl::Back) {
+                        send_cancel();
+                    } else if (picker_focus_ == PickerControl::Done) {
+                        send_commit();
+                    } else if (hit == PickerHit::HueRing) {
+                        focus_picker(PickerControl::HueRing, true);
+                    } else if (hit == PickerHit::Triangle) {
+                        focus_picker(PickerControl::Triangle, true);
+                    } else {
+                        focus_picker(picker_focus_, true);
+                    }
+                }
+                return {FormatInput::Type::Consumed, {}};
+            case FormatCommand::Type::ToggleArcball:
+                if (picker_captured_) {
+                    toggle_picker_focus();
+                } else {
+                    const PickerHit hit = picker_hit_at(cursor);
+                    if (hit == PickerHit::HueRing) {
+                        picker_focus_ = PickerControl::HueRing;
+                    } else if (hit == PickerHit::Triangle) {
+                        picker_focus_ = PickerControl::Triangle;
+                    }
+                }
+                return {FormatInput::Type::Consumed, {}};
+            case FormatCommand::Type::CursorMove:
+                if (!picker_captured_) {
+                    return {FormatInput::Type::Ignored, {}};
+                }
+                if (command.dx == 0 && command.dy == 0) {
+                    wheel_.clear();
+                } else if (picker_focus_ == PickerControl::HueRing) {
+                    move_hue_wheel(command.dx, command.dy);
+                } else if (picker_focus_ == PickerControl::Triangle) {
+                    move_triangle_cursor(command.dx, command.dy);
+                }
+                return {FormatInput::Type::Consumed, {}};
+            case FormatCommand::Type::CancelMenu:
+                if (picker_captured_) {
+                    clear_capture();
+                } else {
+                    send_cancel();
+                }
+                return {FormatInput::Type::Consumed, {}};
+            case FormatCommand::Type::OverlayCancel:
+                send_cancel();
+                return {FormatInput::Type::Consumed, {}};
+            case FormatCommand::Type::ReleaseCapture:
+                clear_capture();
+                return {FormatInput::Type::Consumed, {}};
+            case FormatCommand::Type::ToggleMenu:
+                return {FormatInput::Type::Ignored, {}};
+        }
+    }
+
     if (command.type == FormatCommand::Type::ToggleArcball) {
         send(kHelloActionToggleArcball, 0.0, 0.0, true);
         return {FormatInput::Type::Consumed, {}};
@@ -215,21 +483,43 @@ FormatInput HelloWorld::command(
     return {FormatInput::Type::Ignored, {}};
 }
 
+bool HelloWorld::cursor_hidden() const {
+    return picker_captured_;
+}
+
 std::vector<MenuItem> HelloWorld::menu_items() const {
     return hello_menu_items(mode(), overlay());
 }
 
 FormatInput HelloWorld::menu_action(const std::string& id) {
+    const int current_overlay = overlay();
     if (id == kHelloMenuMode) {
+        if (current_overlay == kHelloOverlayColor) {
+            send_cancel();
+        }
         send(kHelloActionModeToggle, 0.0, 0.0, true);
         return {FormatInput::Type::Consumed, {}};
     }
     if (id == kHelloMenuLuxColor) {
+        if (current_overlay == kHelloOverlayPos) {
+            send(kHelloActionLightCancel, 0.0, 0.0, true);
+        }
+        const bool opening = current_overlay != kHelloOverlayColor;
         send(kHelloActionToggleLuxColor, 0.0, 0.0, true);
+        picker_focus_ = PickerControl::HueRing;
+        picker_captured_ = opening;
+        mouse_picking_.reset();
+        triangle_cursor_.reset();
+        wheel_.clear();
         return {FormatInput::Type::Consumed, {}};
     }
     if (id == kHelloMenuLuxPos) {
+        if (current_overlay == kHelloOverlayColor) {
+            send_cancel();
+        }
         send(kHelloActionToggleLuxPos, 0.0, 0.0, true);
+        picker_captured_ = false;
+        mouse_picking_.reset();
         return {FormatInput::Type::Consumed, {}};
     }
     return {FormatInput::Type::Ignored, {}};

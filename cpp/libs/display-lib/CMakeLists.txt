@@ -1,5 +1,6 @@
 add_library(display_lib SHARED
     src/display_lib.cpp
+    src/color_picker.cpp
     src/earth.cpp
     src/format_manager_impl.cpp
     src/format_chooser.cpp
@@ -38,6 +39,7 @@ target_link_libraries(display_lib PRIVATE
 
 add_executable(display-lib-tests
     tests/main.cpp
+    src/color_picker.cpp
     src/earth.cpp
     src/format_chooser.cpp
     src/icon.cpp

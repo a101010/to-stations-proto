@@ -5,9 +5,11 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
+#include "color_picker.hpp"
 #include "earth.hpp"
 #include "formats.hpp"
 #include "text.hpp"
@@ -69,20 +71,38 @@ public:
         std::optional<std::pair<int, int>> cursor) override;
     std::vector<MenuItem> menu_items() const override;
     FormatInput menu_action(const std::string& id) override;
+    bool cursor_hidden() const override;
 
 private:
     void send(int action, double x, double y, bool pressed);
     bool arcball_enabled() const;
     int mode() const;
     int overlay() const;
+    std::tuple<float, float, float> color_state() const;
+    void sync_overlay(int overlay);
+    void clear_capture();
+    void send_commit();
+    void send_cancel();
+    void focus_picker(PickerControl focus, bool capture);
+    PickerHit picker_hit_at(std::optional<std::pair<int, int>> cursor) const;
+    void toggle_picker_focus();
+    void move_triangle_cursor(int dx, int dy);
+    void move_hue_wheel(int dx, int dy);
 
     std::shared_ptr<ViewState> state_;
     std::shared_ptr<HelloWorldInput> input_;
     Earth earth_;
     TextRenderer text_;
+    ColorPicker picker_;
     bool dragging_ = false;
     std::pair<float, float> last_pointer_{0.0f, 0.0f};
     Rect region_;
+    PickerControl picker_focus_ = PickerControl::HueRing;
+    bool picker_captured_ = false;
+    std::optional<PickerHit> mouse_picking_;
+    std::optional<std::pair<float, float>> triangle_cursor_;
+    WheelLatch wheel_;
+    int last_overlay_ = kHelloOverlayNone;
 };
 
 }  // namespace display_lib_impl
