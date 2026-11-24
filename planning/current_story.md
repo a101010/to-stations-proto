@@ -1,94 +1,88 @@
-# Current story: cpp-format-services
+# Current story: cpp-hello-service
 
 This file is the detailed, living plan for the one active story. It is rewritten for each story. The backlog in `backlog.md` holds all work and the per-story status.
 
 ## Story
 
-Create C++ `format-ctl-service` and `format-view-service` with per-display assignments, persistence, command relay, contracts, instance guards, and deploy-relative config. Extract the shared C++ format-list/assignment-state library used by the display library and services. Replace the Rust format services in `launch-cpp.ps1` while keeping the Rust hello services and `paws` as stand-ins.
+Create C++ `hello-service`: sequential greeting list, attitude model, and 10 Hz `HelloWorldTopic`. Replace the Rust model service in `launch-cpp.ps1`.
 
 - **Depends on:** none.
-- **Minimal test:** C++ `lil-d` with C++ format services switches and persists per-window formats; two display ids remain independent.
+- **Minimal test:** Rust `dds-echo` shows C++ `HelloWorldTopic` samples with changing greetings and attitude.
 
 ## Context
 
-- `periodic-current-format` is complete at `2026-11-23 16:43:52`.
-- `FormatManagerViewTopic` is best effort, revisioned, and periodically republished.
-- The C++ display library consumes the format view topic and filters revisions.
-- `launch-cpp.ps1` currently starts the Rust `format-ctl-service` and `format-view-service` as stand-ins.
-- The C++ display library has a private format-list parser and constants that the services also need.
-- The Rust services define the required behavior and DDS topics:
-  - controller: `FormatManagerInputTopic` → `FormatManagerCtlTopic` and `FormatManagerCommandCtlTopic`;
-  - view service: `FormatManagerCtlTopic` → `FormatManagerViewTopic`.
-- Both services share the format assignment state file `%LOCALAPPDATA%\to-stations\format-view-service\<display-id>.toml`.
-- C++ services are console executables; they do not use SDL or the display library.
-- C++ runtime DLLs for DDS are already deployed next to C++ executables.
+- `cpp-format-services` is complete at `2026-11-24 09:33:18`.
+- The C++ configuration currently runs C++ `format-ctl-service`, `format-view-service`, and `lil-d` with Rust `hello-service`, `hello-view-service`, `hello-ctl-service`, and `paws` stand-ins.
+- `launch-rust.ps1` must remain unchanged.
+- The Rust model service is the behavior reference:
+  - `HelloWorldTopic` at 10 Hz by default;
+  - a fixed 17-entry greeting list, advancing sequentially at random 15–60 second intervals;
+  - the earth attitude model with a 55-degree pole view angle, 45-degree screen tilt, `-100`-degree initial longitude, and a 12-minute spin.
+- `contracts/services/hello-service.toml`, `contracts/topics.toml`, and `DDS/hello_world.idl` already define the service and topic.
+- C++ generated DDS types are available from `hello_world_types`.
+- C++ service conventions are established by the format services: deploy-relative config, contract validation, `support::SingleInstance`, `stations-dds::Node`, and `--topics`.
 
 ## Decisions
 
-1. **Extract a shared C++ `format-list` library.**
-   - Format names, command constants, menu/hello constants.
-   - `FormatList`: parse, catalog order, `contains`, `is_known`, `first`, `next`.
-   - Saved assignment state: load/save, validation, sorting, legacy/default behavior.
-   - Reject `format-chooser` in `formats.toml`; treat it as implicit.
-2. **Implement native C++ console services.**
-   - `format-ctl-service` and `format-view-service`.
-   - Same CLI, contracts, guard names, state paths, and DDS behavior as Rust.
-3. **Keep the Rust hello services and `paws` in `launch-cpp.ps1`.**
-   - Replace only the two format services.
-   - `launch-rust.ps1` remains unchanged.
-4. **Keep format view delivery best effort and periodic.**
-   - C++ view service publishes immediately, after changes, and every 250 ms.
-   - Use a monotonic wall-clock base for revisions so service restarts do not go backward.
-5. **C++ format controller publishes full assignment state.**
-   - `FormatManagerCtlTopic` remains transient-local/reliable.
-   - It never writes the state file; the view service owns persistence.
-6. **No ACK protocol or control-topic QoS changes.**
-   - Existing reliable control topics remain unchanged.
-7. **No C++ hello services or C++ `paws` in this story.**
+1. **Keep model logic app-local for now.**
+   - Put greeting and attitude code under the C++ `hello-service` app.
+   - Do not create a shared C++ hello-model library until the hello view/control services need shared code.
+2. **Port the Rust model behavior exactly.**
+   - Same greeting strings and order.
+   - Same random interval and SplitMix64 generator.
+   - Same attitude constants, quaternion math, and timing.
+3. **Implement only the global model service in this story.**
+   - C++ `hello-view-service`, C++ `hello-ctl-service`, and C++ `paws` are out of scope.
+   - `launch-cpp.ps1` keeps Rust hello view/control and `paws`.
+4. **Test the model logic without DDS.**
+   - A dedicated `hello-service-tests` executable compiles the greeting and attitude modules.
+   - `hello-service-topics` checks the service contract.
+5. **No IDL, contract, state, or version changes.**
+   - No persistence is added.
+   - No `docs/versions.md` change.
 
 ## Scope
 
 **In scope**
 
-- C++ `format-list` shared library and tests.
-- C++ `format-ctl-service`.
-- C++ `format-view-service`.
-- CMake targets and C++ deploy updates.
-- `launch-cpp.ps1` switch to C++ format services.
-- `--topics` CTest checks for both services.
-- Architecture and backlog updates.
+- C++ `hello-service`.
+- C++ greeting and attitude modules.
+- C++ model tests.
+- CMake target and deploy copy.
+- `launch-cpp.ps1` switch to the C++ model service.
+- Architecture and planning updates.
 
 **Out of scope**
 
-- C++ hello services.
+- C++ hello view/control services.
 - C++ `paws`.
 - Lux overlays.
-- ACK protocol.
-- Position/window-placement changes.
-- README restructuring.
+- Random greeting order; that remains the separate `random-greeting` story.
+- Changes to Rust `hello-service`.
+- Changes to `launch-rust.ps1`.
 
 ## Files
 
 ```text
-cpp/libs/format-list/
+cpp/apps/formats/
   CMakeLists.txt
-  include/format_list/format_list.hpp
-  src/format_list.cpp
-  tests/main.cpp
-cpp/apps/format-manager/
-  CMakeLists.txt
-  format-ctl-service/CMakeLists.txt
-  format-ctl-service/main.cpp
-  format-view-service/CMakeLists.txt
-  format-view-service/main.cpp
+  hello-world/
+    CMakeLists.txt
+    hello-service/
+      CMakeLists.txt
+      main.cpp
+      greeting.hpp
+      greeting.cpp
+      attitude.hpp
+      attitude.cpp
+      tests/
+        main.cpp
 ```
 
 Other changes:
 
 ```text
 cpp/CMakeLists.txt
-cpp/libs/display-lib/CMakeLists.txt
-cpp/libs/display-lib/src/*                 (use shared format-list)
 scripts/build.ps1
 scripts/launch-cpp.ps1
 planning/architecture.md
@@ -101,163 +95,192 @@ No `docs/versions.md` change is needed.
 
 ## Implementation
 
-### 1. Shared C++ `format-list` library
+### 1. Greeting module
 
-Create namespace `format_list` containing:
+Port `rust/service/hello-service/src/greeting.rs`.
 
-- Format constants:
-  - `hello-world`, `default`, implicit `format-chooser`;
-  - Next/Select/CursorMove/Navigate/Pointer/ToggleArcball/MenuToggle/MenuCancel/OverlayCancel;
-  - pointer-right;
-  - hello mode/action/menu/overlay constants.
-- `is_control_command(int)`.
-- `FormatList`:
-  - parse ordered `formats.toml`;
-  - reject explicit `format-chooser`;
-  - `contains`, `is_known`, `first`, `next`.
-- Saved assignments:
-  - `FormatAssignment { int window; std::string format; }`;
-  - `SavedAssignments` with load/save of the exact Rust TOML schema;
-  - `validated(FormatList)` dropping duplicates, sorting by window, replacing unknown formats with `hello-world`, and preserving implicit `format-chooser`;
-  - default window 0 = `hello-world`;
-  - state path remains supplied by `support`.
+- Use exactly these 17 greetings in order:
+  `Hello, world!`, `Hola, mundo!`, `Bonjour le monde!`, `Hallo, Welt!`,
+  `Ciao, mondo!`, `Olá, mundo!`, `Hallo, wereld!`, `Hej, världen!`,
+  `Hei, maailma!`, `Witaj, świecie!`, `Merhaba dünya!`, `Salut, lume!`,
+  `Salve, munde!`, `toki, ma o!`, `Halo, wol!`, `Habari, dunia!`,
+  `Pẹlẹ o, ayé!`.
+- Enable MSVC `/utf-8` for the service and test targets.
+- Implement `GreetingCycle`:
+  - start at greeting 0;
+  - choose the first change from 15–60 seconds inclusive;
+  - advance sequentially and wrap;
+  - advance multiple times when the current time has overrun;
+  - expose `current()`;
+  - expose `advance_if_due(now)`;
+  - expose the next-change time or an equivalent accessor for tests.
+- Seed from wall-clock nanoseconds; provide deterministic `with_seed(now, seed)` for tests.
+- Port SplitMix64 exactly:
+  - add `0x9e37_79b9_7f4a_7c15`;
+  - mix with the same shifts and multipliers;
+  - use `uint64_t` wrapping arithmetic.
+- Random interval:
+  - span is 46 values;
+  - result is `15 + next_u64() % 46` seconds.
 
-Update `display-lib` to include/link the shared library and remove its private format-list implementation.
+Tests:
 
-Add `format-list-tests` covering:
+- 100 intervals stay within 15–60 seconds.
+- Sequence advances sequentially and wraps through all greetings.
+- No early advance at the start time.
 
-- catalog order;
-- chooser rejection;
-- `contains` vs `is_known`;
-- `next` wrapping and chooser exclusion;
-- assignment round-trip;
-- validation, deduplication, sorting, unknown fallback, and chooser preservation.
+### 2. Attitude module
 
-### 2. Common service behavior
+Port `rust/service/hello-service/src/attitude.rs` using generated `math::Quaternion`.
 
-Each service:
+- Constants:
+  - `POLE_VIEW_ANGLE_DEG = 55.0`;
+  - `POLE_SCREEN_TILT_DEG = 45.0`;
+  - `SPIN_PERIOD_S = 12.0 * 60.0`;
+  - `INITIAL_LONGITUDE_DEG = -100.0`.
+- Use an internal `std::array<double, 3>` vector type.
+- Port helpers: dot, cross, scale, subtract, normalize, unit quaternion, quaternion multiply, and vector rotation.
+- Implement:
+  - `pole_in_view()`;
+  - `initial_attitude()`;
+  - `attitude_at(std::chrono::duration<double> elapsed)`.
+- Use `std::numbers::pi_v<double>` rather than non-standard constants.
+- Preserve the Rust multiplication order:
+  - `initial_attitude` places the polar axis and then the sub-camera point;
+  - `attitude_at` returns `initial_attitude * spin`.
 
-- Parses `--domain` (default 0), `--config <path>`, `--display-id <id>`, and `--topics`.
-- Requires `--display-id` unless `--topics` is used.
-- Resolves the config directory:
-  - explicit `--config`;
-  - otherwise `<deploy>/config` through `support`;
-  - otherwise `./contracts` for development.
-- Loads and validates:
-  - `topics.toml`;
-  - its service contract under `config/services/`;
-  - `formats.toml`.
-- Prints the service contract and exits for `--topics`.
-- Acquires the same guard names as Rust:
-  - `format-ctl-service-display-<id>`;
-  - `format-view-service-display-<id>`.
-- Creates one `stations_dds::Node` with the deploy DDS config.
-- Polls every 10 ms.
-- Prints errors to stderr and exits non-zero.
+Tests:
 
-### 3. C++ `format-ctl-service`
+- Polar axis is placed by the view angle and screen tilt.
+- Initial attitude points the pole and the Americas at the camera.
+- Spin preserves the pole and makes equatorial points antipodal after six minutes.
+- A full 12-minute revolution returns to the initial orientation.
+- Use dot-product tolerances matching the Rust tests.
 
-- Read saved assignments from:
-  `support::state_path("format-view-service", display_id)`.
-- Initialize the assignment map from the validated saved state.
-- Create:
-  - reader `FormatManagerInputTopic`;
-  - writer `FormatManagerCtlTopic`;
-  - writer `FormatManagerCommandCtlTopic`.
-- For each sample addressed to this display:
-  - if it is a control command, relay it unchanged on `FormatManagerCommandCtlTopic`;
-  - if `Next`, advance using `FormatList::next` with wrapping;
-  - if `Select`, accept only `FormatList::is_known` formats;
-  - on a changed assignment, publish the complete assignment map on `FormatManagerCtlTopic`.
-- Do not write the state file.
-- Do not publish state at startup; the view service publishes current state.
+### 3. Service executable
 
-### 4. C++ `format-view-service`
+Create `hello-service` using the established C++ service pattern.
 
-- Read and validate saved assignments from:
-  `support::state_path("format-view-service", display_id)`.
-- Create:
-  - reader `FormatManagerCtlTopic`;
-  - writer `FormatManagerViewTopic`.
-- Add `--rate-ms` with default 250.
-- Publish immediately at startup with a revision.
-- On control messages for this display:
-  - convert the full `windows` set to `SavedAssignments`;
-  - validate against the format catalog;
-  - write the state file only when the assignment changes;
-  - mark state changed.
-- Publish when changed or every periodic interval.
-- Every publish:
-  - increments a revision using a wall-clock-based monotonic base;
-  - writes the full `FormatManagerViewTopic` snapshot.
-- Keep `FormatManagerViewTopic` best effort.
+CLI:
 
-### 5. CMake, deploy, and launch
+- `--domain` default `0`;
+- `--rate-ms` default `100`;
+- `--config <dir>`;
+- `--topics`.
 
-- Add `format-list` static library.
-- Add `format-ctl-service` and `format-view-service` console executables under `cpp/apps/format-manager`.
-- Link `support`, `stations-dds`, `format-list`, and generated format-manager/hello-world types as needed.
-- Add the C++ apps directory to `cpp/CMakeLists.txt`.
-- Update `scripts/build.ps1` to copy both C++ service executables to `build/deploy/cpp/bin`.
+Config resolution:
+
+1. explicit `--config`;
+2. `<deploy>/config` through `support::deploy_path` when it contains `topics.toml`;
+3. `./contracts` for development.
+
+Startup order:
+
+1. load and validate `topics.toml`;
+2. load and validate `services/hello-service.toml`;
+3. print the rendered contract and exit for `--topics`, without a guard or DDS;
+4. acquire singleton guard `hello-service`;
+5. create the `stations-dds::Node` with the deploy `cyclonedds-config.xml`;
+6. create the writer for `HelloWorldTopic`.
+
+Publish loop:
+
+- period is `std::chrono::milliseconds(std::max(rate_ms, 1))`;
+- record the steady-clock start time;
+- construct the greeting cycle from the start time;
+- each iteration:
+  - read the current steady-clock time;
+  - advance the greeting if due;
+  - set the greeting;
+  - set the attitude from the elapsed time since start;
+  - write the sample;
+  - sleep for the period.
+
+Errors print to stderr as `hello-service: <message>` and exit non-zero.
+
+### 4. CMake, deploy, and launch
+
+- Add `apps/formats` to `cpp/CMakeLists.txt`.
+- Add `apps/formats/hello-world` and its `hello-service` subdirectory.
+- Add `hello-service` executable linking:
+  - `support`;
+  - `stations-dds`;
+  - `hello_world_types`.
+- Add `hello-service-tests` with:
+  - `greeting.cpp`;
+  - `attitude.cpp`;
+  - `tests/main.cpp`;
+  - link `hello_world_types`.
+- Add CTest:
+  - `hello-service-tests`;
+  - `hello-service-topics` with `--topics --config "${REPO_ROOT}/contracts"`.
+- Add `/utf-8` compile options for the service and tests on MSVC.
+- Update `scripts/build.ps1` to copy `build\cpp\Release\hello-service.exe` to `build/deploy/cpp/bin`.
 - Update `scripts/launch-cpp.ps1`:
-  - Rust hello services and `paws` from `build/deploy/rust/bin`;
-  - C++ `format-ctl-service`, `format-view-service`, and `lil-d` from `build/deploy/cpp/bin`;
-  - validate all paths.
-- No `cleanup.ps1` change; image names are unchanged.
+  - `$model` resolves to `$cppBin\hello-service.exe`;
+  - description says C++ hello-service, format services, and displays run with Rust hello view/control and `paws` stand-ins.
+- No `cleanup.ps1` change; the image name is unchanged.
 
-### 6. Architecture
+### 5. Architecture
 
-Update `planning/architecture.md`:
+Update the C++ runtime paragraph:
 
-- Add C++ `format-list` to shared C++ libraries.
-- Add `cpp/apps/format-manager/`.
-- State that C++ format services are drop-in replacements.
-- Update the C++ launch description: C++ format services/displays with Rust hello and `paws` stand-ins.
-- Keep the existing best-effort periodic view and future ACK policies.
-- Do not add an ACK implementation.
+- The C++ launch script starts the C++ `hello-service`, C++ format services, and C++ displays.
+- Rust `hello-view-service`, `hello-ctl-service`, and `paws` remain stand-ins.
+
+The folder tree already lists the planned C++ hello format directory.
 
 ## Tests
 
-- `format-list-tests` as above.
-- CTest `--topics` checks for both services using `${REPO_ROOT}/contracts`.
+- `hello-service-tests`:
+  - greeting interval range;
+  - sequential advance and wrap;
+  - no early advance;
+  - all four attitude tests.
+- `hello-service-topics`.
 - Existing CTest suites stay green.
 - Manual integration:
-  - `launch-cpp.ps1` starts C++ format services and C++ `lil-d`;
-  - formats switch and persist across restart;
-  - two display ids remain independent;
-  - no Rust format services are left running by `launch-cpp.ps1`;
-  - `launch-rust.ps1` still uses Rust format services.
+  - `launch-cpp.ps1` starts the C++ model service from `cpp/bin`;
+  - no Rust `hello-service.exe` remains running;
+  - Rust hello view/control and `paws` still run;
+  - `dds-echo` shows `HelloWorldTopic` with changing greeting and attitude;
+  - `launch-rust.ps1` still uses the Rust model service.
 
 ## Verification
 
 ```powershell
 .\scripts\build.ps1 -Test
 .\scripts\build.ps1
-.\scripts\launch-cpp.ps1 -DisplayId 0,1
-# change formats on both displays
-.\scripts\cleanup.ps1
-.\scripts\launch-cpp.ps1 -DisplayId 0,1
-# verify both formats restore
-.\scripts\cleanup.ps1
-.\scripts\launch-rust.ps1 -DisplayId 0,1
-# verify the Rust configuration still works
 ```
 
-Use a temporary `LOCALAPPDATA` for automated/manual verification. Confirm the state files are shared and both display ids remain independent.
+Expected CTest result: 9/9 passing (the existing 7 plus `hello-service-tests` and `hello-service-topics`).
+
+Manual verification with a temporary `LOCALAPPDATA`:
+
+1. Run `.\scripts\launch-cpp.ps1`.
+2. Confirm `hello-service.exe` runs from `build/deploy/cpp/bin`.
+3. Confirm the other C++ and Rust stand-in processes from the launch script.
+4. Use `dds-echo` to observe `HelloWorldTopic`:
+   - greeting starts at `Hello, world!`;
+   - greeting changes within 15–60 seconds;
+   - attitude changes continuously.
+5. Confirm `hello-service --topics` prints the contract without DDS.
+6. Stop with `cleanup.ps1`.
+7. Run `launch-rust.ps1` briefly to confirm the Rust configuration is unchanged.
+8. Remove only the temporary `LOCALAPPDATA`.
 
 ## Risks
 
-- Moving format constants and parsing into a shared library touches display-lib compile paths and tests.
-- C++ assignment state serialization must match Rust’s TOML schema exactly.
-- The C++ view revision must remain monotonic across service restarts.
-- Only the view service writes format state.
-- `launch-cpp.ps1` must not leave Rust format services running.
-- Control-topic behavior remains unchanged; do not add ACK logic.
-- Do not touch real `%LOCALAPPDATA%`; use temporary state for GUI verification.
+- Non-ASCII greeting literals need a defined source encoding; use MSVC `/utf-8`.
+- Greeting tests must use deterministic seeds and explicit next-change accessors.
+- Quaternion helper order must match Rust exactly; keep the numerical tests.
+- `--topics` must not acquire the guard or create DDS objects.
+- `launch-cpp.ps1` must not leave a Rust `hello-service` running.
+- Do not modify the Rust model or `launch-rust.ps1`.
 
 ## Bookkeeping
 
-- `periodic-current-format` is completed at `2026-11-23 16:43:52`.
-- `cpp-format-services` is `in progress` in `backlog.md`.
-- `cpp-format-services` has no remaining story prerequisites.
-- Do not move `cpp-format-services` to `completed_stories.md` until the user asks to plan the next story.
+- `cpp-format-services` is completed at `2026-11-24 09:33:18`.
+- `cpp-hello-service` is `in progress` in `backlog.md`.
+- `cpp-hello-service` has no remaining story prerequisites.
+- Do not move `cpp-hello-service` to `completed_stories.md` until the user asks to plan the next story.

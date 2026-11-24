@@ -361,3 +361,10 @@ Make view-service state delivery best effort and periodic, starting with the cur
 - **Depends on:** none.
 - **Minimal test:** move windows and change formats in C++ `lil-d`, clean up, restart C++, then switch to Rust and back; positions and formats restore in both directions; `dds-echo` shows repeated best-effort `FormatManagerViewTopic` samples.
 - **Note:** verified with temporary `LOCALAPPDATA`; the real runtime state was untouched.
+
+### cpp-format-services
+Create C++ `format-ctl-service` and `format-view-service` with per-display assignments, persistence, command relay, contracts, instance guards, and deploy-relative config. Extracted the shared C++ format-list/assignment-state library used by the display library and services, replaced the Rust format services in `launch-cpp.ps1`, and added CTest coverage for the C++ services.
+- **Completed:** 2026-11-24 09:33:18.
+- **Depends on:** none.
+- **Minimal test:** C++ `lil-d` with C++ format services switches and persists per-window formats; two display ids remain independent.
+- **Note:** verified with temporary `LOCALAPPDATA`; the real runtime state was untouched.
