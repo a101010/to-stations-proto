@@ -180,6 +180,7 @@ if (-not $Test) {
     Copy-Item -Path (Join-Path $repoRoot 'build\cpp\Release\hello-ctl-service.exe') -Destination $deployCppBin -Force
     Copy-Item -Path (Join-Path $repoRoot 'build\cpp\Release\format-ctl-service.exe') -Destination $deployCppBin -Force
     Copy-Item -Path (Join-Path $repoRoot 'build\cpp\Release\format-view-service.exe') -Destination $deployCppBin -Force
+    Copy-Item -Path (Join-Path $repoRoot 'build\cpp\Release\paws.exe') -Destination $deployCppBin -Force
     Copy-Item -Path (Join-Path $repoRoot 'build\cpp\Release\display_lib.dll') -Destination $deployCppBin -Force
     Copy-Item -Path (Join-Path $extPathPrefix 'harfbuzz/bin/harfbuzz.dll') -Destination $deployCppBin -Force
     Copy-Item -Path (Join-Path $extPathPrefix 'harfbuzz/bin/harfbuzz-gpu.dll') -Destination $deployCppBin -Force

@@ -3,10 +3,9 @@
 Launches the C++ display configuration.
 
 .DESCRIPTION
-Starts all C++ hello_world services, one C++ format-manager service pair per
-display, and the C++ lil-d display from build/deploy/cpp/bin. One paws
-virtual-controller window per display id remains a Rust stand-in from
-build/deploy/rust/bin until the C++ replacement is implemented.
+Starts the complete C++ configuration from build/deploy/cpp/bin: all hello and
+format services, one lil-d display, and one paws virtual-controller window per
+display id.
 
 Every display has a unique numeric display id. The same id is given to its
 hello view/controller services, format controller, format view service, lil-d,
@@ -48,7 +47,7 @@ $formatCtl = Join-Path $cppBin 'format-ctl-service.exe'
 $formatView = Join-Path $cppBin 'format-view-service.exe'
 $display = Join-Path $cppBin 'lil-d.exe'
 $displayLib = Join-Path $cppBin 'display_lib.dll'
-$paws = Join-Path $rustBin 'paws.exe'
+$paws = Join-Path $cppBin 'paws.exe'
 if (-not (Test-Path $model) -or -not (Test-Path $helloCtl) -or -not (Test-Path $helloView) -or -not (Test-Path $formatCtl) -or -not (Test-Path $formatView) -or -not (Test-Path $display) -or -not (Test-Path $displayLib) -or -not (Test-Path $paws) -or -not (Test-Path $config)) {
     throw "Not built: run scripts\build.ps1 first."
 }
