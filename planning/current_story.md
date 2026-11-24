@@ -19,6 +19,9 @@ Create the C++ `paws` using SDL3, Dear ImGui, and SDL gamepad input: the virtual
 - `paws` commands, state path, and persisted controller schema already exist in Rust.
 - The existing C++ `support` library provides state paths, placement resolution, and singleton guards.
 - `scripts/cleanup.ps1` already stops the `paws` image name.
+- Manual testing found two follow-up defects in the C++ `paws`:
+  - physical-controller Y axes are inverted while virtual mouse sticks are correct;
+  - physical-controller input stops when the `paws` window is not focused.
 
 ## Decisions
 
@@ -39,6 +42,13 @@ Create the C++ `paws` using SDL3, Dear ImGui, and SDL gamepad input: the virtual
    - `launch-cpp.ps1` starts C++ `paws`.
    - `launch-rust.ps1` remains unchanged.
 6. **No changes to IDL, contracts, services, or display-library behavior.**
+7. **Fix the SDL Y-axis convention in the SDL adapter.**
+   - SDL reports stick Y axes as up-negative.
+   - `Controls::read` expects up-positive input before converting to screen-down.
+   - Convert SDL Y axes in `SdlPadState::axis` so physical and virtual sticks use the same screen direction.
+8. **Allow gamepad input while Paws is unfocused.**
+   - Set `SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS` before `SDL_Init`.
+   - Keep the existing gamepad event polling.
 
 ## Scope
 
@@ -52,6 +62,7 @@ Create the C++ `paws` using SDL3, Dear ImGui, and SDL gamepad input: the virtual
 - Command state machine and DDS writer.
 - C++ deploy and launch integration.
 - Tests and architecture updates.
+- Follow-up fixes for physical-controller Y direction and background input.
 
 **Out of scope**
 
@@ -338,13 +349,42 @@ Update:
 - Runtime state remains shared and Rust-compatible.
 - `launch-rust.ps1` continues to use Rust `paws`.
 
+### 9. Follow-up fixes after manual testing
+
+#### Physical-controller Y axes
+
+In `cpp/apps/controls/paws/src/app.cpp`:
+
+- In `SdlPadState::axis`, negate the raw SDL value for `PadAxis::LeftStickY` and `PadAxis::RightStickY`.
+- Leave X axes, trigger axes, and all buttons unchanged.
+- Keep `Controls::read`'s screen-coordinate behavior unchanged.
+- Keep the virtual mouse stick path unchanged.
+
+Add a pure regression helper/test for SDL-style Y values so physical up/down direction is covered without hardware:
+
+- SDL up `-1` maps to controls-up;
+- SDL down `+1` maps to controls-down;
+- virtual stick behavior remains unchanged.
+
+#### Background gamepad input
+
+In `cpp/apps/controls/paws/src/main.cpp`, before `SDL_Init`:
+
+```cpp
+SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+```
+
+- Keep `SDL_INIT_VIDEO | SDL_INIT_GAMEPAD`.
+- Do not alter keyboard or mouse focus behavior.
+- If verification shows the hint alone is insufficient on the current SDL build, add `SDL_UpdateGamepads()` once per frame before reading controller values.
+
 ## Tests
 
 `paws-tests` covers:
 
 - state round-trip and Rust-shaped state loading;
 - stick clamping and invalid input;
-- control deadzone, Y inversion, button mapping, trigger thresholds;
+- control deadzone, SDL Y-axis normalization, button mapping, trigger thresholds;
 - remembered-controller matching, zero UUID, changed names, ambiguity;
 - selection and dropdown index mapping;
 - command state:
@@ -380,15 +420,18 @@ Manual verification with a temporary `LOCALAPPDATA`:
    - in Lux Color switches ring/triangle focus when able;
    - in Lux Pos does nothing.
 6. Verify right-stick return-to-rest emits the zero cursor move and resets the Lux Color wheel latch.
-7. Verify the controller dropdown:
+7. With a physical controller selected:
+   - both stick Y axes must move the Paws knobs and display controls in the same direction as Virtual mode;
+   - with Paws unfocused, stick, D-pad, A, B, Back, Start, and R3 input must continue to reach the display.
+8. Verify the controller dropdown:
    - lists Virtual plus Xbox-style controllers;
    - selecting a real controller mirrors it;
    - disconnect falls back to Virtual;
    - reconnect of the remembered controller auto-selects it;
    - selecting Virtual clears the remembered controller.
-8. Restart and verify window position/size and remembered controller restore.
-9. Verify `launch-rust.ps1` still starts the Rust configuration.
-10. Remove only the temporary `LOCALAPPDATA`; never touch the real runtime state.
+9. Restart and verify window position/size and remembered controller restore.
+10. Verify `launch-rust.ps1` still starts the Rust configuration.
+11. Remove only the temporary `LOCALAPPDATA`; never touch the real runtime state.
 
 ## Risks
 
@@ -401,6 +444,9 @@ Manual verification with a temporary `LOCALAPPDATA`:
 - Cursor move and D-pad edge handling must not duplicate commands.
 - `launch-cpp.ps1` must not start Rust `paws`.
 - The app must still run when DDS setup fails, matching Rust `paws`.
+- Y-axis normalization must not affect X axes or trigger axes.
+- Background gamepad events must not produce duplicate command edges.
+- If SDL's background-events hint is ineffective on the current build, use verified `SDL_UpdateGamepads` polling as a fallback.
 
 ## Bookkeeping
 
