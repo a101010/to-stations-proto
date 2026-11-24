@@ -382,3 +382,10 @@ Create C++ per-display `hello-view-service` and `hello-ctl-service`: Auto/Inspec
 - **Depends on:** none.
 - **Minimal test:** with C++ hello service and a display, mode/arcball/light/color actions and two-display isolation match the Rust behavior.
 - **Note:** verified with temporary `LOCALAPPDATA` and a temporary DDS harness; the real runtime state was untouched.
+
+### cpp-lux-color
+Add the C++ Lux Color overlay with the hue ring, saturation/value triangle, preview, shared Back/Done row, focus and capture, mouse and controller picking, wheel latch, and view actions. Added the C++ `color_picker` geometry and shader renderer, integrated Lux Color into the C++ hello-world format, added picker tests, and verified the overlay with C++ `lil-d` and C++ services.
+- **Completed:** 2026-11-24 13:58:20.
+- **Depends on:** none.
+- **Minimal test:** the Rust Lux Color acceptance test passes with C++ `lil-d` and C++ services.
+- **Note:** verified with temporary `LOCALAPPDATA`; a screenshot confirmed the C++ picker rendering and the real runtime state was untouched.
