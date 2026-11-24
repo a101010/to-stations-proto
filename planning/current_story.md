@@ -1,93 +1,96 @@
-# Current story: periodic-current-format
+# Current story: cpp-format-services
 
 This file is the detailed, living plan for the one active story. It is rewritten for each story. The backlog in `backlog.md` holds all work and the per-story status.
 
 ## Story
 
-Make view-service state delivery best effort and periodic, starting with the current format assignment. Change `FormatManagerViewTopic` to best effort, add a monotonic revision, and have `format-view-service` republish the current assignment immediately at startup, immediately after changes, and periodically. Fold in cross-language monitor identity so window placement survives Rust/C++ switches. Record the architecture rule for future reliable control delivery but do not implement an ACK protocol until a message requires it.
+Create C++ `format-ctl-service` and `format-view-service` with per-display assignments, persistence, command relay, contracts, instance guards, and deploy-relative config. Extract the shared C++ format-list/assignment-state library used by the display library and services. Replace the Rust format services in `launch-cpp.ps1` while keeping the Rust hello services and `paws` as stand-ins.
 
 - **Depends on:** none.
-- **Minimal test:** move windows and change formats in C++ `lil-d`, clean up, restart C++, then switch to Rust and back; positions and formats restore in both directions; `dds-echo` shows repeated best-effort `FormatManagerViewTopic` samples.
+- **Minimal test:** C++ `lil-d` with C++ format services switches and persists per-window formats; two display ids remain independent.
 
 ## Context
 
-- `cpp-display-chooser` is complete at `2026-11-23 15:16:59`.
-- Format assignments already persist in `%LOCALAPPDATA%\to-stations\format-view-service\<display-id>.toml`; the failure is startup delivery to the display library.
-- `format-view-service` publishes the saved assignment once at startup and then only on accepted control changes. Displays that miss the one-shot publication keep `hello-world`.
-- `HelloWorldViewTopic` is already best effort and republished at 100 Hz.
-- `FormatManagerViewTopic` is currently transient-local. C++ and Rust transient-local QoS were made reliable during `cpp-display-chooser`.
-- Window position state already lives in `%LOCALAPPDATA%\to-stations\lil-d\<display-id>.toml`.
-- Rust/winit writes monitor names such as `\\.\DISPLAY1`; C++/SDL writes friendly names such as `Acer VG270K`. Placement restoration matches by name, so switching implementations can fall back or cascade and appear to reset the position.
-- There is no current message that requires end-to-end reliable control with ACK. `FormatManagerCtlTopic` is the only transient-local control topic; command topics remain reliable but volatile.
-- This story does not add a `reliable-control-ack` or `monitor-identity` story.
+- `periodic-current-format` is complete at `2026-11-23 16:43:52`.
+- `FormatManagerViewTopic` is best effort, revisioned, and periodically republished.
+- The C++ display library consumes the format view topic and filters revisions.
+- `launch-cpp.ps1` currently starts the Rust `format-ctl-service` and `format-view-service` as stand-ins.
+- The C++ display library has a private format-list parser and constants that the services also need.
+- The Rust services define the required behavior and DDS topics:
+  - controller: `FormatManagerInputTopic` → `FormatManagerCtlTopic` and `FormatManagerCommandCtlTopic`;
+  - view service: `FormatManagerCtlTopic` → `FormatManagerViewTopic`.
+- Both services share the format assignment state file `%LOCALAPPDATA%\to-stations\format-view-service\<display-id>.toml`.
+- C++ services are console executables; they do not use SDL or the display library.
+- C++ runtime DLLs for DDS are already deployed next to C++ executables.
 
 ## Decisions
 
-1. **All view-service state delivered to display libraries is best effort and periodically republished.**
-   - `HelloWorldViewTopic` already satisfies this.
-   - `FormatManagerViewTopic` changes from `transient_local` to `best_effort`.
-2. **`format-view-service` republishes the current assignment.**
-   - Immediately at startup.
-   - Immediately after an accepted assignment change.
-   - Periodically, recommended every 250 ms.
-3. **Current format state is revisioned.**
-   - Add a monotonically increasing `revision` to `FormatManagerViewTopic`.
-   - Displays apply only a higher revision than the last applied revision.
-   - When multiple samples are available, select the highest revision, not the last sample in the batch.
-4. **No ACK or transient-local dependency for view state.**
-   - A missed view sample is acceptable; the next periodic message converges.
-   - Periodic republishes do not write the format state file.
-5. **Monitor identity is canonical.**
-   - C++ maps SDL display bounds to Win32 `MONITORINFOEX.szDevice` names such as `\\.\DISPLAY1`.
-   - Rust/winit already uses those names.
-   - A geometry fallback handles legacy C++ state with friendly monitor names.
-6. **Control topics remain unchanged in this story.**
-   - `FormatManagerCtlTopic` remains transient-local and reliable.
-   - Command and input topics remain reliable but volatile.
-   - No ACK protocol is implemented.
-7. **Architecture records the future reliable-control rule.**
-   - DDS reliable QoS is transport-level, not proof of application delivery.
-   - A future reliable control writer must track outstanding application ACKs per command and expected receiver, retry until all ACKs or a deadline, and stop only when all required ACKs are present.
-   - Receivers ACK after applying and deduplicate by command id.
-   - Prefer idempotent set-state commands over non-idempotent events.
-   - No current message requires this yet.
+1. **Extract a shared C++ `format-list` library.**
+   - Format names, command constants, menu/hello constants.
+   - `FormatList`: parse, catalog order, `contains`, `is_known`, `first`, `next`.
+   - Saved assignment state: load/save, validation, sorting, legacy/default behavior.
+   - Reject `format-chooser` in `formats.toml`; treat it as implicit.
+2. **Implement native C++ console services.**
+   - `format-ctl-service` and `format-view-service`.
+   - Same CLI, contracts, guard names, state paths, and DDS behavior as Rust.
+3. **Keep the Rust hello services and `paws` in `launch-cpp.ps1`.**
+   - Replace only the two format services.
+   - `launch-rust.ps1` remains unchanged.
+4. **Keep format view delivery best effort and periodic.**
+   - C++ view service publishes immediately, after changes, and every 250 ms.
+   - Use a monotonic wall-clock base for revisions so service restarts do not go backward.
+5. **C++ format controller publishes full assignment state.**
+   - `FormatManagerCtlTopic` remains transient-local/reliable.
+   - It never writes the state file; the view service owns persistence.
+6. **No ACK protocol or control-topic QoS changes.**
+   - Existing reliable control topics remain unchanged.
+7. **No C++ hello services or C++ `paws` in this story.**
 
 ## Scope
 
 **In scope**
 
-- `FormatManagerViewTopic` QoS change to best effort.
-- Periodic republishing by `format-view-service`.
-- `FormatManagerViewTopic.revision`.
-- Rust and C++ revision filtering.
-- C++ canonical monitor device names.
-- Legacy friendly-name placement fallback.
-- Architecture updates for view-state delivery, monitor identity, and future ACKed control.
-- Tests and manual verification.
+- C++ `format-list` shared library and tests.
+- C++ `format-ctl-service`.
+- C++ `format-view-service`.
+- CMake targets and C++ deploy updates.
+- `launch-cpp.ps1` switch to C++ format services.
+- `--topics` CTest checks for both services.
+- Architecture and backlog updates.
 
 **Out of scope**
 
-- ACK protocol implementation.
-- New reliable-control or monitor-identity stories.
-- Changes to `HelloWorldViewTopic`; it already republishes at 100 Hz.
-- Changing control-topic QoS.
+- C++ hello services.
+- C++ `paws`.
+- Lux overlays.
+- ACK protocol.
+- Position/window-placement changes.
 - README restructuring.
 
 ## Files
 
 ```text
-contracts/topics.toml
-DDS/format_manager.idl
-rust/service/format-view-service/src/main.rs
-rust/lib/display-lib/src/format_source.rs
-cpp/libs/display-lib/src/format_source.hpp/.cpp
-cpp/libs/display-lib/src/window_state.cpp
-cpp/libs/support/include/support/window_position.hpp
-cpp/libs/support/src/window_position.cpp
-rust/lib/window-position/src/lib.rs
-cpp/libs/display-lib/tests/main.cpp
-rust/lib/display-lib/src/format_source.rs tests
-rust/service/format-view-service tests
+cpp/libs/format-list/
+  CMakeLists.txt
+  include/format_list/format_list.hpp
+  src/format_list.cpp
+  tests/main.cpp
+cpp/apps/format-manager/
+  CMakeLists.txt
+  format-ctl-service/CMakeLists.txt
+  format-ctl-service/main.cpp
+  format-view-service/CMakeLists.txt
+  format-view-service/main.cpp
+```
+
+Other changes:
+
+```text
+cpp/CMakeLists.txt
+cpp/libs/display-lib/CMakeLists.txt
+cpp/libs/display-lib/src/*                 (use shared format-list)
+scripts/build.ps1
+scripts/launch-cpp.ps1
 planning/architecture.md
 planning/backlog.md
 planning/completed_stories.md
@@ -98,120 +101,163 @@ No `docs/versions.md` change is needed.
 
 ## Implementation
 
-### 1. Contract and IDL
+### 1. Shared C++ `format-list` library
 
-`contracts/topics.toml`:
+Create namespace `format_list` containing:
 
-- Change `FormatManagerViewTopic.qos` from `transient_local` to `best_effort`.
+- Format constants:
+  - `hello-world`, `default`, implicit `format-chooser`;
+  - Next/Select/CursorMove/Navigate/Pointer/ToggleArcball/MenuToggle/MenuCancel/OverlayCancel;
+  - pointer-right;
+  - hello mode/action/menu/overlay constants.
+- `is_control_command(int)`.
+- `FormatList`:
+  - parse ordered `formats.toml`;
+  - reject explicit `format-chooser`;
+  - `contains`, `is_known`, `first`, `next`.
+- Saved assignments:
+  - `FormatAssignment { int window; std::string format; }`;
+  - `SavedAssignments` with load/save of the exact Rust TOML schema;
+  - `validated(FormatList)` dropping duplicates, sorting by window, replacing unknown formats with `hello-world`, and preserving implicit `format-chooser`;
+  - default window 0 = `hello-world`;
+  - state path remains supplied by `support`.
 
-`DDS/format_manager.idl`:
+Update `display-lib` to include/link the shared library and remove its private format-list implementation.
 
-- Add `unsigned long long revision;` to `FormatManagerViewTopic`.
-- Update generated Rust/C++ constructors, tests, and any field metadata.
+Add `format-list-tests` covering:
 
-### 2. `format-view-service`
+- catalog order;
+- chooser rejection;
+- `contains` vs `is_known`;
+- `next` wrapping and chooser exclusion;
+- assignment round-trip;
+- validation, deduplication, sorting, unknown fallback, and chooser preservation.
 
-Add a publish period, default 250 ms, preferably exposed as `--rate-ms`.
+### 2. Common service behavior
 
-Behavior:
+Each service:
 
-1. Load and validate saved assignments.
-2. Publish immediately with revision 1.
-3. In the main loop:
-   - process control input;
-   - write the state file only when the assignment actually changes;
-   - publish when changed or when the periodic interval elapses;
-   - increment `revision` on every publish.
-4. Keep the writer best effort.
-5. Do not write state on periodic republishes.
+- Parses `--domain` (default 0), `--config <path>`, `--display-id <id>`, and `--topics`.
+- Requires `--display-id` unless `--topics` is used.
+- Resolves the config directory:
+  - explicit `--config`;
+  - otherwise `<deploy>/config` through `support`;
+  - otherwise `./contracts` for development.
+- Loads and validates:
+  - `topics.toml`;
+  - its service contract under `config/services/`;
+  - `formats.toml`.
+- Prints the service contract and exits for `--topics`.
+- Acquires the same guard names as Rust:
+  - `format-ctl-service-display-<id>`;
+  - `format-view-service-display-<id>`.
+- Creates one `stations_dds::Node` with the deploy DDS config.
+- Polls every 10 ms.
+- Prints errors to stderr and exits non-zero.
 
-### 3. Display libraries
+### 3. C++ `format-ctl-service`
 
-Rust `format_source` and C++ `FormatSource`:
+- Read saved assignments from:
+  `support::state_path("format-view-service", display_id)`.
+- Initialize the assignment map from the validated saved state.
+- Create:
+  - reader `FormatManagerInputTopic`;
+  - writer `FormatManagerCtlTopic`;
+  - writer `FormatManagerCommandCtlTopic`.
+- For each sample addressed to this display:
+  - if it is a control command, relay it unchanged on `FormatManagerCommandCtlTopic`;
+  - if `Next`, advance using `FormatList::next` with wrapping;
+  - if `Select`, accept only `FormatList::is_known` formats;
+  - on a changed assignment, publish the complete assignment map on `FormatManagerCtlTopic`.
+- Do not write the state file.
+- Do not publish state at startup; the view service publishes current state.
 
-- Track `last_revision` for the active display.
-- Apply an assignment only when `incoming.revision > last_revision`.
-- When multiple samples are available, select the highest revision for the display id.
-- Treat repeated samples as idempotent.
-- Continue filtering by display id.
-- Do not add file fallback or ACK handling.
+### 4. C++ `format-view-service`
 
-### 4. Monitor identity
+- Read and validate saved assignments from:
+  `support::state_path("format-view-service", display_id)`.
+- Create:
+  - reader `FormatManagerCtlTopic`;
+  - writer `FormatManagerViewTopic`.
+- Add `--rate-ms` with default 250.
+- Publish immediately at startup with a revision.
+- On control messages for this display:
+  - convert the full `windows` set to `SavedAssignments`;
+  - validate against the format catalog;
+  - write the state file only when the assignment changes;
+  - mark state changed.
+- Publish when changed or every periodic interval.
+- Every publish:
+  - increments a revision using a wall-clock-based monotonic base;
+  - writes the full `FormatManagerViewTopic` snapshot.
+- Keep `FormatManagerViewTopic` best effort.
 
-Add a Windows C++ helper that:
+### 5. CMake, deploy, and launch
 
-- enumerates Win32 monitors with `EnumDisplayMonitors`/`GetMonitorInfoW`;
-- maps SDL display bounds to `MONITORINFOEX.szDevice`;
-- returns the device name when a match exists.
+- Add `format-list` static library.
+- Add `format-ctl-service` and `format-view-service` console executables under `cpp/apps/format-manager`.
+- Link `support`, `stations-dds`, `format-list`, and generated format-manager/hello-world types as needed.
+- Add the C++ apps directory to `cpp/CMakeLists.txt`.
+- Update `scripts/build.ps1` to copy both C++ service executables to `build/deploy/cpp/bin`.
+- Update `scripts/launch-cpp.ps1`:
+  - Rust hello services and `paws` from `build/deploy/rust/bin`;
+  - C++ `format-ctl-service`, `format-view-service`, and `lil-d` from `build/deploy/cpp/bin`;
+  - validate all paths.
+- No `cleanup.ps1` change; image names are unchanged.
 
-Use the canonical name when:
+### 6. Architecture
 
-- building the monitor list for placement restore;
-- saving the current window monitor.
+Update `planning/architecture.md`:
 
-Fall back to the SDL friendly name only if no Win32 match exists.
-
-Legacy placement fallback:
-
-- If the saved monitor name does not match, try a monitor with matching saved monitor dimensions.
-- Use the unique resolution match.
-- Otherwise retain the existing primary-monitor and cascade fallback.
-
-Apply the geometry fallback in the shared placement code used by both Rust and C++ so old C++ friendly-name state migrates without a guaranteed reset.
-
-### 5. Architecture
-
-Update `planning/architecture.md` with:
-
-- View-state topics are best effort, idempotent, revisioned where ordering matters, and periodically republished.
-- Consumers tolerate repeats and ignore stale revisions.
-- `HelloWorldViewTopic` already follows this policy; `FormatManagerViewTopic` does after this story.
-- Window placement uses the Win32 monitor device name as the canonical monitor identity, with geometry fallback for legacy state.
-- Reliable control delivery is an application-level ACK contract; DDS reliable QoS alone is insufficient.
-- Writers of future reliable control track every required ACK and retry until all ACKs or a failure deadline.
-- Receivers ACK after applying and deduplicate.
-- Prefer idempotent current-state publication over ACK where the payload is state.
-- The ACK rule is guidance for future work; no current topic implements it.
+- Add C++ `format-list` to shared C++ libraries.
+- Add `cpp/apps/format-manager/`.
+- State that C++ format services are drop-in replacements.
+- Update the C++ launch description: C++ format services/displays with Rust hello and `paws` stand-ins.
+- Keep the existing best-effort periodic view and future ACK policies.
+- Do not add an ACK implementation.
 
 ## Tests
 
-- Contract test expects `FormatManagerViewTopic` QoS `best_effort`.
-- `format-view-service` revision increments on every publish.
-- State is written only when assignments change; periodic republishes do not write it.
-- Rust `FormatSource` ignores older revisions and applies newer ones.
-- C++ `FormatSource` ignores older revisions and applies newer ones.
-- Multiple available samples resolve to the highest revision.
-- Monitor device-name mapping and legacy geometry fallback tests where practical.
-- Full `scripts/build.ps1 -Test` and CTest remain green.
+- `format-list-tests` as above.
+- CTest `--topics` checks for both services using `${REPO_ROOT}/contracts`.
+- Existing CTest suites stay green.
+- Manual integration:
+  - `launch-cpp.ps1` starts C++ format services and C++ `lil-d`;
+  - formats switch and persist across restart;
+  - two display ids remain independent;
+  - no Rust format services are left running by `launch-cpp.ps1`;
+  - `launch-rust.ps1` still uses Rust format services.
 
-## Manual Verification
+## Verification
 
-1. Run `scripts/build.ps1 -Test`, then `scripts/build.ps1`.
-2. With a temporary `LOCALAPPDATA`, launch C++ `lil-d` for displays 0 and 1.
-3. Move both windows to known positions.
-4. Change both formats.
-5. Run `scripts/cleanup.ps1`.
-6. Relaunch C++; verify positions and formats restore.
-7. Clean up and launch Rust; verify the same positions and formats restore.
-8. Clean up and switch back to C++; verify again.
-9. Confirm `format-view-service\<id>.toml` retains the expected formats.
-10. Confirm `lil-d\<id>.toml` uses `\\.\DISPLAY…` monitor names.
-11. Use `dds-echo` to observe repeated best-effort `FormatManagerViewTopic` samples.
-12. Remove only the temporary state and processes.
+```powershell
+.\scripts\build.ps1 -Test
+.\scripts\build.ps1
+.\scripts\launch-cpp.ps1 -DisplayId 0,1
+# change formats on both displays
+.\scripts\cleanup.ps1
+.\scripts\launch-cpp.ps1 -DisplayId 0,1
+# verify both formats restore
+.\scripts\cleanup.ps1
+.\scripts\launch-rust.ps1 -DisplayId 0,1
+# verify the Rust configuration still works
+```
+
+Use a temporary `LOCALAPPDATA` for automated/manual verification. Confirm the state files are shared and both display ids remain independent.
 
 ## Risks
 
-- Best-effort samples can arrive out of order; revision handling is required.
-- Periodic publishing must not rewrite the format state file.
-- Legacy friendly-name state may require one migration; geometry fallback should minimize visible resets.
-- High-DPI monitor bounds must match between SDL and Win32.
-- Control-topic behavior remains unchanged; do not accidentally add ACK logic to this story.
+- Moving format constants and parsing into a shared library touches display-lib compile paths and tests.
+- C++ assignment state serialization must match Rust’s TOML schema exactly.
+- The C++ view revision must remain monotonic across service restarts.
+- Only the view service writes format state.
+- `launch-cpp.ps1` must not leave Rust format services running.
+- Control-topic behavior remains unchanged; do not add ACK logic.
 - Do not touch real `%LOCALAPPDATA%`; use temporary state for GUI verification.
 
 ## Bookkeeping
 
-- `cpp-display-chooser` is completed at `2026-11-23 15:16:59`.
-- `periodic-current-format` is `in progress` in `backlog.md`.
-- `periodic-current-format` has no remaining story prerequisites.
-- Do not add `reliable-control-ack` or `monitor-identity` stories.
-- Do not move `periodic-current-format` to `completed_stories.md` until the user asks to plan the next story.
+- `periodic-current-format` is completed at `2026-11-23 16:43:52`.
+- `cpp-format-services` is `in progress` in `backlog.md`.
+- `cpp-format-services` has no remaining story prerequisites.
+- Do not move `cpp-format-services` to `completed_stories.md` until the user asks to plan the next story.

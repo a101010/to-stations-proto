@@ -11,17 +11,11 @@ Conventions:
 
 ## Stories
 
-### periodic-current-format
-Make view-service state delivery best effort and periodic, starting with the current format assignment. Change `FormatManagerViewTopic` to best effort, add a monotonic revision, and have `format-view-service` republish the current assignment immediately at startup, immediately after changes, and periodically. Fold in cross-language monitor identity so window placement survives Rust/C++ switches. Record the architecture rule for future reliable control delivery but do not implement an ACK protocol until a message requires it.
-- **Depends on:** none.
-- **Minimal test:** move windows and change formats in C++ `lil-d`, clean up, restart C++, then switch to Rust and back; positions and formats restore in both directions; `dds-echo` shows repeated best-effort `FormatManagerViewTopic` samples.
-- **Status:** in progress.
-
 ### cpp-format-services
-Create C++ `format-ctl-service` and `format-view-service` with per-display assignments, persistence, command relay, contracts, instance guards, and deploy-relative config. Replace the Rust format services in `launch-cpp.ps1`.
+Create C++ `format-ctl-service` and `format-view-service` with per-display assignments, persistence, command relay, contracts, instance guards, and deploy-relative config. Extract the shared C++ format-list/assignment-state library used by the display library and services. Replace the Rust format services in `launch-cpp.ps1` while keeping the Rust hello services and `paws` as stand-ins.
 - **Depends on:** none.
 - **Minimal test:** C++ `lil-d` with C++ format services switches and persists per-window formats; two display ids remain independent.
-- **Status:** todo.
+- **Status:** in progress.
 
 ### cpp-hello-service
 Create C++ `hello-service`: sequential greeting list, attitude model, and 10 Hz `HelloWorldTopic`. Replace the Rust model service in `launch-cpp.ps1`.
@@ -49,7 +43,7 @@ Add the C++ Lux Pos overlay with the frozen globe, live lighting, spotlight can,
 
 ### cpp-paws
 Create the C++ `paws` using SDL3, Dear ImGui, and SDL gamepad input: the virtual Xbox controller, real controller selection, per-display persistence, R3 checkbox, Start/B/Back/A/D-pad/right-stick behavior, instance guard, window placement, and the same DDS commands as Rust `paws`. Add it to the C++ deploy and `launch-cpp.ps1`. Finish the pure C++ two-display configuration.
-- **Depends on:** periodic-current-format; cpp-format-services; cpp-hello-service; cpp-hello-view-ctl; cpp-lux-color; cpp-lux-pos.
+- **Depends on:** cpp-format-services; cpp-hello-service; cpp-hello-view-ctl; cpp-lux-color; cpp-lux-pos.
 - **Minimal test:** `launch-cpp.ps1` with two displays and a temporary `LOCALAPPDATA` runs the pure C++ configuration; hello-world, menu, arcball, Lux Color, Lux Pos, C++ `paws`, persistence, and display isolation work; the Rust configuration still runs.
 - **Status:** todo.
 

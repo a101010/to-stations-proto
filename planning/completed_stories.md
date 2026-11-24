@@ -354,3 +354,10 @@ Make the format chooser implicit and implement it in C++. Removed `format-choose
 - **Depends on:** none.
 - **Minimal test:** C++ `lil-d` with default and hello-world formats switches between them through the menu and chooser; D-pad selection wraps correctly; `formats.toml` lists no chooser; Rust services accept and preserve a `format-chooser` assignment; `Next` skips the chooser.
 - **Note:** verified with a temporary `LOCALAPPDATA`; the real runtime state was untouched.
+
+### periodic-current-format
+Make view-service state delivery best effort and periodic, starting with the current format assignment. Added a revision to `FormatManagerViewTopic`, made it best effort, made `format-view-service` republish immediately and every 250 ms, added revision filtering to Rust/C++ display libraries, and canonicalized C++ monitor identity with a legacy geometry fallback. Recorded the future ACK rule for reliable control without implementing it.
+- **Completed:** 2026-11-23 16:43:52.
+- **Depends on:** none.
+- **Minimal test:** move windows and change formats in C++ `lil-d`, clean up, restart C++, then switch to Rust and back; positions and formats restore in both directions; `dds-echo` shows repeated best-effort `FormatManagerViewTopic` samples.
+- **Note:** verified with temporary `LOCALAPPDATA`; the real runtime state was untouched.
