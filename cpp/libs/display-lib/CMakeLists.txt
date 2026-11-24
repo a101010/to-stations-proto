@@ -11,6 +11,7 @@ add_library(display_lib SHARED
     src/formats/hello_world.cpp
     src/icon.cpp
     src/image.cpp
+    src/light_pos.cpp
     src/shader.cpp
     src/text.cpp
     src/ui.cpp
@@ -44,6 +45,7 @@ add_executable(display-lib-tests
     src/format_chooser.cpp
     src/icon.cpp
     src/image.cpp
+    src/light_pos.cpp
     src/shader.cpp
     src/text.cpp
     src/ui.cpp

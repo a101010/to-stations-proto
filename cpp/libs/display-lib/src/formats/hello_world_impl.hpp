@@ -12,6 +12,7 @@
 #include "color_picker.hpp"
 #include "earth.hpp"
 #include "formats.hpp"
+#include "light_pos.hpp"
 #include "text.hpp"
 #include "ui.hpp"
 #include "view.hpp"
@@ -88,12 +89,18 @@ private:
     void toggle_picker_focus();
     void move_triangle_cursor(int dx, int dy);
     void move_hue_wheel(int dx, int dy);
+    std::array<float, 3> light_state() const;
+    void send_light(float x, float y, float z);
+    void send_light_commit();
+    void send_light_cancel();
+    void move_light(int dx, int dy);
 
     std::shared_ptr<ViewState> state_;
     std::shared_ptr<HelloWorldInput> input_;
     Earth earth_;
     TextRenderer text_;
     ColorPicker picker_;
+    Spotlight spotlight_;
     bool dragging_ = false;
     std::pair<float, float> last_pointer_{0.0f, 0.0f};
     Rect region_;
@@ -102,6 +109,9 @@ private:
     std::optional<PickerHit> mouse_picking_;
     std::optional<std::pair<float, float>> triangle_cursor_;
     WheelLatch wheel_;
+    LightFocus light_focus_ = LightFocus::Back;
+    bool light_dragging_ = false;
+    std::optional<std::pair<float, float>> light_cursor_;
     int last_overlay_ = kHelloOverlayNone;
 };
 

@@ -13,6 +13,7 @@
 #include "format_list.hpp"
 #include "formats/default_format.hpp"
 #include "icon.hpp"
+#include "light_pos.hpp"
 #include "image.hpp"
 #include "text.hpp"
 
@@ -270,6 +271,40 @@ void check_color_picker() {
     check(std::abs(saturation - 0.25f) < 1e-4f, "saturation round trip");
     check(std::abs(value - 0.75f) < 1e-4f, "value round trip");
 }
+
+void check_light_pos() {
+    using namespace display_lib_impl;
+    const Rect region{0, 0, 720, 720};
+    const ButtonRow row = button_row(region);
+    const LightLayout layout = LightLayout::create(region);
+    check(layout.back == row.back, "light back matches color");
+    check(layout.done == row.done, "light done matches color");
+    check(layout.globe.y + layout.globe.h <= layout.back.y, "globe above buttons");
+
+    const auto centered = front_light(0.0f, 0.0f);
+    check(std::abs(centered[2] - 1.0f) < 1e-6f, "front light center z");
+    const auto clamped = front_light(2.0f, 0.0f);
+    check(std::abs(clamped[0] - 1.0f) < 1e-6f, "front light clamps x");
+    check(std::abs(clamped[1]) < 1e-6f, "front light clamps y");
+    check(std::abs(clamped[2]) < 1e-6f, "front light clamps z");
+
+    const auto marker = layout.marker(0.5f, -0.5f);
+    check(
+        layout.globe.contains(
+            static_cast<int>(marker.first),
+            static_cast<int>(marker.second)),
+        "marker inside globe");
+    const float angle = layout.can_angle(marker);
+    check(std::cos(angle) < 0.0f && std::sin(angle) < 0.0f, "marker points inward");
+
+    check(next_light_focus(LightFocus::Back, 1) == LightFocus::Done, "light focus forward");
+    check(next_light_focus(LightFocus::Done, -1) == LightFocus::Back, "light focus backward");
+    check(next_light_focus(LightFocus::Done, 1) == LightFocus::Done, "light focus stays done");
+
+    const auto delta = light_stick_delta(20, -20, region);
+    check(delta.first > 0.0f && delta.second > 0.0f, "light stick direction");
+    check(delta.first < 0.02f && delta.second < 0.02f, "light stick speed");
+}
 }
 
 int main() {
@@ -281,6 +316,7 @@ int main() {
     check_chooser_layout();
     check_chooser_wrap();
     check_color_picker();
+    check_light_pos();
     check_images();
 
     if (failures != 0) {

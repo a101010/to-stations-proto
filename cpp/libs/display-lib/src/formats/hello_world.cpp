@@ -116,6 +116,15 @@ void HelloWorld::sync_overlay(int overlay) {
         triangle_cursor_.reset();
         wheel_.clear();
         dragging_ = false;
+        light_focus_ = LightFocus::Back;
+        light_dragging_ = false;
+        if (overlay == kHelloOverlayPos) {
+            const std::array<float, 3> light = light_state();
+            const auto [x, y, _] = front_light(light[0], light[1]);
+            light_cursor_ = std::make_pair(x, y);
+        } else {
+            light_cursor_.reset();
+        }
         last_overlay_ = overlay;
     }
 }
@@ -199,6 +208,38 @@ void HelloWorld::move_hue_wheel(int dx, int dy) {
         true);
 }
 
+std::array<float, 3> HelloWorld::light_state() const {
+    if (!state_ || !state_->value) {
+        return {0.6f, 0.8f, 0.7f};
+    }
+    return state_->value->light;
+}
+
+void HelloWorld::send_light(float x, float y, float z) {
+    if (input_) {
+        input_->send(kHelloActionLight, x, y, z, true);
+    }
+}
+
+void HelloWorld::send_light_commit() {
+    send(kHelloActionLightCommit, 0.0, 0.0, true);
+    light_dragging_ = false;
+}
+
+void HelloWorld::send_light_cancel() {
+    send(kHelloActionLightCancel, 0.0, 0.0, true);
+    light_dragging_ = false;
+}
+
+void HelloWorld::move_light(int dx, int dy) {
+    const std::array<float, 3> light = light_state();
+    const auto current = light_cursor_.value_or(std::make_pair(light[0], light[1]));
+    const auto delta = light_stick_delta(dx, dy, region_);
+    const auto [x, y, z] = front_light(current.first + delta.first, current.second + delta.second);
+    light_cursor_ = std::make_pair(x, y);
+    send_light(x, y, z);
+}
+
 void HelloWorld::render(
     int framebuffer_height,
     int x,
@@ -246,6 +287,45 @@ void HelloWorld::render(
         return;
     }
 
+    if (current_overlay == kHelloOverlayPos) {
+        const LightLayout layout = LightLayout::create(region_);
+        if (view->attitude) {
+            const int globe_y = framebuffer_height - layout.globe.y - layout.globe.h;
+            glViewport(layout.globe.x, globe_y, layout.globe.w, layout.globe.h);
+            earth_.render(
+                layout.globe.w,
+                layout.globe.h,
+                *view->attitude,
+                view->light,
+                view->color);
+        }
+        const auto marker = layout.marker(view->light[0], view->light[1]);
+        spotlight_.render(
+            framebuffer_height,
+            region_,
+            marker,
+            layout.can_angle(marker),
+            layout.spotlight_size(),
+            view->color);
+        draw_button(
+            text_,
+            framebuffer_height,
+            region_,
+            layout.back,
+            "Back",
+            light_focus_ == LightFocus::Back,
+            layout.font_size);
+        draw_button(
+            text_,
+            framebuffer_height,
+            region_,
+            layout.done,
+            "Done",
+            light_focus_ == LightFocus::Done,
+            layout.font_size);
+        return;
+    }
+
     if (view->attitude) {
         earth_.render(width, height, *view->attitude, view->light, view->color);
     }
@@ -276,6 +356,36 @@ FormatInput HelloWorld::mouse_button(
     }
     if (button != 0) {
         return {FormatInput::Type::Ignored, {}};
+    }
+    if (current_overlay == kHelloOverlayPos) {
+        const LightLayout layout = LightLayout::create(
+            Rect{region_x, region_y, region_width, region_height});
+        if (pressed) {
+            switch (layout.hit(x, y)) {
+                case LightHit::Back:
+                    light_focus_ = LightFocus::Back;
+                    send_light_cancel();
+                    break;
+                case LightHit::Done:
+                    light_focus_ = LightFocus::Done;
+                    send_light_commit();
+                    break;
+                case LightHit::None:
+                    if (layout.globe.contains(x, y)) {
+                        light_dragging_ = true;
+                        const auto [lx, ly] = layout.pointer_xy(
+                            static_cast<float>(x),
+                            static_cast<float>(y));
+                        const auto [lx3, ly3, lz3] = front_light(lx, ly);
+                        light_cursor_ = std::make_pair(lx3, ly3);
+                        send_light(lx3, ly3, lz3);
+                    }
+                    break;
+            }
+        } else {
+            light_dragging_ = false;
+        }
+        return {FormatInput::Type::Consumed, {}};
     }
     if (current_overlay == kHelloOverlayColor) {
         if (pressed) {
@@ -345,6 +455,20 @@ FormatInput HelloWorld::mouse_motion(
     int y) {
     const int current_overlay = overlay();
     sync_overlay(current_overlay);
+    if (current_overlay == kHelloOverlayPos) {
+        if (!light_dragging_) {
+            return {FormatInput::Type::Ignored, {}};
+        }
+        const LightLayout layout = LightLayout::create(
+            Rect{region_x, region_y, region_width, region_height});
+        const auto [lx, ly] = layout.pointer_xy(
+            static_cast<float>(x),
+            static_cast<float>(y));
+        const auto [lx3, ly3, lz3] = front_light(lx, ly);
+        light_cursor_ = std::make_pair(lx3, ly3);
+        send_light(lx3, ly3, lz3);
+        return {FormatInput::Type::Consumed, {}};
+    }
     if (current_overlay == kHelloOverlayColor) {
         if (picker_captured_) {
             clear_capture();
@@ -467,6 +591,49 @@ FormatInput HelloWorld::command(
         }
     }
 
+    if (current_overlay == kHelloOverlayPos) {
+        switch (command.type) {
+            case FormatCommand::Type::Navigate: {
+                const int direction = command.dx < 0 || command.dy < 0 ? -1 : 1;
+                light_focus_ = next_light_focus(light_focus_, direction);
+                return {FormatInput::Type::Consumed, {}};
+            }
+            case FormatCommand::Type::Pointer:
+                if (command.button == kFormatPointerRight && command.pressed) {
+                    const LightLayout layout = LightLayout::create(region_);
+                    const LightHit hit = cursor
+                                             ? layout.hit(cursor->first, cursor->second)
+                                             : LightHit::None;
+                    if (hit == LightHit::Back) {
+                        send_light_cancel();
+                    } else if (hit == LightHit::Done) {
+                        send_light_commit();
+                    } else if (light_focus_ == LightFocus::Back) {
+                        send_light_cancel();
+                    } else {
+                        send_light_commit();
+                    }
+                }
+                return {FormatInput::Type::Consumed, {}};
+            case FormatCommand::Type::ToggleArcball:
+                return {FormatInput::Type::Consumed, {}};
+            case FormatCommand::Type::CursorMove:
+                if (command.dx != 0 || command.dy != 0) {
+                    move_light(command.dx, command.dy);
+                }
+                return {FormatInput::Type::Consumed, {}};
+            case FormatCommand::Type::CancelMenu:
+            case FormatCommand::Type::OverlayCancel:
+                send_light_cancel();
+                return {FormatInput::Type::Consumed, {}};
+            case FormatCommand::Type::ReleaseCapture:
+                light_dragging_ = false;
+                return {FormatInput::Type::Consumed, {}};
+            case FormatCommand::Type::ToggleMenu:
+                return {FormatInput::Type::Ignored, {}};
+        }
+    }
+
     if (command.type == FormatCommand::Type::ToggleArcball) {
         send(kHelloActionToggleArcball, 0.0, 0.0, true);
         return {FormatInput::Type::Consumed, {}};
@@ -496,13 +663,15 @@ FormatInput HelloWorld::menu_action(const std::string& id) {
     if (id == kHelloMenuMode) {
         if (current_overlay == kHelloOverlayColor) {
             send_cancel();
+        } else if (current_overlay == kHelloOverlayPos) {
+            send_light_cancel();
         }
         send(kHelloActionModeToggle, 0.0, 0.0, true);
         return {FormatInput::Type::Consumed, {}};
     }
     if (id == kHelloMenuLuxColor) {
         if (current_overlay == kHelloOverlayPos) {
-            send(kHelloActionLightCancel, 0.0, 0.0, true);
+            send_light_cancel();
         }
         const bool opening = current_overlay != kHelloOverlayColor;
         send(kHelloActionToggleLuxColor, 0.0, 0.0, true);
@@ -520,6 +689,7 @@ FormatInput HelloWorld::menu_action(const std::string& id) {
         send(kHelloActionToggleLuxPos, 0.0, 0.0, true);
         picker_captured_ = false;
         mouse_picking_.reset();
+        light_dragging_ = false;
         return {FormatInput::Type::Consumed, {}};
     }
     return {FormatInput::Type::Ignored, {}};
