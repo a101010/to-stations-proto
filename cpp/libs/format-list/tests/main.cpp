@@ -34,6 +34,18 @@ name = "default"
     check(list.next("default") != nullptr && *list.next("default") == "hello-world", "next wraps");
 }
 
+void test_hello_actions() {
+    check(format_list::kHelloActionGrab == 0, "grab action");
+    check(format_list::kHelloActionToggleLuxPos == 7, "lux-pos toggle action");
+    check(format_list::kHelloActionColorHue == 8, "color hue action");
+    check(format_list::kHelloActionColorSv == 9, "color sv action");
+    check(format_list::kHelloActionColorCommit == 10, "color commit action");
+    check(format_list::kHelloActionColorCancel == 11, "color cancel action");
+    check(format_list::kHelloActionLight == 12, "light action");
+    check(format_list::kHelloActionLightCommit == 13, "light commit action");
+    check(format_list::kHelloActionLightCancel == 14, "light cancel action");
+}
+
 void test_chooser_rejected() {
     bool rejected = false;
     try {
@@ -99,6 +111,7 @@ void test_round_trip() {
 int main() {
     try {
         test_format_list();
+        test_hello_actions();
         test_chooser_rejected();
         test_validation();
         test_round_trip();

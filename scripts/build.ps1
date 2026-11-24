@@ -176,6 +176,8 @@ if (-not $Test) {
     # The C++ display loads its C++ display library and runtime DLLs from next to its executable.
     Copy-Item -Path (Join-Path $repoRoot 'build\cpp\Release\lil-d.exe') -Destination $deployCppBin -Force
     Copy-Item -Path (Join-Path $repoRoot 'build\cpp\Release\hello-service.exe') -Destination $deployCppBin -Force
+    Copy-Item -Path (Join-Path $repoRoot 'build\cpp\Release\hello-view-service.exe') -Destination $deployCppBin -Force
+    Copy-Item -Path (Join-Path $repoRoot 'build\cpp\Release\hello-ctl-service.exe') -Destination $deployCppBin -Force
     Copy-Item -Path (Join-Path $repoRoot 'build\cpp\Release\format-ctl-service.exe') -Destination $deployCppBin -Force
     Copy-Item -Path (Join-Path $repoRoot 'build\cpp\Release\format-view-service.exe') -Destination $deployCppBin -Force
     Copy-Item -Path (Join-Path $repoRoot 'build\cpp\Release\display_lib.dll') -Destination $deployCppBin -Force

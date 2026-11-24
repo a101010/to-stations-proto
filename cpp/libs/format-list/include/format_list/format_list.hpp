@@ -35,6 +35,13 @@ inline constexpr int32_t kHelloActionModeToggle = 4;
 inline constexpr int32_t kHelloActionRotate = 5;
 inline constexpr int32_t kHelloActionToggleLuxColor = 6;
 inline constexpr int32_t kHelloActionToggleLuxPos = 7;
+inline constexpr int32_t kHelloActionColorHue = 8;
+inline constexpr int32_t kHelloActionColorSv = 9;
+inline constexpr int32_t kHelloActionColorCommit = 10;
+inline constexpr int32_t kHelloActionColorCancel = 11;
+inline constexpr int32_t kHelloActionLight = 12;
+inline constexpr int32_t kHelloActionLightCommit = 13;
+inline constexpr int32_t kHelloActionLightCancel = 14;
 
 inline constexpr const char* kHelloMenuMode = "mode";
 inline constexpr const char* kHelloMenuLuxColor = "lux-color";
