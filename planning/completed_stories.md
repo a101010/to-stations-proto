@@ -368,3 +368,10 @@ Create C++ `format-ctl-service` and `format-view-service` with per-display assig
 - **Depends on:** none.
 - **Minimal test:** C++ `lil-d` with C++ format services switches and persists per-window formats; two display ids remain independent.
 - **Note:** verified with temporary `LOCALAPPDATA`; the real runtime state was untouched.
+
+### cpp-hello-service
+Create C++ `hello-service`: sequential greeting list, attitude model, and 10 Hz `HelloWorldTopic`. Replaced the Rust model service in `launch-cpp.ps1`, added the C++ greeting cycle and attitude/quaternion model, and added CTest coverage for the model and service contract.
+- **Completed:** 2026-11-24 11:41:36.
+- **Depends on:** none.
+- **Minimal test:** Rust `dds-echo` shows C++ `HelloWorldTopic` samples with changing greetings and attitude.
+- **Note:** verified with temporary `LOCALAPPDATA`; a temporary DDS reader observed valid samples and the real runtime state was untouched.

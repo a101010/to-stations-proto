@@ -1,88 +1,86 @@
-# Current story: cpp-hello-service
+# Current story: cpp-hello-view-ctl
 
 This file is the detailed, living plan for the one active story. It is rewritten for each story. The backlog in `backlog.md` holds all work and the per-story status.
 
 ## Story
 
-Create C++ `hello-service`: sequential greeting list, attitude model, and 10 Hz `HelloWorldTopic`. Replace the Rust model service in `launch-cpp.ps1`.
+Create C++ per-display `hello-view-service` and `hello-ctl-service`: Auto/Inspect, local attitude and inertia, light, color/HSV, overlay snapshots, frozen Lux Pos attitude, Lux Color/Lux Pos actions, guards, and view relay. Replace the Rust hello services in `launch-cpp.ps1`.
 
 - **Depends on:** none.
-- **Minimal test:** Rust `dds-echo` shows C++ `HelloWorldTopic` samples with changing greetings and attitude.
+- **Minimal test:** with C++ hello service and a display, mode/arcball/light/color actions and two-display isolation match the Rust behavior.
 
 ## Context
 
-- `cpp-format-services` is complete at `2026-11-24 09:33:18`.
-- The C++ configuration currently runs C++ `format-ctl-service`, `format-view-service`, and `lil-d` with Rust `hello-service`, `hello-view-service`, `hello-ctl-service`, and `paws` stand-ins.
+- `cpp-hello-service` is complete at `2026-11-24 11:41:36`.
+- The C++ configuration runs C++ `hello-service`, C++ format services, and C++ `lil-d` with Rust `hello-view-service`, `hello-ctl-service`, and `paws` stand-ins.
+- The Rust hello view/control services are the behavior reference.
+- `HelloWorldTopic`, `HelloWorldViewTopic`, `HelloWorldInputTopic`, and `HelloWorldCtlTopic` already exist.
+- The service contracts `hello-view-service.toml` and `hello-ctl-service.toml` already exist.
+- C++ `format-list` currently has hello actions 0–7 but is missing the color/light actions 8–14.
+- The C++ display library uses placeholder overlays; the real C++ overlays come later.
+- Hello view state is intentionally not persisted.
 - `launch-rust.ps1` must remain unchanged.
-- The Rust model service is the behavior reference:
-  - `HelloWorldTopic` at 10 Hz by default;
-  - a fixed 17-entry greeting list, advancing sequentially at random 15–60 second intervals;
-  - the earth attitude model with a 55-degree pole view angle, 45-degree screen tilt, `-100`-degree initial longitude, and a 12-minute spin.
-- `contracts/services/hello-service.toml`, `contracts/topics.toml`, and `DDS/hello_world.idl` already define the service and topic.
-- C++ generated DDS types are available from `hello_world_types`.
-- C++ service conventions are established by the format services: deploy-relative config, contract validation, `support::SingleInstance`, `stations-dds::Node`, and `--topics`.
 
 ## Decisions
 
-1. **Keep model logic app-local for now.**
-   - Put greeting and attitude code under the C++ `hello-service` app.
-   - Do not create a shared C++ hello-model library until the hello view/control services need shared code.
-2. **Port the Rust model behavior exactly.**
-   - Same greeting strings and order.
-   - Same random interval and SplitMix64 generator.
-   - Same attitude constants, quaternion math, and timing.
-3. **Implement only the global model service in this story.**
-   - C++ `hello-view-service`, C++ `hello-ctl-service`, and C++ `paws` are out of scope.
-   - `launch-cpp.ps1` keeps Rust hello view/control and `paws`.
-4. **Test the model logic without DDS.**
-   - A dedicated `hello-service-tests` executable compiles the greeting and attitude modules.
-   - `hello-service-topics` checks the service contract.
-5. **No IDL, contract, state, or version changes.**
-   - No persistence is added.
-   - No `docs/versions.md` change.
+1. **Port the Rust relay logic into the C++ view service.**
+   - Keep `ViewRelay` app-local under `hello-view-service`.
+   - Do not create a shared C++ hello-state library yet.
+2. **Extract the controller relay filter.**
+   - Put it in a small `control` helper so the matching and ignored-display cases are testable.
+3. **Extend shared C++ `format-list` constants.**
+   - Add the missing `kHelloActionColor*` and `kHelloActionLight*` constants.
+   - Add aliases in display-lib’s compatibility header.
+4. **Services implement overlay state; overlays remain out of scope.**
+   - The view service owns Lux Color and Lux Pos state, snapshots, and commits/cancels.
+   - C++ overlay rendering remains in `cpp-lux-color` and `cpp-lux-pos`.
+5. **After this story, only Rust `paws` remains a C++ launch stand-in.**
+6. **No IDL, contract, state-path, or version changes.**
 
 ## Scope
 
 **In scope**
 
-- C++ `hello-service`.
-- C++ greeting and attitude modules.
-- C++ model tests.
-- CMake target and deploy copy.
-- `launch-cpp.ps1` switch to the C++ model service.
+- C++ hello view relay and tests.
+- C++ `hello-view-service`.
+- C++ `hello-ctl-service`.
+- C++ format-list hello action constants.
+- CMake targets, deploy copying, and C++ launch switch.
 - Architecture and planning updates.
 
 **Out of scope**
 
-- C++ hello view/control services.
+- C++ Lux Color and Lux Pos rendering.
 - C++ `paws`.
-- Lux overlays.
-- Random greeting order; that remains the separate `random-greeting` story.
-- Changes to Rust `hello-service`.
+- Hello state persistence.
+- Changes to Rust services.
 - Changes to `launch-rust.ps1`.
 
 ## Files
 
 ```text
-cpp/apps/formats/
+cpp/apps/formats/hello-world/
   CMakeLists.txt
-  hello-world/
+  hello-view-service/
     CMakeLists.txt
-    hello-service/
-      CMakeLists.txt
-      main.cpp
-      greeting.hpp
-      greeting.cpp
-      attitude.hpp
-      attitude.cpp
-      tests/
-        main.cpp
+    main.cpp
+    relay.hpp
+    relay.cpp
+    tests/main.cpp
+  hello-ctl-service/
+    CMakeLists.txt
+    main.cpp
+    control.hpp
+    control.cpp
+    tests/main.cpp
 ```
 
 Other changes:
 
 ```text
-cpp/CMakeLists.txt
+cpp/libs/format-list/include/format_list/format_list.hpp
+cpp/libs/format-list/tests/main.cpp
+cpp/libs/display-lib/src/format_list.hpp
 scripts/build.ps1
 scripts/launch-cpp.ps1
 planning/architecture.md
@@ -91,160 +89,206 @@ planning/completed_stories.md
 planning/current_story.md
 ```
 
-No `docs/versions.md` change is needed.
+No `docs/versions.md`, `DDS/`, or `contracts/` changes are needed.
 
 ## Implementation
 
-### 1. Greeting module
+### 1. Shared C++ format constants
 
-Port `rust/service/hello-service/src/greeting.rs`.
+Add to `format_list`:
 
-- Use exactly these 17 greetings in order:
-  `Hello, world!`, `Hola, mundo!`, `Bonjour le monde!`, `Hallo, Welt!`,
-  `Ciao, mondo!`, `Olá, mundo!`, `Hallo, wereld!`, `Hej, världen!`,
-  `Hei, maailma!`, `Witaj, świecie!`, `Merhaba dünya!`, `Salut, lume!`,
-  `Salve, munde!`, `toki, ma o!`, `Halo, wol!`, `Habari, dunia!`,
-  `Pẹlẹ o, ayé!`.
-- Enable MSVC `/utf-8` for the service and test targets.
-- Implement `GreetingCycle`:
-  - start at greeting 0;
-  - choose the first change from 15–60 seconds inclusive;
-  - advance sequentially and wrap;
-  - advance multiple times when the current time has overrun;
-  - expose `current()`;
-  - expose `advance_if_due(now)`;
-  - expose the next-change time or an equivalent accessor for tests.
-- Seed from wall-clock nanoseconds; provide deterministic `with_seed(now, seed)` for tests.
-- Port SplitMix64 exactly:
-  - add `0x9e37_79b9_7f4a_7c15`;
-  - mix with the same shifts and multipliers;
-  - use `uint64_t` wrapping arithmetic.
-- Random interval:
-  - span is 46 values;
-  - result is `15 + next_u64() % 46` seconds.
+- `kHelloActionColorHue = 8`
+- `kHelloActionColorSv = 9`
+- `kHelloActionColorCommit = 10`
+- `kHelloActionColorCancel = 11`
+- `kHelloActionLight = 12`
+- `kHelloActionLightCommit = 13`
+- `kHelloActionLightCancel = 14`
 
-Tests:
+Add aliases for these in `cpp/libs/display-lib/src/format_list.hpp`.
 
-- 100 intervals stay within 15–60 seconds.
-- Sequence advances sequentially and wraps through all greetings.
-- No early advance at the start time.
+Extend `format-list-tests` with checks for the action values.
 
-### 2. Attitude module
+### 2. C++ hello view relay
 
-Port `rust/service/hello-service/src/attitude.rs` using generated `math::Quaternion`.
+Port `rust/service/hello-view-service/src/relay.rs` to `hello_view_service::ViewRelay`.
 
-- Constants:
-  - `POLE_VIEW_ANGLE_DEG = 55.0`;
-  - `POLE_SCREEN_TILT_DEG = 45.0`;
-  - `SPIN_PERIOD_S = 12.0 * 60.0`;
-  - `INITIAL_LONGITUDE_DEG = -100.0`.
-- Use an internal `std::array<double, 3>` vector type.
-- Port helpers: dot, cross, scale, subtract, normalize, unit quaternion, quaternion multiply, and vector rotation.
-- Implement:
-  - `pole_in_view()`;
-  - `initial_attitude()`;
-  - `attitude_at(std::chrono::duration<double> elapsed)`.
-- Use `std::numbers::pi_v<double>` rather than non-standard constants.
-- Preserve the Rust multiplication order:
-  - `initial_attitude` places the polar axis and then the sub-camera point;
-  - `attitude_at` returns `initial_attitude * spin`.
+API:
 
-Tests:
+```text
+ViewRelay(Clock::time_point started, uint32_t display_id)
+update(const HelloWorldTopic&, Clock::time_point now)
+control(const HelloWorldCtlTopic&, Clock::time_point now)
+std::optional<HelloWorldViewTopic> view(Clock::time_point now)
+```
 
-- Polar axis is placed by the view angle and screen tilt.
-- Initial attitude points the pole and the Americas at the camera.
-- Spin preserves the pole and makes equatorial points antipodal after six minutes.
-- A full 12-minute revolution returns to the initial orientation.
-- Use dot-product tolerances matching the Rust tests.
+Use `std::chrono::steady_clock` and saturating elapsed-time helpers.
 
-### 3. Service executable
+State:
 
-Create `hello-service` using the established C++ service pattern.
+- latest model sample and last-received time;
+- Auto/Inspect mode;
+- arcball enabled;
+- local attitude quaternion;
+- inertia velocity vector;
+- light direction;
+- RGB color;
+- HSV values;
+- optional color snapshot;
+- optional pre-light snapshot;
+- optional frozen Lux Pos attitude;
+- overlay state;
+- optional drag state;
+- last inertia tick.
+
+Exact constants and defaults:
+
+- model timeout `2s`;
+- inertia damping `4.5`;
+- minimum inertia speed `0.05`;
+- stick rotation `pi` radians at full deflection;
+- initial light `(0.6, 0.8, 0.7)`;
+- initial color white;
+- initial HSV `(0, 0, 1)`;
+- identity quaternion as local attitude.
+
+Port exactly:
+
+- `trackball` projection onto the near hemisphere;
+- shortest-arc `rotation_between`, including the antipodal fallback axis;
+- quaternion-vector conversion choosing the shorter arc;
+- quaternion multiplication and axis-angle construction;
+- HSV→RGB sector conversion;
+- `NoConn hh:mm:ss` formatting;
+- inertia integration, damping, and stopping;
+- Auto/Inspect transitions;
+- mode toggle cancelling the active overlay first;
+- grab/drag/release behavior and inertia;
+- arcball toggle and right-stick rotation;
+- Lux Color open/cancel/commit, snapshot restore, HSV clamping;
+- Lux Pos open/cancel/commit, light normalization with `z >= 0`, fallback `+Z`, frozen attitude;
+- mutual exclusion between Lux Color and Lux Pos;
+- overlay-specific action filtering;
+- display-id filtering.
+
+`view()` behavior:
+
+- Before two seconds without any model sample: return no view.
+- At/after two seconds without model: return invalid NoConn view with identity or last attitude as appropriate.
+- With fresh model: valid, using the model greeting and automatic attitude.
+- On timeout after a model sample: invalid NoConn view, retaining the last attitude.
+- In Inspect mode: publish the local attitude.
+- In Lux Pos: publish the frozen attitude.
+- Advance inertia only when no overlay is open.
+
+Expose a small velocity accessor for tests if needed to port the Rust inertia test.
+
+### 3. C++ hello-view-service executable
 
 CLI:
 
 - `--domain` default `0`;
-- `--rate-ms` default `100`;
+- `--rate-ms` default `10`;
 - `--config <dir>`;
+- `--display-id`;
 - `--topics`.
 
-Config resolution:
+Behavior:
 
-1. explicit `--config`;
-2. `<deploy>/config` through `support::deploy_path` when it contains `topics.toml`;
-3. `./contracts` for development.
-
-Startup order:
-
-1. load and validate `topics.toml`;
-2. load and validate `services/hello-service.toml`;
-3. print the rendered contract and exit for `--topics`, without a guard or DDS;
-4. acquire singleton guard `hello-service`;
-5. create the `stations-dds::Node` with the deploy `cyclonedds-config.xml`;
-6. create the writer for `HelloWorldTopic`.
-
-Publish loop:
-
-- period is `std::chrono::milliseconds(std::max(rate_ms, 1))`;
-- record the steady-clock start time;
-- construct the greeting cycle from the start time;
-- each iteration:
-  - read the current steady-clock time;
-  - advance the greeting if due;
-  - set the greeting;
-  - set the attitude from the elapsed time since start;
-  - write the sample;
+- Resolve config through explicit path, deploy config, then `./contracts`.
+- Load and validate `topics.toml` and `services/hello-view-service.toml`.
+- `--topics` prints the contract and exits without a guard or DDS.
+- Require `--display-id`.
+- Acquire `hello-view-service-display-<id>`.
+- Create one node and:
+  - writer `HelloWorldViewTopic`;
+  - reader `HelloWorldTopic`;
+  - reader `HelloWorldCtlTopic`.
+- Period is `max(rate_ms, 1)` milliseconds.
+- Loop:
+  - take model samples and update the relay with the last valid sample;
+  - take control samples and apply each;
+  - publish `relay.view(now)` when present;
+  - on reader exceptions, print a diagnostic and continue;
+  - on writer failure, exit non-zero;
   - sleep for the period.
 
-Errors print to stderr as `hello-service: <message>` and exit non-zero.
+### 4. C++ hello-ctl-service executable
 
-### 4. CMake, deploy, and launch
+CLI:
 
-- Add `apps/formats` to `cpp/CMakeLists.txt`.
-- Add `apps/formats/hello-world` and its `hello-service` subdirectory.
-- Add `hello-service` executable linking:
-  - `support`;
-  - `stations-dds`;
-  - `hello_world_types`.
-- Add `hello-service-tests` with:
-  - `greeting.cpp`;
-  - `attitude.cpp`;
-  - `tests/main.cpp`;
-  - link `hello_world_types`.
-- Add CTest:
-  - `hello-service-tests`;
-  - `hello-service-topics` with `--topics --config "${REPO_ROOT}/contracts"`.
-- Add `/utf-8` compile options for the service and tests on MSVC.
-- Update `scripts/build.ps1` to copy `build\cpp\Release\hello-service.exe` to `build/deploy/cpp/bin`.
+- `--domain` default `0`;
+- `--config <dir>`;
+- `--display-id`;
+- `--topics`.
+
+Behavior:
+
+- Resolve config and validate `topics.toml` and `services/hello-ctl-service.toml`.
+- `--topics` prints and exits without DDS.
+- Require `--display-id`.
+- Acquire `hello-ctl-service-display-<id>`.
+- Create reader `HelloWorldInputTopic` and writer `HelloWorldCtlTopic`.
+- Poll every 10 ms.
+- Relay only input addressed to the configured display, copying `display_id`, `action`, `x`, `y`, `z`, and `pressed`.
+- Propagate reader/writer failures as errors.
+
+`control.hpp/cpp` exposes the filter/relay helper for testing.
+
+### 5. CMake, deploy, and launch
+
+- Add both service subdirectories to `cpp/apps/formats/hello-world/CMakeLists.txt`.
+- Add executables:
+  - `hello-view-service`: `main.cpp`, `relay.cpp`; link `support`, `stations-dds`, `format-list`, `hello_world_types`.
+  - `hello-ctl-service`: `main.cpp`, `control.cpp`; link `support`, `stations-dds`, `hello_world_types`.
+- Add tests:
+  - `hello-view-service-tests`: relay implementation plus all Rust relay tests.
+  - `hello-ctl-service-tests`: matching/ignored display tests.
+  - `hello-view-service-topics`.
+  - `hello-ctl-service-topics`.
+- Update `scripts/build.ps1` to copy both executables to `build/deploy/cpp/bin`.
 - Update `scripts/launch-cpp.ps1`:
-  - `$model` resolves to `$cppBin\hello-service.exe`;
-  - description says C++ hello-service, format services, and displays run with Rust hello view/control and `paws` stand-ins.
-- No `cleanup.ps1` change; the image name is unchanged.
+  - `$helloCtl` and `$helloView` resolve to `$cppBin`;
+  - description says all C++ hello, format, and display components run from `cpp/bin`, with only Rust `paws` remaining.
+- No cleanup-script change; image names are unchanged.
 
-### 5. Architecture
+### 6. Architecture
 
-Update the C++ runtime paragraph:
+Update the C++ runtime launch paragraph:
 
-- The C++ launch script starts the C++ `hello-service`, C++ format services, and C++ displays.
-- Rust `hello-view-service`, `hello-ctl-service`, and `paws` remain stand-ins.
+- C++ launch now starts C++ hello-service, hello-view/control services, format services, and displays.
+- Rust `paws` is the only remaining stand-in.
 
-The folder tree already lists the planned C++ hello format directory.
+Mention that C++ `format-list` includes the complete hello action constants.
 
 ## Tests
 
-- `hello-service-tests`:
-  - greeting interval range;
-  - sequential advance and wrap;
-  - no early advance;
-  - all four attitude tests.
-- `hello-service-topics`.
-- Existing CTest suites stay green.
-- Manual integration:
-  - `launch-cpp.ps1` starts the C++ model service from `cpp/bin`;
-  - no Rust `hello-service.exe` remains running;
-  - Rust hello view/control and `paws` still run;
-  - `dds-echo` shows `HelloWorldTopic` with changing greeting and attitude;
-  - `launch-rust.ps1` still uses the Rust model service.
+Port the Rust relay tests:
+
+- no view before the startup timeout;
+- NoConn view at two seconds;
+- fresh model relaying;
+- timeout retains the last attitude and counts up;
+- recovery on a new model sample;
+- Auto/Inspect toggle;
+- arcball toggle and display isolation;
+- drag rotation and inertia;
+- inertia decay and stopping;
+- overlay mutual exclusion;
+- Lux Pos attitude freeze and light updates;
+- light commit and light ignored outside Lux Pos;
+- HSV updates and color commit;
+- color cancel restores the snapshot;
+- Lux Pos/mode toggle cancels Lux Color first;
+- HSV primary-color conversion;
+- right-stick rotation only when arcball is active.
+
+Add controller tests:
+
+- matching display input is relayed unchanged;
+- other display input is ignored.
+
+Expected CTest count: existing 9 plus relay tests, control tests, and two `--topics` checks → 13/13.
 
 ## Verification
 
@@ -253,34 +297,35 @@ The folder tree already lists the planned C++ hello format directory.
 .\scripts\build.ps1
 ```
 
-Expected CTest result: 9/9 passing (the existing 7 plus `hello-service-tests` and `hello-service-topics`).
+Manual/integration verification with a temporary `LOCALAPPDATA`:
 
-Manual verification with a temporary `LOCALAPPDATA`:
-
-1. Run `.\scripts\launch-cpp.ps1`.
-2. Confirm `hello-service.exe` runs from `build/deploy/cpp/bin`.
-3. Confirm the other C++ and Rust stand-in processes from the launch script.
-4. Use `dds-echo` to observe `HelloWorldTopic`:
-   - greeting starts at `Hello, world!`;
-   - greeting changes within 15–60 seconds;
-   - attitude changes continuously.
-5. Confirm `hello-service --topics` prints the contract without DDS.
-6. Stop with `cleanup.ps1`.
-7. Run `launch-rust.ps1` briefly to confirm the Rust configuration is unchanged.
-8. Remove only the temporary `LOCALAPPDATA`.
+1. `launch-cpp.ps1` starts C++ hello-service, C++ hello-view/control services, C++ format services, and C++ `lil-d`.
+2. Confirm no Rust `hello-service`, `hello-view-service`, or `hello-ctl-service` remains.
+3. Confirm Rust `paws` still runs.
+4. Use a temporary DDS harness or `dds-echo` plus display menu to verify:
+   - view starts as NoConn after two seconds without the model;
+   - model data becomes valid;
+   - Auto/Inspect and arcball work;
+   - mouse/controller drag and inertia change the local attitude;
+   - Lux Color and Lux Pos actions update overlay/color/light state;
+   - display 0 and display 1 remain independent.
+5. Verify `launch-rust.ps1` still runs the Rust services unchanged.
+6. Remove only the temporary `LOCALAPPDATA`.
 
 ## Risks
 
-- Non-ASCII greeting literals need a defined source encoding; use MSVC `/utf-8`.
-- Greeting tests must use deterministic seeds and explicit next-change accessors.
-- Quaternion helper order must match Rust exactly; keep the numerical tests.
-- `--topics` must not acquire the guard or create DDS objects.
-- `launch-cpp.ps1` must not leave a Rust `hello-service` running.
-- Do not modify the Rust model or `launch-rust.ps1`.
+- Quaternion and inertia math must match Rust numerically; port formulas verbatim and keep tolerance-based tests.
+- Inertia tests need deterministic time points; avoid real sleeps.
+- C++ generated `Quaternion` defaults to zero, not identity; construct identity explicitly.
+- Color/light action constants must exactly match Rust.
+- Overlay-specific actions must be ignored outside their overlay.
+- Lux Pos must freeze the attitude but still relay the live light.
+- Do not persist any hello view state.
+- Avoid starting Rust hello services from `launch-cpp.ps1`.
 
 ## Bookkeeping
 
-- `cpp-format-services` is completed at `2026-11-24 09:33:18`.
-- `cpp-hello-service` is `in progress` in `backlog.md`.
-- `cpp-hello-service` has no remaining story prerequisites.
-- Do not move `cpp-hello-service` to `completed_stories.md` until the user asks to plan the next story.
+- `cpp-hello-service` is completed at `2026-11-24 11:41:36`.
+- `cpp-hello-view-ctl` is `in progress` in `backlog.md`.
+- `cpp-hello-view-ctl` has no remaining story prerequisites.
+- Do not move `cpp-hello-view-ctl` to `completed_stories.md` until the user asks to plan the next story.

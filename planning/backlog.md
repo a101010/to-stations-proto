@@ -11,17 +11,11 @@ Conventions:
 
 ## Stories
 
-### cpp-hello-service
-Create C++ `hello-service`: sequential greeting list, attitude model, and 10 Hz `HelloWorldTopic`. Replace the Rust model service in `launch-cpp.ps1`.
-- **Depends on:** none.
-- **Minimal test:** Rust `dds-echo` shows C++ `HelloWorldTopic` samples with changing greetings and attitude.
-- **Status:** in progress.
-
 ### cpp-hello-view-ctl
 Create C++ per-display `hello-view-service` and `hello-ctl-service`: Auto/Inspect, local attitude and inertia, light, color/HSV, overlay snapshots, frozen Lux Pos attitude, Lux Color/Lux Pos actions, guards, and view relay. Replace the Rust hello services in `launch-cpp.ps1`.
-- **Depends on:** cpp-hello-service.
+- **Depends on:** none.
 - **Minimal test:** with C++ hello service and a display, mode/arcball/light/color actions and two-display isolation match the Rust behavior.
-- **Status:** todo.
+- **Status:** in progress.
 
 ### cpp-lux-color
 Add the C++ Lux Color overlay with the hue ring, saturation/value triangle, preview, shared Back/Done row, focus and capture, mouse and controller picking, wheel latch, and view actions.
@@ -37,7 +31,7 @@ Add the C++ Lux Pos overlay with the frozen globe, live lighting, spotlight can,
 
 ### cpp-paws
 Create the C++ `paws` using SDL3, Dear ImGui, and SDL gamepad input: the virtual Xbox controller, real controller selection, per-display persistence, R3 checkbox, Start/B/Back/A/D-pad/right-stick behavior, instance guard, window placement, and the same DDS commands as Rust `paws`. Add it to the C++ deploy and `launch-cpp.ps1`. Finish the pure C++ two-display configuration.
-- **Depends on:** cpp-hello-service; cpp-hello-view-ctl; cpp-lux-color; cpp-lux-pos.
+- **Depends on:** cpp-hello-view-ctl; cpp-lux-color; cpp-lux-pos.
 - **Minimal test:** `launch-cpp.ps1` with two displays and a temporary `LOCALAPPDATA` runs the pure C++ configuration; hello-world, menu, arcball, Lux Color, Lux Pos, C++ `paws`, persistence, and display isolation work; the Rust configuration still runs.
 - **Status:** todo.
 
