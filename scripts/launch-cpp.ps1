@@ -3,11 +3,11 @@
 Launches the C++ display configuration.
 
 .DESCRIPTION
-Starts the C++ lil-d display from build/deploy/cpp/bin, using the Rust services
-and paws as stand-ins until the C++ replacements are implemented. The
-hello_world model service, one hello_world view/controller service pair and one
-format-manager service pair per display, and one paws virtual-controller window
-per display id come from build/deploy/rust/bin.
+Starts the C++ lil-d display and one C++ format-manager service pair per display
+from build/deploy/cpp/bin. The Rust hello_world model service, one hello_world
+view/controller service pair, and one paws virtual-controller window per display
+id remain Rust stand-ins from build/deploy/rust/bin until the C++ replacements
+are implemented.
 
 Every display has a unique numeric display id. The same id is given to its
 hello view/controller services, format controller, format view service, lil-d,
@@ -45,8 +45,8 @@ $config = Join-Path $repoRoot 'build\deploy\config\cyclonedds-config.xml'
 $model = Join-Path $rustBin 'hello-service.exe'
 $helloCtl = Join-Path $rustBin 'hello-ctl-service.exe'
 $helloView = Join-Path $rustBin 'hello-view-service.exe'
-$formatCtl = Join-Path $rustBin 'format-ctl-service.exe'
-$formatView = Join-Path $rustBin 'format-view-service.exe'
+$formatCtl = Join-Path $cppBin 'format-ctl-service.exe'
+$formatView = Join-Path $cppBin 'format-view-service.exe'
 $display = Join-Path $cppBin 'lil-d.exe'
 $displayLib = Join-Path $cppBin 'display_lib.dll'
 $paws = Join-Path $rustBin 'paws.exe'

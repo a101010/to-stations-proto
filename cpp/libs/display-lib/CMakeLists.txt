@@ -1,7 +1,6 @@
 add_library(display_lib SHARED
     src/display_lib.cpp
     src/earth.cpp
-    src/format_list.cpp
     src/format_manager_impl.cpp
     src/format_chooser.cpp
     src/format_menu.cpp
@@ -28,6 +27,7 @@ target_compile_features(display_lib PRIVATE cxx_std_20)
 target_link_libraries(display_lib PRIVATE
     support
     stations-dds
+    format-list
     hello_world_types
     tomlplusplus
     stb_image
@@ -40,7 +40,6 @@ add_executable(display-lib-tests
     tests/main.cpp
     src/earth.cpp
     src/format_chooser.cpp
-    src/format_list.cpp
     src/icon.cpp
     src/image.cpp
     src/shader.cpp
@@ -55,6 +54,7 @@ target_include_directories(display-lib-tests PRIVATE
 target_compile_definitions(display-lib-tests PRIVATE REPO_ROOT="${REPO_ROOT}")
 target_compile_features(display-lib-tests PRIVATE cxx_std_20)
 target_link_libraries(display-lib-tests PRIVATE
+    format-list
     tomlplusplus
     stb_image
     ${HARFBUZZ_GPU_LIBRARY}
