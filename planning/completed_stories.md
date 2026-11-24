@@ -375,3 +375,10 @@ Create C++ `hello-service`: sequential greeting list, attitude model, and 10 Hz 
 - **Depends on:** none.
 - **Minimal test:** Rust `dds-echo` shows C++ `HelloWorldTopic` samples with changing greetings and attitude.
 - **Note:** verified with temporary `LOCALAPPDATA`; a temporary DDS reader observed valid samples and the real runtime state was untouched.
+
+### cpp-hello-view-ctl
+Create C++ per-display `hello-view-service` and `hello-ctl-service`: Auto/Inspect, local attitude and inertia, light, color/HSV, overlay snapshots, frozen Lux Pos attitude, Lux Color/Lux Pos actions, guards, and view relay. Replaced the Rust hello services in `launch-cpp.ps1`, extended the C++ hello action constants, added the C++ view relay and controller, and added CTest coverage for both services.
+- **Completed:** 2026-11-24 12:37:25.
+- **Depends on:** none.
+- **Minimal test:** with C++ hello service and a display, mode/arcball/light/color actions and two-display isolation match the Rust behavior.
+- **Note:** verified with temporary `LOCALAPPDATA` and a temporary DDS harness; the real runtime state was untouched.
