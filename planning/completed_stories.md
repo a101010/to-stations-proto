@@ -389,3 +389,10 @@ Add the C++ Lux Color overlay with the hue ring, saturation/value triangle, prev
 - **Depends on:** none.
 - **Minimal test:** the Rust Lux Color acceptance test passes with C++ `lil-d` and C++ services.
 - **Note:** verified with temporary `LOCALAPPDATA`; a screenshot confirmed the C++ picker rendering and the real runtime state was untouched.
+
+### cpp-lux-pos
+Add the C++ Lux Pos overlay with the frozen globe, live lighting, spotlight can, front-hemisphere mapping, Back/Done, rate-based right-stick control, R3 no-op, crosshair retention, and overlay transitions. Added the C++ `light_pos` geometry and spotlight shader renderer, integrated Lux Pos into the C++ hello-world format, added light-position tests, and verified the overlay with C++ `lil-d` and C++ services.
+- **Completed:** 2026-11-24 14:42:42.
+- **Depends on:** none.
+- **Minimal test:** the Rust Lux Pos acceptance test passes with C++ `lil-d` and C++ services.
+- **Note:** verified with temporary `LOCALAPPDATA`; a screenshot confirmed the C++ globe, spotlight, lighting, and buttons and the real runtime state was untouched.

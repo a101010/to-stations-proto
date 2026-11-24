@@ -11,17 +11,11 @@ Conventions:
 
 ## Stories
 
-### cpp-lux-pos
-Add the C++ Lux Pos overlay with the frozen globe, live lighting, spotlight can, front-hemisphere mapping, Back/Done, rate-based right-stick control, R3 no-op, crosshair retention, and overlay transitions.
-- **Depends on:** none.
-- **Minimal test:** the Rust Lux Pos acceptance test passes with C++ `lil-d` and C++ services.
-- **Status:** in progress.
-
 ### cpp-paws
 Create the C++ `paws` using SDL3, Dear ImGui, and SDL gamepad input: the virtual Xbox controller, real controller selection, per-display persistence, R3 checkbox, Start/B/Back/A/D-pad/right-stick behavior, instance guard, window placement, and the same DDS commands as Rust `paws`. Add it to the C++ deploy and `launch-cpp.ps1`. Finish the pure C++ two-display configuration.
-- **Depends on:** cpp-lux-pos.
+- **Depends on:** none.
 - **Minimal test:** `launch-cpp.ps1` with two displays and a temporary `LOCALAPPDATA` runs the pure C++ configuration; hello-world, menu, arcball, Lux Color, Lux Pos, C++ `paws`, persistence, and display isolation work; the Rust configuration still runs.
-- **Status:** todo.
+- **Status:** in progress.
 
 ### readme-cleanup
 Rewrite `README.md` to focus on setup, build, run, and tool usage. Remove temporary smoke-test details, implementation history, and duplicated architecture/version notes; keep exact external dependency install commands, build/test commands, launch and cleanup commands, and short pointers to `planning/architecture.md` and `docs/versions.md`.

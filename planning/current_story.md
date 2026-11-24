@@ -1,247 +1,362 @@
-# Current story: cpp-lux-pos
+# Current story: cpp-paws
 
 This file is the detailed, living plan for the one active story. It is rewritten for each story. The backlog in `backlog.md` holds all work and the per-story status.
 
 ## Story
 
-Add the C++ Lux Pos overlay with the frozen globe, live lighting, spotlight can, front-hemisphere mapping, Back/Done, rate-based right-stick control, R3 no-op, crosshair retention, and overlay transitions.
+Create the C++ `paws` using SDL3, Dear ImGui, and SDL gamepad input: the virtual Xbox controller, real controller selection, per-display persistence, R3 checkbox, Start/B/Back/A/D-pad/right-stick behavior, instance guard, window placement, and the same DDS commands as Rust `paws`. Add it to the C++ deploy and `launch-cpp.ps1`. Finish the pure C++ two-display configuration.
 
 - **Depends on:** none.
-- **Minimal test:** the Rust Lux Pos acceptance test passes with C++ `lil-d` and C++ services.
+- **Minimal test:** `launch-cpp.ps1` with two displays and a temporary `LOCALAPPDATA` runs the pure C++ configuration; hello-world, menu, arcball, Lux Color, Lux Pos, C++ `paws`, persistence, and display isolation work; the Rust configuration still runs.
 
 ## Context
 
-- `cpp-lux-color` is complete at `2026-11-24 13:58:20`.
-- The C++ view service already owns light state, light snapshots, frozen Lux Pos attitude, and light commit/cancel actions.
-- The C++ display library already has Lux Color and the shared Back/Done geometry/renderer.
-- The Rust display library implements Lux Pos in `light_pos.rs` and `formats/hello_world.rs`.
-- Rust `paws` is still the controller source for the C++ configuration.
-- Hello view state is intentionally not persisted.
-- `launch-rust.ps1` must remain unchanged.
+- `cpp-lux-pos` is complete at `2026-11-24 14:42:42`.
+- Every other C++ application, service, and display library is implemented.
+- `launch-cpp.ps1` currently uses Rust `paws` as the only remaining stand-in.
+- The Rust `paws` is a Slint application with gilrs XInput gamepad support.
+- C++ GUI applications use SDL3 + Dear ImGui; C++ `paws` must use SDL gamepad APIs.
+- `paws` commands, state path, and persisted controller schema already exist in Rust.
+- The existing C++ `support` library provides state paths, placement resolution, and singleton guards.
+- `scripts/cleanup.ps1` already stops the `paws` image name.
 
 ## Decisions
 
-1. **Port the Rust `light_pos` module to C++.**
-   - Add `LightFocus`, `LightHit`, `LightLayout`, `front_light`, `light_stick_delta`, and `Spotlight`.
-   - Reuse `button_row` from the completed C++ `color_picker` module.
-2. **Keep Lux Pos behavior identical to Rust.**
-   - Same globe layout, spotlight-can shader, front-hemisphere mapping, and Back/Done positions.
-   - Same overlay transitions and frozen-attitude view.
-3. **No service changes.**
-   - C++ `hello-view-service` already provides light state, snapshots, frozen Lux Pos attitude, and commit/cancel actions.
-4. **No Lux Color changes beyond shared helpers.**
-   - Reuse the existing Back/Done row and button renderer.
-5. **No C++ `paws` or deploy changes.**
-   - Rust `paws` provides controller input for this story.
-6. **No IDL, contract, persistence, or launch changes.**
+1. **Use SDL3 + Dear ImGui.**
+   - Functional equivalent of the Rust Slint window, not pixel-for-pixel identical.
+   - Reuse the C++ SDL/OpenGL/ImGui startup and window-state patterns from `lil-d`.
+2. **Use SDL gamepad APIs instead of gilrs.**
+   - Enumerate Xbox/XInput-style gamepads by name.
+   - Preserve Rust behavior for selection, reconnect, Virtual mode, and persistence.
+3. **Keep the `paws/<display-id>.toml` schema Rust-compatible.**
+   - Store optional `[controller]` and `[position]` tables.
+   - Use existing `support::SavedPosition` fields.
+   - Write the complete state atomically so position saves do not erase the controller.
+4. **Keep command behavior identical to Rust.**
+   - Port the command state machine and tests from `commands.rs`.
+   - Publish the same `FormatManagerInputTopic` messages with display id and window 0.
+5. **Finish the pure C++ configuration.**
+   - `launch-cpp.ps1` starts C++ `paws`.
+   - `launch-rust.ps1` remains unchanged.
+6. **No changes to IDL, contracts, services, or display-library behavior.**
 
 ## Scope
 
 **In scope**
 
-- C++ `light_pos` module.
-- C++ Lux Pos rendering.
-- Mouse and controller light movement.
-- Back/Done focus and overlay transitions.
-- Display-library tests and architecture/planning updates.
+- C++ `paws` application.
+- SDL gamepad enumeration and control.
+- Virtual controller UI with mouse interaction.
+- Controller selection and persistence.
+- Window placement persistence.
+- Command state machine and DDS writer.
+- C++ deploy and launch integration.
+- Tests and architecture updates.
 
 **Out of scope**
 
-- C++ `paws`.
-- Service changes.
-- Persistence.
-- Changes to `launch-cpp.ps1` or `launch-rust.ps1`.
-- Changes to Lux Color behavior beyond shared layout helpers.
+- Changes to Rust `paws`.
+- URL/launch-hybrid work.
+- New DDS topics or contracts.
+- New display-library features.
+- Slint C++ integration.
+- README restructuring.
 
 ## Files
 
 ```text
-cpp/libs/display-lib/src/light_pos.hpp
-cpp/libs/display-lib/src/light_pos.cpp
-cpp/libs/display-lib/src/formats/hello_world_impl.hpp
-cpp/libs/display-lib/src/formats/hello_world.cpp
-cpp/libs/display-lib/tests/main.cpp
-cpp/libs/display-lib/CMakeLists.txt
+cpp/apps/controls/
+  CMakeLists.txt
+  paws/
+    CMakeLists.txt
+    src/main.cpp
+    src/app.hpp
+    src/app.cpp
+    src/state.hpp
+    src/state.cpp
+    src/window_state.hpp
+    src/window_state.cpp
+    src/gamepad.hpp
+    src/gamepad.cpp
+    src/controls.hpp
+    src/controls.cpp
+    src/commands.hpp
+    src/commands.cpp
+    src/stick.hpp
+    src/stick.cpp
+    tests/main.cpp
+```
+
+Other changes:
+
+```text
+cpp/CMakeLists.txt
+scripts/build.ps1
+scripts/launch-cpp.ps1
 planning/architecture.md
 planning/backlog.md
 planning/completed_stories.md
 planning/current_story.md
 ```
 
-No new deployable files, assets, contracts, or scripts.
+No `docs/versions.md`, `DDS/`, or `contracts/` changes are needed.
 
 ## Implementation
 
-### 1. Add `light_pos` geometry and helpers
+### 1. Paws state
 
-Create:
+Create an app-local `PawsState` module:
 
-- `LightFocus { Back, Done }`
-- `LightHit { Back, Done, None }`
-- `LightLayout`
-- `next_light_focus(LightFocus, int direction)`
-- `front_light(float x, float y)`
-- `light_stick_delta(int dx, int dy, const Rect& region)`
-- `Spotlight`
+- State path: `support::state_path("paws", std::to_string(display_id))`.
+- Schema:
 
-`LightFocus` rules:
+```toml
+[controller]
+name = "Xbox Wireless Controller"
+uuid = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+id = 2
 
-- default focus is Back;
-- `Back -> Done` forward;
-- `Done -> Back` backward;
-- forward from Done stays Done.
+[position]
+monitor = "\\.\DISPLAY1"
+monitor_width = 1920
+monitor_height = 1080
+x = 100
+y = 50
+width = 960
+height = 640
+```
 
-`LightLayout`:
+- `controller` and `position` are optional.
+- Load tolerates missing, incomplete, or malformed files by returning defaults.
+- Save both tables together atomically with a temporary file and `MoveFileExW`.
+- Do not use `support::save` for this file; it writes only position fields and would erase the controller.
+- Preserve unknown optional position fields as the Rust schema does.
 
-- use `button_row(region)` for shared Back/Done positions and font size;
-- globe margin `12 * scale`;
-- globe sits above the Back/Done row;
-- globe side is `min(width, max(1, buttons.back.y - margin - top))`;
-- globe centered horizontally;
-- radius from `earth::silhouette_radius(side, side)`;
-- default colors and fallback state remain view-driven.
+### 2. Window position and persistence
 
-`front_light`:
+Adapt the existing `lil-d` SDL window-state logic:
 
-- clamp normalized x-y to the unit disk;
-- derive `z = sqrt(max(0, 1 - x² - y²))`.
+- Restore position and inner size through `support::restore_or_cascade`.
+- Use canonical Win32 monitor device names with the same geometry fallback.
+- Restore before showing the window.
+- Track move/resize changes and save on the shared interval or forced close/focus events.
+- Save the complete `PawsState` after restoring the resolved position.
+- Save on quit, close request, focus loss, and window move/resize.
+- Save failures are logged and non-fatal.
+- Use the same cascade slot as the display id, matching Rust `paws`.
 
-`LightLayout` helpers:
+### 3. Gamepad enumeration and selection
 
-- `hit(x, y)` checks Back/Done;
-- `pointer_xy(x, y)` maps globe pointer coordinates to normalized front-hemisphere x-y;
-- `marker(x, y)` projects normalized light x-y using a `1.05 * radius` marker radius;
-- `can_angle(marker)` points the spotlight toward the globe center;
-- `spotlight_size()` is `max(34 * scale, 12)`.
+Create plain gamepad data structures independent of SDL where possible:
 
-`light_stick_delta`:
+- `ChoiceKey { name, uuid[16], id }`
+- `SavedController { name, uuid[16], id }`
+- `Choice { joystick_id, key }`
+- `Selection { Virtual, Gamepad(id) }`
 
-- `half = min(region.w, region.h) / 2`;
-- scale is `0.25 / half`;
-- return `(dx * scale, -dy * scale)`, matching Rust.
+Use SDL3:
 
-### 2. Add the spotlight renderer
+- `SDL_GetGamepads`
+- `SDL_GetGamepadNameForID`
+- `SDL_GetGamepadGUIDForID`
+- `SDL_OpenGamepad`
+- `SDL_CloseGamepad`
+- `SDL_GetGamepadConnected`
+- `SDL_GetGamepadName`
+- SDL gamepad added/removed events
 
-Port the Rust spotlight shader and renderer:
+Filter only names containing `xbox` or `xinput`, case-insensitively.
 
-- Quad vertices `[-1,1]`.
-- Vertex shader:
-  - rotate the quad by `u_angle`;
-  - translate by `u_marker` in region coordinates;
-  - project using `u_region_size`.
-- Fragment shader:
-  - body, nose, and lens formulas from Rust;
-  - lens uses the current light color;
-  - body uses neutral gray;
-  - alpha is the shape mask.
-- `Spotlight`:
-  - own program, VAO, VBO;
-  - cache `u_marker`, `u_angle`, `u_size`, `u_region_size`, `u_color`;
-  - render with blending enabled;
-  - set viewport to the format region;
-  - restore GL program/VAO/blend state.
+Port Rust matching rules:
 
-### 3. Integrate with `HelloWorld`
+- Prefer saved id among matching entries.
+- If UUID is all zero, use name matching and saved id.
+- If UUID is zero and no name matches, the saved id is the remaining identity.
+- If UUID is nonzero, allow a unique UUID match when the name changed.
+- If multiple candidates remain and none has the saved id, do not auto-select.
 
-Add state:
+Selection behavior:
 
-- `Spotlight spotlight_`
-- `LightFocus light_focus_ = LightFocus::Back`
-- `bool light_dragging_ = false`
-- `std::optional<std::pair<float, float>> light_cursor_`
+- Dropdown index 0 is `Virtual`.
+- Selecting `Virtual` clears the remembered controller.
+- Selecting a gamepad stores its name, UUID, and id.
+- Startup auto-selects only the remembered controller if currently connected.
+- Disconnect falls back to `Virtual` but retains the remembered controller.
+- A remembered controller that appears later is auto-selected.
+- Other newly connected controllers are never auto-selected.
+- Refresh choices on add/remove events.
 
-Add helpers:
+Cross-language caveat: SDL GUID bytes and gilrs UUIDs may differ for the same physical device. The shared schema and zero-UUID/name/id fallbacks keep behavior compatible for the common case; do not claim exact cross-language identity when driver UUIDs differ.
 
-- `light_state()` returning the current view light or default `{0.6, 0.8, 0.7}`;
-- `send_light(x, y, z)`;
-- `send_light_commit()`;
-- `send_light_cancel()`;
-- `move_light(dx, dy)`.
+### 4. Controls and stick normalization
 
-Update `sync_overlay(int overlay)`:
+Port `controls.rs` and `stick.rs`.
 
-- continue resetting picker state when the overlay changes;
-- reset `light_focus_ = Back`;
-- set `light_dragging_ = false`;
-- when opening Lux Pos, set `light_cursor_ = front_light(light.x, light.y)` from the current light;
-- otherwise clear `light_cursor_`.
+`Controls`:
 
-Rendering:
+- left/right stick `(x, y)`;
+- A, B, X, Y;
+- LB, RB;
+- LT, RT;
+- D-pad up/down/left/right;
+- Back, Start, R3.
 
-- keep the existing background clear;
-- if overlay is Lux Color, render the picker and return;
-- if overlay is Lux Pos:
-  - create `LightLayout`;
-  - set the OpenGL viewport to the globe area;
-  - render Earth with the frozen view attitude, live light, and color;
-  - compute the spotlight marker from the live light;
-  - render the spotlight can at the marker angle/size;
-  - draw Back/Done with the shared button renderer;
-  - return without drawing the greeting.
-- otherwise preserve existing hello-world rendering.
-- Do not add Lux Pos rendering to Lux Color.
+Use SDL gamepad axes/buttons:
 
-Mouse input:
+- left stick X/Y;
+- right stick X/Y;
+- face buttons: South=A, East=B, West=X, North=Y;
+- shoulders: left/right shoulder buttons;
+- triggers: left/right trigger axes at 0.5 threshold;
+- D-pad buttons;
+- Back, Start, right thumb.
 
-- Lux Pos handles only left-button input.
-- Press:
-  - Back: focus Back and send light cancel;
-  - Done: focus Done and send light commit;
-  - globe area: begin dragging, map pointer to front-hemisphere light, store cursor, send light.
-- Release: clear dragging.
-- Mouse motion:
-  - if dragging, update light from pointer and send it;
-  - otherwise ignored.
-- Right-click remains ignored.
+Apply the Rust deadzone:
 
-Controller commands:
+- clamp to `[-1, 1]`;
+- deadzone `0.08`;
+- rescale outside the deadzone;
+- invert Y for top-left screen coordinates.
 
-- `Navigate`: cycle Back/Done focus.
-- Right pointer/A:
-  - Back cancels;
-  - Done commits;
-  - empty area activates the focused Back/Done.
-- `ToggleArcball`/R3: consumed and does nothing.
-- `CursorMove`:
-  - nonzero movement moves the light using `light_stick_delta`;
-  - zero movement is consumed with no light change;
-  - the virtual crosshair stays at its last position.
-- `CancelMenu` and `OverlayCancel`: cancel and restore the light.
-- `ReleaseCapture`: stop light dragging.
-- `ToggleMenu`: leave to the menu layer.
+`clamp_stick`:
 
-Menu behavior:
+- invalid or non-positive radius -> `(0, 0)`;
+- divide by radius;
+- clamp length to 1 without changing direction.
 
-- Mode toggle cancels active Lux Pos first, then sends mode toggle.
-- Lux Color cancels Lux Pos first.
-- Lux Pos:
-  - cancels Lux Color first when open;
-  - sends the Lux Pos toggle;
-  - clears picker capture/picking;
-  - stops light dragging.
-- World menu item cancels Lux Pos through `OverlayCancel`.
+### 5. Command state and sender
 
-Crosshair:
+Port `commands.rs` exactly:
 
-- `cursor_hidden()` remains true only for captured Lux Color.
-- Lux Pos never captures the cursor.
+- cursor interval `33ms`;
+- cursor speed `20`;
+- right stick active when max abs axis `> 0.1`;
+- send cursor movement only when active and due;
+- send one zero `CursorMove` when the right stick transitions from active to rest;
+- D-pad sends `Navigate` only on press edges;
+- A sends right-button `Pointer` press and release edges;
+- B sends `MenuCancel` on press edge;
+- Back sends `OverlayCancel` on press edge;
+- Start sends `MenuToggle` on press edge;
+- any `r3_checked` change sends `ToggleArcball`.
 
-### 4. CMake and tests
+`CommandSender`:
 
-- Add `src/light_pos.cpp` to `display_lib`.
-- Add `src/light_pos.cpp` to `display-lib-tests`.
-- Include `light_pos.hpp` in the display-library tests.
-- Add tests:
-  - Back/Done match `button_row` from Lux Color;
-  - globe sits above Back/Done;
-  - `front_light` clamps to the disk and gives `z = 1` at the center;
-  - marker is inside the globe and points inward;
-  - focus cycles between Back and Done correctly.
-- CTest count remains 13; `display-lib-tests` is expanded.
+- resolve contracts from explicit `--config`, deploy config, or `./contracts`;
+- load and validate `topics.toml` and `services/paws.toml`;
+- create `FormatManagerInputTopic` writer;
+- if DDS or contract setup fails, log and continue with the window functional;
+- send with `display_id`, `window = 0`, empty format, and the computed command fields.
 
-### 5. Architecture
+### 6. C++ application and UI
 
-Update the C++ display-library split to include `color_picker` and `light_pos`, which now match the Rust display-library modules.
+Create a `paws` SDL3 + OpenGL + Dear ImGui application.
+
+CLI:
+
+- `--display-id` required;
+- `--domain` default `0`;
+- `--config <dir>`.
+
+Startup:
+
+1. Parse args.
+2. Acquire guard `paws-display-<id>`; duplicate exits with failure.
+3. Load `PawsState`.
+4. Load controller choices and select remembered controller if connected.
+5. Create hidden SDL window, OpenGL 3.3 context, glad, ImGui.
+6. Set window title and minimum size (`720x480`), preferred size `960x640`.
+7. Restore window position/size.
+8. Create DDS command sender.
+9. Show and raise the window.
+
+Loop at roughly 16 ms:
+
+- poll SDL and ImGui events;
+- poll gamepad add/remove and selected controller state;
+- update `r3_checked` on physical R3 press edges;
+- draw the virtual controller UI;
+- track/save window position;
+- update and send command transitions.
+
+UI layout:
+
+- header with `paws #<display-id>` and a Controller combo containing `Virtual` plus Xbox gamepads;
+- central rounded controller body;
+- LT/RT, LB/RB, left/right sticks, D-pad, A/B/X/Y, Back/Start, and the R3 checkbox-style toggle;
+- `R3 Off` / `R3 On`;
+- status line for Virtual versus Controller mode.
+
+Virtual mode:
+
+- mouse-drag sticks update normalized values;
+- clicking/holding controller buttons sets their down state;
+- clicking the R3 toggle flips `r3_checked`;
+- controller mode ignores mouse control of sticks/buttons;
+- use ImGui invisible buttons/hit areas and draw-list primitives; no Slint files or assets.
+
+Controller mode:
+
+- mirror selected SDL gamepad state;
+- physical R3 press toggles the checkbox;
+- physical disconnect falls back to Virtual.
+
+Close handling:
+
+- save complete state;
+- destroy ImGui, GL, window, and SDL;
+- do not leave the DDS writer or gamepad handles dangling.
+
+### 7. CMake, deploy, and launch
+
+- Add `apps/controls` to `cpp/CMakeLists.txt`.
+- Add `paws` as a `WIN32` executable linking:
+  - `support`;
+  - `stations-dds`;
+  - `format-list`;
+  - `imgui`;
+  - `glad`;
+  - `OpenGL::GL`;
+  - `SDL3::SDL3-static`;
+  - `tomlplusplus`.
+- Add `paws-tests` compiling the pure state/controls/gamepad/commands/stick modules and tests.
+- Add `paws-tests` to CTest; expected total 14/14.
+- Update `scripts/build.ps1` to copy `build\cpp\Release\paws.exe` into `build/deploy/cpp/bin`.
+- Update `scripts/launch-cpp.ps1`:
+  - `$paws` resolves to `$cppBin\paws.exe`;
+  - description says the configuration is fully C++;
+  - no Rust paws stand-in remains.
+- No `cleanup.ps1` change; the process name stays `paws`.
+
+### 8. Architecture
+
+Update:
+
+- C++ runtime is fully C++ after this story.
+- `paws` section describes both the Rust Slint implementation and the C++ SDL3/ImGui implementation.
+- C++ application tree lists `apps/controls/paws`.
+- Runtime state remains shared and Rust-compatible.
+- `launch-rust.ps1` continues to use Rust `paws`.
+
+## Tests
+
+`paws-tests` covers:
+
+- state round-trip and Rust-shaped state loading;
+- stick clamping and invalid input;
+- control deadzone, Y inversion, button mapping, trigger thresholds;
+- remembered-controller matching, zero UUID, changed names, ambiguity;
+- selection and dropdown index mapping;
+- command state:
+  - neutral input sends nothing;
+  - cursor throttling;
+  - right-stick rest sends one zero move;
+  - D-pad press edges;
+  - A press/release;
+  - B, Back, Start press edges;
+  - R3 checkbox changes.
+
+Expected CTest count: 14/14.
 
 ## Verification
 
@@ -250,45 +365,46 @@ Update the C++ display-library split to include `color_picker` and `light_pos`, 
 .\scripts\build.ps1
 ```
 
-Manual acceptance with a temporary `LOCALAPPDATA` and `launch-cpp.ps1`:
+Manual verification with a temporary `LOCALAPPDATA`:
 
-1. Open `Lux Pos` from the menu.
-2. Verify:
-   - frozen globe at the opening attitude;
-   - live lighting;
-   - spotlight-can marker pointing toward the globe center;
-   - Back/Done shared positions and Back default focus.
-3. Move the light with the mouse:
-   - lighting changes;
-   - Done commits;
-   - Back/B/World cancels and restores the previous light.
-4. Reopen and verify the previous attitude remains frozen while the light moves.
-5. Verify controller behavior with Rust `paws`:
-   - D-pad Back/Done focus;
-   - A/right-click activation;
-   - right stick moves the light while the crosshair stays put;
-   - R3 does nothing;
-   - zero right-stick movement does nothing.
-6. Verify overlay transitions:
-   - Lux Color cancels Lux Pos;
-   - Lux Pos cancels Lux Color;
-   - mode change cancels Lux Pos;
-   - menu selection cancels Lux Pos.
-7. Confirm two displays remain independent and `launch-rust.ps1` still works.
+1. Run `launch-cpp.ps1` with display ids `0,1`.
+2. Confirm all launched components are C++; no Rust `paws`, hello services, or format services remain.
+3. Confirm two C++ `paws` windows open with independent display ids and independent state.
+4. In Virtual mode:
+   - drag both sticks;
+   - click controller buttons;
+   - toggle R3;
+   - open the menu, change formats, rotate the globe, and use Lux Color/Lux Pos.
+5. Verify R3 behavior:
+   - outside overlays toggles arcball;
+   - in Lux Color switches ring/triangle focus when able;
+   - in Lux Pos does nothing.
+6. Verify right-stick return-to-rest emits the zero cursor move and resets the Lux Color wheel latch.
+7. Verify the controller dropdown:
+   - lists Virtual plus Xbox-style controllers;
+   - selecting a real controller mirrors it;
+   - disconnect falls back to Virtual;
+   - reconnect of the remembered controller auto-selects it;
+   - selecting Virtual clears the remembered controller.
+8. Restart and verify window position/size and remembered controller restore.
+9. Verify `launch-rust.ps1` still starts the Rust configuration.
+10. Remove only the temporary `LOCALAPPDATA`; never touch the real runtime state.
 
 ## Risks
 
-- The spotlight shader and globe viewport coordinate conversion must match the Rust rendering.
-- `Earth::render` expects the caller to set the globe viewport.
-- Lux Pos must not capture the cursor or hide it.
-- R3 must be consumed without toggling arcball.
-- Cursor-move commands must not move the virtual crosshair in Lux Pos.
-- Do not persist light or overlay state.
-- Avoid changing Lux Color behavior while adding shared `button_row` usage.
+- SDL gamepad GUIDs and gilrs UUIDs are not guaranteed identical; cross-language controller auto-restore is best-effort.
+- The state schema must be nested exactly like Rust; using `support::save` would erase the controller.
+- Position saves must preserve controller state and vice versa.
+- SDL gamepad handles must be closed on refresh/removal.
+- ImGui hit areas must not accept mouse input in controller mode.
+- R3 must be an observable checkbox state, not a momentary command.
+- Cursor move and D-pad edge handling must not duplicate commands.
+- `launch-cpp.ps1` must not start Rust `paws`.
+- The app must still run when DDS setup fails, matching Rust `paws`.
 
 ## Bookkeeping
 
-- `cpp-lux-color` is completed at `2026-11-24 13:58:20`.
-- `cpp-lux-pos` is `in progress` in `backlog.md`.
-- `cpp-lux-pos` has no remaining story prerequisites.
-- Do not move `cpp-lux-pos` to `completed_stories.md` until the user asks to plan the next story.
+- `cpp-lux-pos` is completed at `2026-11-24 14:42:42`.
+- `cpp-paws` is `in progress` in `backlog.md`.
+- `cpp-paws` has no remaining story prerequisites.
+- Do not move `cpp-paws` to `completed_stories.md` until the user asks to plan the next story.
