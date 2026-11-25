@@ -161,13 +161,16 @@ void WindowState::restore(SDL_Window* window) {
         primary = &monitors.front();
     }
 
-    int width = 960;
-    int height = 640;
+    int width = 840;
+    int height = 560;
     SDL_GetWindowSizeInPixels(window, &width, &height);
     const Borders borders = window_borders(window);
-    const support::Size inner_size{
+    support::Size inner_size{
         static_cast<uint32_t>(std::max(width, 1)),
         static_cast<uint32_t>(std::max(height, 1))};
+    if (store_.state.position && store_.state.position->size()) {
+        inner_size = *store_.state.position->size();
+    }
     const support::Size window_size{
         inner_size.width + static_cast<uint32_t>(std::max(
             borders.left + borders.right,

@@ -146,10 +146,10 @@ component R3Toggle inherits Rectangle {
 
 export component MainWindow inherits Window {
     title: "paws";
-    preferred-width: 960px;
-    preferred-height: 640px;
-    min-width: 720px;
-    min-height: 480px;
+    preferred-width: 840px;
+    preferred-height: 560px;
+    min-width: 640px;
+    min-height: 420px;
     background: #121417;
 
     in-out property <int> display-id: 0;
@@ -271,7 +271,7 @@ export component MainWindow inherits Window {
                     width: body.width * 0.22;
                     height: self.width;
                     x: body.width * 0.13;
-                    y: body.height * 0.36;
+                    y: body.height * 0.30;
                     value-x: root.left-x;
                     value-y: root.left-y;
                     interactive: root.virtual-mode;

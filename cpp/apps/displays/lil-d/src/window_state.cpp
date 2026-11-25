@@ -179,9 +179,12 @@ void WindowState::restore(SDL_Window* window) {
     int height = 720;
     SDL_GetWindowSizeInPixels(window, &width, &height);
     const Borders borders = window_borders(window);
-    const support::Size inner_size{
+    support::Size inner_size{
         static_cast<std::uint32_t>(std::max(width, 1)),
         static_cast<std::uint32_t>(std::max(height, 1))};
+    if (saved && saved->size()) {
+        inner_size = *saved->size();
+    }
     const support::Size window_size{
         inner_size.width +
             static_cast<std::uint32_t>(std::max(
