@@ -51,10 +51,9 @@ public:
         if (sdl_axis == SDL_GAMEPAD_AXIS_INVALID || !SDL_GamepadHasAxis(pad_, sdl_axis)) {
             return 0.0f;
         }
-        if (axis == PadAxis::LeftTrigger || axis == PadAxis::RightTrigger) {
-            return static_cast<float>(SDL_GetGamepadAxis(pad_, sdl_axis)) / 32767.0f;
-        }
-        return static_cast<float>(SDL_GetGamepadAxis(pad_, sdl_axis)) / 32767.0f;
+        return normalize_sdl_axis(
+            axis,
+            static_cast<float>(SDL_GetGamepadAxis(pad_, sdl_axis)) / 32767.0f);
     }
 
     bool pressed(PadButton button) const override {

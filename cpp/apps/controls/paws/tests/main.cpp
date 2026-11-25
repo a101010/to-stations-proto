@@ -72,6 +72,13 @@ public:
     }
 };
 
+void test_sdl_axis_normalization() {
+    close(paws::normalize_sdl_axis(paws::PadAxis::LeftStickY, -1.0f), 1.0f, "sdl left up");
+    close(paws::normalize_sdl_axis(paws::PadAxis::RightStickY, 1.0f), -1.0f, "sdl right down");
+    close(paws::normalize_sdl_axis(paws::PadAxis::LeftStickX, 0.5f), 0.5f, "sdl x unchanged");
+    close(paws::normalize_sdl_axis(paws::PadAxis::LeftTrigger, 0.75f), 0.75f, "sdl trigger unchanged");
+}
+
 void test_controls() {
     FakePad empty;
     check(paws::Controls::read(empty) == paws::Controls::neutral(), "controls neutral");
@@ -282,6 +289,7 @@ void test_commands() {
 
 int main() {
     test_stick();
+    test_sdl_axis_normalization();
     test_controls();
     test_gamepad();
     test_state();

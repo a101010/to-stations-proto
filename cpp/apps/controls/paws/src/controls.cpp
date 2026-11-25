@@ -16,6 +16,13 @@ std::pair<float, float> stick(float x, float y) {
 
 }  // namespace
 
+float normalize_sdl_axis(PadAxis axis, float value) {
+    if (axis == PadAxis::LeftStickY || axis == PadAxis::RightStickY) {
+        return -value;
+    }
+    return value;
+}
+
 float apply_axis_deadzone(float value) {
     if (!std::isfinite(value)) {
         return 0.0f;

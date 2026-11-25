@@ -61,5 +61,6 @@ struct Controls {
 };
 
 float apply_axis_deadzone(float value);
+float normalize_sdl_axis(PadAxis axis, float value);
 
 }  // namespace paws
