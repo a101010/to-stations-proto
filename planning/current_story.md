@@ -13,15 +13,17 @@ Create the C++ `paws` using SDL3, Dear ImGui, and SDL gamepad input: the virtual
 
 - `cpp-lux-pos` is complete at `2026-11-24 14:42:42`.
 - Every other C++ application, service, and display library is implemented.
-- `launch-cpp.ps1` currently uses Rust `paws` as the only remaining stand-in.
-- The Rust `paws` is a Slint application with gilrs XInput gamepad support.
+- `launch-cpp.ps1` now uses the C++ `paws`.
+- The Rust `paws` remains the Slint implementation with gilrs XInput gamepad support.
 - C++ GUI applications use SDL3 + Dear ImGui; C++ `paws` must use SDL gamepad APIs.
 - `paws` commands, state path, and persisted controller schema already exist in Rust.
 - The existing C++ `support` library provides state paths, placement resolution, and singleton guards.
 - `scripts/cleanup.ps1` already stops the `paws` image name.
-- Manual testing found two follow-up defects in the C++ `paws`:
+- Manual testing found four follow-up defects:
   - physical-controller Y axes are inverted while virtual mouse sticks are correct;
-  - physical-controller input stops when the `paws` window is not focused.
+  - physical-controller input stops when the `paws` window is not focused;
+  - C++ `paws` does not restore its saved window size and overwrites the size saved by Rust `paws`;
+  - the C++ layout is only an approximation of the Rust layout, both default windows are larger than desired, and the Rust left stick sits too close to the D-pad.
 
 ## Decisions
 
@@ -49,6 +51,17 @@ Create the C++ `paws` using SDL3, Dear ImGui, and SDL gamepad input: the virtual
 8. **Allow gamepad input while Paws is unfocused.**
    - Set `SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS` before `SDL_Init`.
    - Keep the existing gamepad event polling.
+9. **Restore saved sizes in the C++ window-state path.**
+   - Use the saved inner size when selecting the current size before placement.
+   - Fix C++ `paws` and C++ `lil-d`, which share the same `support::restore_or_cascade` usage.
+   - Never save the fallback default over a valid saved size.
+10. **Make both Paws windows smaller.**
+    - Default `840x560`.
+    - Minimum `640x420`.
+11. **Bring the C++ layout closer to Rust and raise the Rust left stick.**
+    - Use Rust’s circular/pill controls, header arrangement, and body proportions.
+    - Move the Rust left stick from `0.36` to approximately `0.30` of body height.
+    - Apply the same stick position to C++.
 
 ## Scope
 
@@ -63,10 +76,13 @@ Create the C++ `paws` using SDL3, Dear ImGui, and SDL gamepad input: the virtual
 - C++ deploy and launch integration.
 - Tests and architecture updates.
 - Follow-up fixes for physical-controller Y direction and background input.
+- Window-size restoration fixes for C++ Paws and C++ lil-d.
+- Smaller default/minimum window sizes for Rust and C++ Paws.
+- C++ layout parity work and Rust left-stick repositioning.
 
 **Out of scope**
 
-- Changes to Rust `paws`.
+- Changes to Rust Paws behavior other than layout and window sizing.
 - URL/launch-hybrid work.
 - New DDS topics or contracts.
 - New display-library features.
@@ -378,6 +394,87 @@ SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
 - Do not alter keyboard or mouse focus behavior.
 - If verification shows the hint alone is insufficient on the current SDL build, add `SDL_UpdateGamepads()` once per frame before reading controller values.
 
+### 10. Window sizing and layout parity follow-up
+
+#### Saved window size
+
+The C++ window-state path currently passes the current default inner size into
+`support::restore_or_cascade`, so the returned size is always the default. The
+restore path then saves that default, overwriting the Rust-saved size.
+
+Fix both C++ SDL window-state implementations:
+
+- `cpp/apps/controls/paws/src/window_state.cpp`
+- `cpp/apps/displays/lil-d/src/window_state.cpp`
+
+In each `restore` method:
+
+1. Read the current inner size from SDL as the fallback.
+2. If `saved->size()` exists and is valid, use that as the effective inner size.
+3. Compute the outer window size from the effective inner size plus borders.
+4. Pass those values into `support::restore_or_cascade`.
+5. Apply the returned size with `SDL_SetWindowSize`.
+6. Save the resolved size afterward.
+
+Add a regression check that a saved inner size is used instead of the
+current/default size, and that a later save preserves it.
+
+#### Smaller defaults and minimums
+
+Use:
+
+- Rust `paws.slint`:
+  - preferred `840x560`
+  - minimum `640x420`
+- C++ `paws`:
+  - initial window `840x560`
+  - minimum `640x420`
+  - restoration fallback `840x560`
+
+The current values are `960x640` and `720x480`.
+
+#### Closer C++ layout
+
+Update `cpp/apps/controls/paws/src/app.cpp` to match Rust more closely:
+
+- Header:
+  - `paws #<id>` on the left.
+  - `Controller` label and combo on the right.
+  - Match the Rust spacing and combo width as closely as practical.
+- Body:
+  - Use the Rust aspect ratio and centering:
+    - body width constrained by available height times 1.45;
+    - body height = width / 1.45.
+  - Rounded body with `body_height * 0.22` radius and a 3 px border.
+  - Match Rust body colors.
+- Controls:
+  - Use circular or pill-shaped controls instead of rectangular ImGui buttons.
+  - Match Rust’s relative positions and sizes from `paws.slint`:
+    - LT/RT, LB/RB;
+    - left/right sticks;
+    - D-pad U/D/L/R;
+    - Y/X/B/A diamond;
+    - Back/Start;
+    - R3 rounded toggle.
+  - Keep the existing hit areas and down-state behavior.
+  - Use the Rust active color `#6fc2ff` for pressed controls.
+- Footer:
+  - Center the Virtual/Controller status text as Rust does.
+- Left stick:
+  - Use the new `0.30` vertical fraction in both Rust and C++.
+
+Do not attempt pixel-perfect Slint reproduction; match proportions, shapes, and
+spacing closely.
+
+#### Rust left stick
+
+In `rust/ui/paws/ui/paws.slint`:
+
+- Change the left stick `y` from `body.height * 0.36` to `body.height * 0.30`.
+- Keep the right stick where it is.
+- Verify the left stick no longer crowds the D-pad at both default and minimum
+  sizes.
+
 ## Tests
 
 `paws-tests` covers:
@@ -385,6 +482,7 @@ SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
 - state round-trip and Rust-shaped state loading;
 - stick clamping and invalid input;
 - control deadzone, SDL Y-axis normalization, button mapping, trigger thresholds;
+- saved window-size selection and preservation;
 - remembered-controller matching, zero UUID, changed names, ambiguity;
 - selection and dropdown index mapping;
 - command state:
@@ -423,15 +521,24 @@ Manual verification with a temporary `LOCALAPPDATA`:
 7. With a physical controller selected:
    - both stick Y axes must move the Paws knobs and display controls in the same direction as Virtual mode;
    - with Paws unfocused, stick, D-pad, A, B, Back, Start, and R3 input must continue to reach the display.
-8. Verify the controller dropdown:
+8. Window size:
+   - both Paws implementations default to `840x560`;
+   - both can resize down to `640x420`;
+   - resize Rust Paws, restart C++ Paws, and verify C++ uses the Rust-saved size;
+   - resize C++ Paws, restart Rust Paws, and verify Rust uses the C++-saved size;
+   - restart either implementation and verify its own size restores.
+9. Layout:
+   - C++ controls are circular/pill-shaped and proportioned like Rust;
+   - left stick sits clearly above the D-pad cluster in both implementations at default and minimum sizes.
+10. Verify the controller dropdown:
    - lists Virtual plus Xbox-style controllers;
    - selecting a real controller mirrors it;
    - disconnect falls back to Virtual;
    - reconnect of the remembered controller auto-selects it;
    - selecting Virtual clears the remembered controller.
-9. Restart and verify window position/size and remembered controller restore.
-10. Verify `launch-rust.ps1` still starts the Rust configuration.
-11. Remove only the temporary `LOCALAPPDATA`; never touch the real runtime state.
+11. Restart and verify window position/size and remembered controller restore.
+12. Verify `launch-rust.ps1` still starts the Rust configuration.
+13. Remove only the temporary `LOCALAPPDATA`; never touch the real runtime state.
 
 ## Risks
 
@@ -447,6 +554,10 @@ Manual verification with a temporary `LOCALAPPDATA`:
 - Y-axis normalization must not affect X axes or trigger axes.
 - Background gamepad events must not produce duplicate command edges.
 - If SDL's background-events hint is ineffective on the current build, use verified `SDL_UpdateGamepads` polling as a fallback.
+- C++ size restoration must use the saved inner size, not the default size.
+- C++ and Rust share the `paws/<id>.toml` size fields; changing units or schema would break cross-language restoration.
+- C++ layout changes must keep controller mode, virtual mode, and hit areas working.
+- Raising the Rust left stick must not overlap the D-pad at the minimum size.
 
 ## Bookkeeping
 
