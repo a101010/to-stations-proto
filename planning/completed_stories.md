@@ -396,3 +396,10 @@ Add the C++ Lux Pos overlay with the frozen globe, live lighting, spotlight can,
 - **Depends on:** none.
 - **Minimal test:** the Rust Lux Pos acceptance test passes with C++ `lil-d` and C++ services.
 - **Note:** verified with temporary `LOCALAPPDATA`; a screenshot confirmed the C++ globe, spotlight, lighting, and buttons and the real runtime state was untouched.
+
+### cpp-paws
+Create the C++ `paws` using SDL3, Dear ImGui, and SDL gamepad input: the virtual Xbox controller, real controller selection, per-display persistence, R3 checkbox, Start/B/Back/A/D-pad/right-stick behavior, instance guard, window placement, and the same DDS commands as Rust `paws`. Added the C++ application, Rust-compatible state, controls/gamepad/command modules, deploy and launch integration, tests, background gamepad input, corrected Y-axis handling, saved-size restoration, and Rust-like layout.
+- **Completed:** 2026-11-25 11:18:58.
+- **Depends on:** none.
+- **Minimal test:** `launch-cpp.ps1` with two displays and a temporary `LOCALAPPDATA` runs the pure C++ configuration; hello-world, menu, arcball, Lux Color, Lux Pos, C++ `paws`, persistence, and display isolation work; the Rust configuration still runs.
+- **Note:** verified with temporary `LOCALAPPDATA`; the real runtime state was untouched.

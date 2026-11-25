@@ -50,6 +50,6 @@
 
 ## Writing
 
-- Do not use "vendor" to mean copying a dependency's source into the repository (for example "vendor a dependency", "vendored source" in that sense). It is jargon from a few ecosystems, not general usage. Say what is meant: "copy the dependency's source into the repository", "install the dependency to the external prefix", or "check the dependency out to an external location".
+- Do not use "vendor" to mean copying a dependency's source into the repository (for example "copy a dependency's source into the repository"). It is jargon from a few ecosystems, not general usage. Say what is meant: "copy the dependency's source into the repository", "install the dependency to the external prefix", or "check the dependency out to an external location".
 - "Vendor" meaning a supplier is fine (for example "vendor root namespace", "source from a vendor").
 - Do not navigate a path with "..". Address in-repository locations relative to the repository root, and external components by an absolute path under the external prefix (`docs/versions.md`).

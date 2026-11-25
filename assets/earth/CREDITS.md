@@ -18,22 +18,22 @@ equirect-to-cubemap <blue-marble-equirect.jpg> assets/earth --size 1024 --format
 
 `--target-bytes 80000` selects, per face, the highest JPEG quality whose encoded size is at or below 80 KB, so every committed face stays within the 50–100 KB budget.
 
-| Face | File | Size (bytes) | JPEG quality |
-|---|---|---|---|
-| +X | `px.jpg` | 79143 | 39 |
-| -X | `nx.jpg` | 79993 | 65 |
-| +Y | `py.jpg` | 79646 | 33 |
-| -Y | `ny.jpg` | 79478 | 82 |
-| +Z | `pz.jpg` | 79819 | 46 |
-| -Z | `nz.jpg` | 77882 | 89 |
+| Face | File     | Size (bytes) | JPEG quality |
+| ---- | -------- | ------------ | ------------ |
+| +X   | `px.jpg` | 79143        | 39           |
+| -X   | `nx.jpg` | 79993        | 65           |
+| +Y   | `py.jpg` | 79646        | 33           |
+| -Y   | `ny.jpg` | 79478        | 82           |
+| +Z   | `pz.jpg` | 79819        | 46           |
+| -Z   | `nz.jpg` | 77882        | 89           |
 
 ## Face order and orientation
 
 - Faces are named and ordered `px, nx, py, ny, pz, nz` (standard OpenGL cube-map layout).
 - For point `(s, t)` in `[-1, 1]` on a face, the direction is:
 
-  | Face | Direction |
-  |---|---|
+  | Face        | Direction      |
+  | ----------- | -------------- |
   | `+X` (`px`) | `( 1, -t, -s)` |
   | `-X` (`nx`) | `(-1, -t,  s)` |
   | `+Y` (`py`) | `( s,  1,  t)` |

@@ -11,17 +11,11 @@ Conventions:
 
 ## Stories
 
-### cpp-paws
-Create the C++ `paws` using SDL3, Dear ImGui, and SDL gamepad input: the virtual Xbox controller, real controller selection, per-display persistence, R3 checkbox, Start/B/Back/A/D-pad/right-stick behavior, instance guard, window placement, and the same DDS commands as Rust `paws`. Add it to the C++ deploy and `launch-cpp.ps1`. Finish the pure C++ two-display configuration.
-- **Depends on:** none.
-- **Minimal test:** `launch-cpp.ps1` with two displays and a temporary `LOCALAPPDATA` runs the pure C++ configuration; hello-world, menu, arcball, Lux Color, Lux Pos, C++ `paws`, persistence, and display isolation work; the Rust configuration still runs.
-- **Status:** in progress.
-
 ### readme-cleanup
-Rewrite `README.md` to focus on setup, build, run, and tool usage. Remove temporary smoke-test details, implementation history, and duplicated architecture/version notes; keep exact external dependency install commands, build/test commands, launch and cleanup commands, and short pointers to `planning/architecture.md` and `docs/versions.md`.
+Rewrite `README.md` to focus on setup, build, run, and tool usage. Remove temporary smoke-test details, implementation history, and duplicated architecture/version notes; keep exact external dependency install commands, build/test commands, launch and cleanup commands, and short pointers to `planning/architecture.md` and `docs/versions.md`. Add `dependencies.md`, a complete Windows x64 build dependency inventory including transitive dependencies, source URLs, and approximate sizes, and link it from the README.
 - **Depends on:** none.
-- **Minimal test:** follow the README from setup through build, launch, and cleanup without needing another source; no temporary smoke-test artifacts are documented.
-- **Status:** todo.
+- **Minimal test:** follow the README from setup through build, launch, and cleanup without needing another source; `dependencies.md` covers system tools, external C/C++ libraries, and the Windows-target Cargo dependency graph; no temporary smoke-test artifacts are documented.
+- **Status:** in progress.
 
 ### paws-two
 Create a game-controller window application (`paws-two`): a Slint window with a Saitek X-52 virtual controller. DDS and real-controller connectivity are out of scope.
